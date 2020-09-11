@@ -1,0 +1,55 @@
+#include <iostream>
+#include "../EzLog/EzLog.h"
+#include <thread>
+
+using namespace std;
+using namespace ezlogspace;
+
+#if 0
+int main() {
+//    std::cout << "Hello, World!" << std::endl;
+    EZLOGI<<"adcc";
+    thread([]()->void {
+        EZLOGD<<"scccc";
+    }).join();
+
+    getchar();
+    getchar();
+    return 0;
+}
+#endif
+
+#if 1
+
+#define CATCH_CONFIG_MAIN  // This tells Catch to provide a main() - only do this in one cpp file
+#include "../outlibs/catch/catch.hpp"
+
+TEST_CASE("single thread log test")
+{
+    EZLOGI << "adcc";
+}
+
+
+TEST_CASE("multi thread log test")
+{
+    EZLOGI << "adcc";
+
+        thread([]()->void {
+        this_thread::sleep_for(10ms);
+        EZLOGD << "scccc";
+    }).join();
+}
+
+TEST_CASE("file multi thread log test")
+{
+    EzLog::init(EzLog::getFileLoggerPrinter());
+
+    EZLOGI << "adcc";
+
+    thread([]()->void {
+        this_thread::sleep_for(10ms);
+        EZLOGD << "scccc";
+    }).join();
+}
+
+#endif
