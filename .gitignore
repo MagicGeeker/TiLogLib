@@ -1,0 +1,11 @@
+cmake-build-debug/*
+/cmake-build-debug-visual-studio/*
+.idea
+.vs
+.vscode
+*.obj
+*.sdf
+*.suo
+*.opensdf
+*.vcxproj.user
+*.o
