@@ -130,6 +130,8 @@ namespace ezlogspace
 
 			static std::thread CreateThread();
 
+			static bool Init();
+
 			static std::string _global_cache;
 			static std::mutex _mtx;
 			static std::condition_variable _cv;
@@ -197,17 +199,17 @@ namespace ezlogspace
 
 		void EzLoggerTerminalPrinter::onAcceptLogs(const char *const logs)
 		{
-			std::cout << logs << endl;
+			std::cout << logs;
 		}
 
 		void EzLoggerTerminalPrinter::onAcceptLogs(const std::string &logs)
 		{
-			std::cout << logs << endl;
+			std::cout << logs;
 		}
 
 		void EzLoggerTerminalPrinter::onAcceptLogs(std::string &&logs)
 		{
-			std::cout << logs << endl;
+			std::cout << logs;
 		}
 
 		bool EzLoggerTerminalPrinter::isThreadSafe()
@@ -236,17 +238,17 @@ namespace ezlogspace
 
 		void EzLoggerFilePrinter::onAcceptLogs(const char *const logs)
 		{
-			_ofs << logs << endl;
+			_ofs << logs;
 		}
 
 		void EzLoggerFilePrinter::onAcceptLogs(const std::string &logs)
 		{
-			_ofs << logs << endl;
+			_ofs << logs;
 		}
 
 		void EzLoggerFilePrinter::onAcceptLogs(std::string &&logs)
 		{
-			_ofs << logs << endl;
+			_ofs << logs;
 		}
 
 		bool EzLoggerFilePrinter::isThreadSafe()
@@ -342,24 +344,27 @@ namespace ezlogspace
 
 #ifdef __________________________________________________EZlogOutputThread__________________________________________________
 
-		std::thread EZlogOutputThread::CreateThread()
-		{
-			thread th(EZlogOutputThread::onAcceptLogs);
-			th.detach();
-			return th;
-		}
-
 		std::string EZlogOutputThread::_global_cache;
 		std::mutex EZlogOutputThread::_mtx;
 		std::condition_variable EZlogOutputThread::_cv;
 		bool EZlogOutputThread::_logging = true;
 		std::thread EZlogOutputThread::_thread = CreateThread();
 
-		bool EZlogOutputThread::_inited = []() -> bool {
-			_global_cache.reserve(2 * EZLOG_GLOBAL_BUF_SIZE);
-			return true;
-		}();
+		bool EZlogOutputThread::_inited = Init();
 		bool EZlogOutputThread::_to_exit = false;
+
+		std::thread EZlogOutputThread::CreateThread()
+		{
+			thread th( EZlogOutputThread::onAcceptLogs );
+			th.detach();
+			return th;
+		}
+		bool EZlogOutputThread::Init()
+		{
+			_global_cache.reserve( 2 * EZLOG_GLOBAL_BUF_SIZE );
+			return true;
+		}
+
 
 		void EZlogOutputThread::pushLog(const EzLogStream *logs)
 		{
@@ -370,7 +375,7 @@ namespace ezlogspace
 		{
 			std::lock_guard<std::mutex> lk(_mtx);
 			{
-				_global_cache += logs;
+				_global_cache += (logs + "\n");
 			}
 
 			_logging = true;
