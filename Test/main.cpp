@@ -2,6 +2,26 @@
 #include "../EzLog/EzLog.h"
 #include <thread>
 #include<mutex>
+#include <condition_variable>
+#include <atomic>
+
+#if __cplusplus>201402L
+#include <mutex>
+#define shared_lock std::shared_lock
+#else
+#include "../outlibs/yamc/include/yamc_shared_lock.hpp"
+#define shared_lock yamc::shared_lock
+#endif
+
+#if __cplusplus>201703L
+#include <shared_mutex>
+#define shared_mutex std::shared_mutex
+#else
+#include "../outlibs/yamc/include/alternate_shared_mutex.hpp"
+#define shared_mutex yamc::alternate::shared_mutex
+#endif
+
+
 
 using namespace std;
 using namespace ezlogspace;
@@ -57,14 +77,17 @@ TEST_CASE("termial many thread cout test")
 {
 	volatile bool begin = false;
 	std::mutex	mtx;
+    static condition_variable_any cva;
+    static shared_mutex smtx;
+    static condition_variable cv;
+
 	for (int i = 1; i < 100; i++)
 	{
 		thread([&](int index)->void
 		{
 			int a = 0;
-			while (!begin)
-			{
-			}
+			shared_lock<shared_mutex> slck(smtx);
+			cva.wait(slck);
 			mtx.lock();
 			cout << "LOGD thr " << index << " " << &a<<endl;
 			cout << "LOGI thr " << index << " " << &a<<endl;
@@ -72,8 +95,7 @@ TEST_CASE("termial many thread cout test")
 			mtx.unlock();
 		}, i).detach();
 	}
-	begin = true;
-
+    cva.notify_all();
 	getchar();
 	getchar();
 }
@@ -84,20 +106,21 @@ TEST_CASE("termial many thread log test")
 
 	EZLOGI << "adcc";
 
-	volatile bool begin=false;
-	for(int i=1;i<100;i++)
+    static condition_variable_any cva;
+    static shared_mutex smtx;
+
+    for(int i=1;i<100;i++)
 	{
 		thread([&](int index)->void {
 			int a=0;
-			while(!begin)
-			{
-			}
+            shared_lock<shared_mutex> slck(smtx);
+            cva.wait(slck);
 			EZLOGI << "LOGI thr " << index << " " << &a;
 			EZLOGD << "LOGD thr " << index << " " << &a;
 			EZLOGV << "LOGV thr " << index << " " << &a;
 		},i).detach();
 	}
-	begin= true;
+    cva.notify_all();
 
 	getchar();
 	getchar();
@@ -109,20 +132,21 @@ TEST_CASE("file many thread log test")
 
     EZLOGI << "adcc";
 
-	volatile bool begin=false;
+    static condition_variable_any cva;
+    static shared_mutex smtx;
+
     for(int i=1;i<100;i++)
     {
         thread([&](int index)->void {
 			int a=0;
-            while(!begin)
-            {
-            }
+            shared_lock<shared_mutex> slck(smtx);
+            cva.wait(slck);
 			EZLOGI << "LOGI thr " << index << " " << &a;
 			EZLOGD << "LOGD thr " << index << " " << &a;
 			EZLOGV << "LOGV thr " << index << " " << &a;
         },i).detach();
     }
-    begin= true;
+    cva.notify_all();
 
 	getchar();
 	getchar();
