@@ -13,7 +13,16 @@
 #include <mutex>
 #include <condition_variable>
 
+namespace ezlogspace
+{
+    enum EzLogTimeStrategyEnum
+    {
+        USE_STD_CHRONO = 0x01,
+        USE_CTIME = 0x02,
 
+        WITH_MILLISECONDS = 0x08
+    };
+}
 /**************************************************MACRO FOR USER**************************************************/
 #define EZLOG_SINGLE_THREAD_BUF_SIZE  ((size_t)1<<20U)   //1MB
 #define EZLOG_GLOBAL_BUF_SIZE  ((size_t)10<<20U)    //10MB
@@ -22,13 +31,15 @@
 
 
 #define EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL   FALSE
-#define EZLOG_LOG_LEVEL    4
+#define EZLOG_GET_TIME_STRATEGY   (ezlogspace::USE_STD_CHRONO|ezlogspace::WITH_MILLISECONDS)
+#define EZLOG_LOG_LEVEL    6
 
 #define       EZLOG_LEVEL_FATAL    1
 #define       EZLOG_LEVEL_ERROR    2
-#define       EZLOG_LEVEL_INFO    3
-#define       EZLOG_LEVEL_DEBUG    4
-#define       EZLOG_LEVEL_VERBOSE    5
+#define       EZLOG_LEVEL_WARN    3
+#define       EZLOG_LEVEL_INFO    4
+#define       EZLOG_LEVEL_DEBUG    5
+#define       EZLOG_LEVEL_VERBOSE    6
 /**************************************************MACRO FOR USER**************************************************/
 
 
@@ -121,6 +132,12 @@ namespace ezlogspace
 #define EZLOGE   (   ezlogspace::EzLogStream(EZLOG_LEVEL_ERROR,__LINE__,__FILE__)  )
 #else
 #define EZLOGE   (   ezlogspace::EzNoLogStream(EZLOG_LEVEL_ERROR,__LINE__,__FILE__)  )
+#endif
+
+#if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_WARN
+#define EZLOGW   (   ezlogspace::EzLogStream(EZLOG_LEVEL_WARN,__LINE__,__FILE__)  )
+#else
+#define EZLOGW   (   ezlogspace::EzNoLogStream(EZLOG_LEVEL_WARN,__LINE__,__FILE__)  )
 #endif
 
 #if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_INFO

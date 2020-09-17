@@ -4,6 +4,7 @@
 
 #include <iostream>
 #include <time.h>
+#include <chrono>
 #include <string.h>
 #include <thread>
 #include "EzLog.h"
@@ -32,16 +33,41 @@ namespace ezloghelperspace
 		return id.data();
 	}
 
-	static char *GetCurCTime()
+	//C++11后static变量初始化是线程安全的
+    static char timecstr[50];
+    //这个函数不是线程安全的
+    static char *GetCurCTime()
 	{
-		static char timecstr[50];
+        time_t t;
+        size_t len;
 
-		time_t t = time(NULL);
-		struct tm *tmd = localtime(&t);
-//        sprintf(timecstr, " UTC %s", asctime(tmd));
-		int l = strftime(timecstr, sizeof(timecstr) - 1, "%Y-%m-%d %H:%M:%S", tmd);
-		return timecstr;
-	}
+        if_constexpr (0 != (EZLOG_GET_TIME_STRATEGY & USE_STD_CHRONO))
+        {
+            std::chrono::system_clock::time_point nowTime = std::chrono::system_clock::now();
+            t = std::chrono::system_clock::to_time_t(nowTime);
+            struct tm *tmd = gmtime(&t);
+            len = strftime(timecstr, sizeof(timecstr) - 1, "%Y-%m-%d %H:%M:%S", tmd);
+
+            if_constexpr (0 != (EZLOG_GET_TIME_STRATEGY & WITH_MILLISECONDS))
+            {
+                if (len != 0)
+                {
+                    auto since_epoch = nowTime.time_since_epoch();
+                    std::chrono::seconds s = std::chrono::duration_cast<std::chrono::seconds>(since_epoch);
+                    since_epoch -= s;
+                    std::chrono::milliseconds milli = std::chrono::duration_cast<std::chrono::milliseconds>(since_epoch);
+                    snprintf(timecstr + len, 50 - 1 - len, ".%03d", milli.count());
+                }
+            }
+        } else if_constexpr (0 != (EZLOG_GET_TIME_STRATEGY & USE_CTIME))
+        {
+            t = time(NULL);
+            struct tm *tmd = localtime(&t);
+            len = strftime(timecstr, sizeof(timecstr) - 1, "%Y-%m-%d %H:%M:%S", tmd);
+        }
+
+        return timecstr;
+    }
 
 	std::string GetCurTime()
 	{
@@ -464,7 +490,7 @@ namespace ezlogspace
 		if (!EzLog::closed())
 		{
 
-			char lvFlag[] = " FEDIV";
+			char lvFlag[] = " FEWIDV";
 			char buf[101];
 
 			snprintf(buf, sizeof(buf) - 1, "%c tid: %s [%s] [%s:%u] ", lvFlag[lv], EzLogImpl::tid, GetCurCTime(), file,
