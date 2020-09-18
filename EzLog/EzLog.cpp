@@ -24,7 +24,7 @@
 
 
 #define EZLOG_CTIME_MAX_LEN 50
-
+#define EZLOG_THREAD_ID_MAX_LEN  (20+1)    //len(UINT64_MAX 64bit)+1
 
 
 using namespace std;
@@ -34,32 +34,27 @@ using namespace ezlogspace;
 namespace ezloghelperspace
 {
 #ifdef __GNUC__
-    static mutex threadIDMtx;
-    static unordered_set<char *> threadIDSet; // thread_local key must be used for non-trivial objects in MinGW.
+	thread_local static char threadIDLocal[EZLOG_THREAD_ID_MAX_LEN];
 #endif
 
     const char *GetThreadIDString()
-    {
+	{
 #ifdef __GNUC__
-        threadIDMtx.lock();
-        stringstream os;
-        os << (std::this_thread::get_id());
-        string id = os.str();
-        char *cstr = new char[id.size() + 1];  //TODO memory lack
-        cstr[id.size()] = '\0';
-        memcpy(cstr, &id[0], id.size());
-        threadIDSet.insert(cstr);
-        threadIDMtx.unlock();
-        return cstr;
+		stringstream os;
+		os << (std::this_thread::get_id());
+		string id = os.str();
+		strncpy(threadIDLocal, id.c_str(), EZLOG_THREAD_ID_MAX_LEN);
+		threadIDLocal[EZLOG_THREAD_ID_MAX_LEN - 1] = '\0';
+		return threadIDLocal;
 #else
-        thread_local static string id;
+		thread_local static string id;
 
-        stringstream os;
-        os << (std::this_thread::get_id());
-        id = os.str();
-        return id.data();
+		stringstream os;
+		os << (std::this_thread::get_id());
+		id = os.str();
+		return id.data();
 #endif
-    }
+	}
 
     thread_local static char timecstr[EZLOG_CTIME_MAX_LEN];
     //这个函数某些场景不是线程安全的
@@ -323,7 +318,7 @@ namespace ezlogspace
 		bool EzLogImpl::_inited = init();
 
 		thread_local const char *EzLogImpl::tid = GetThreadIDString();
-		thread_local char *EzLogImpl::localCache = GetTheadLocalCache();
+		thread_local char *EzLogImpl::localCache = nullptr;
 
 		EzLogImpl::EzLogImpl()
 		{
