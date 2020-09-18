@@ -14,6 +14,7 @@
 
 #if __cplusplus>=201402L
 #include <mutex>
+#include <shared_mutex>
 #define _EZLOG_STD_HAS_SHARED_LOCK
 #else
 #include "../outlibs/yamc/include/yamc_shared_lock.hpp"
@@ -21,7 +22,6 @@
 #endif
 
 #if __cplusplus>=201703L
-#include <shared_mutex>
 #define _EZLOG_STD_HAS_SHARED_MUTEX
 #else
 #include "../outlibs/yamc/include/alternate_shared_mutex.hpp"
