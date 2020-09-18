@@ -2,6 +2,7 @@
 // Created***REMOVED*** on 2020/9/16.
 //
 #include "inc.h"
+#include "SimpleTimer.h"
 
 using namespace std;
 using namespace ezlogspace;
@@ -157,6 +158,23 @@ TEST_CASE("file time many thread log test with sleep----------------------------
     {
         th.join();
     }
+}
+
+TEST_CASE("file single thread benchmark test ----------------------------")
+{
+#ifdef NDEBUG
+	EZLOGI << "file single thread benchmark test ----------------------------";
+	uint64_t loops = (1 << 20);
+	EZLOGI << "1M loops test";
+	SimpleTimer s1m;
+	for (int i = 0; i < loops; i++)
+	{
+		EZLOGD << " i= " << i;
+	}
+	uint64_t ms = s1m.GetMillisecondsUpToNOW();
+	EZLOGI << (1000 * loops / ms) << " logs per second";
+	EZLOGI << 1.0 * ms / loops << " milliseconds per log";
+#endif
 }
 
 #endif

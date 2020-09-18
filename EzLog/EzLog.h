@@ -100,7 +100,7 @@ namespace ezlogspace
 	class EzNoLogStream
 	{
 	public:
-		EzNoLogStream(int32_t lv, uint32_t line, const char *file)
+		EzNoLogStream(int32_t lv, uint32_t line,uint32_t fileLen ,const char *file)
 		{};
 
 		~EzNoLogStream()
