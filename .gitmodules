@@ -1,0 +1,3 @@
+[submodule "outlibs/yamc"]
+	path = outlibs/yamc
+	url = https://github.com/yohhoy/yamc
