@@ -129,11 +129,11 @@ TEST_CASE("file many thread log test----------------------------")
     }
 }
 
-TEST_CASE("file time many thread log test----------------------------")
+TEST_CASE("file time many thread log test with sleep----------------------------")
 {
     EzLog::init(EzLog::getDefaultFileLoggerPrinter());
 
-    EZLOGI << "file time many thread log test----------------------------";
+    EZLOGI << "file time many thread log test with sleep----------------------------";
 
     static bool begin = false;
     static condition_variable_any cva;
@@ -141,13 +141,13 @@ TEST_CASE("file time many thread log test----------------------------")
 
     std::vector<std::thread> vec;
 
-    for (int i = 1; i < 100; i++)
+    for (int i = 1; i < 20; i++)
     {
         vec.emplace_back(thread([&](int index) -> void {
             int a = 0;
             shared_lock<shared_mutex> slck(smtx);
             cva.wait(slck, []() -> bool { return begin; });
-            this_thread::sleep_for(std::chrono::milliseconds(20 * index));
+            this_thread::sleep_for(std::chrono::milliseconds(100 * index));
             EZLOGD << "LOGD thr " << index << " " << &a;
         }, i));
     }

@@ -28,6 +28,7 @@ namespace ezlogspace
 #define EZLOG_GLOBAL_BUF_SIZE  ((size_t)10<<20U)    //10MB
 #define EZLOG_SINGLE_THREAD_LINKED_LIST_MAX_SIZE  ((size_t)1<<8U)   //256
 #define EZLOG_GLOBAL_LINKED_LIST_MAX_SIZE  ((size_t)1<<12U)   //4096
+#define EZLOG_PREFIX_RESERVE_LEN  30     //reserve for log level,tid ...
 
 
 #define EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL   FALSE
@@ -54,7 +55,10 @@ namespace ezlogspace
 
 		virtual void onAcceptLogs(std::string &&logs) = 0;
 
-		virtual bool isThreadSafe() = 0;
+        virtual bool isThreadSafe() = 0;
+
+        virtual bool isStatic()
+        { return true; }
 
 		virtual ~EzLoggerPrinter() = default;
 
@@ -87,7 +91,7 @@ namespace ezlogspace
 	class EzLogStream : public std::ostringstream
 	{
 	public:
-		EzLogStream(int32_t lv, uint32_t line, const char *file);
+		EzLogStream(int32_t lv, uint32_t line,uint32_t fileLen ,const char *file);
 
 		virtual ~EzLogStream() override;
 
@@ -123,39 +127,39 @@ namespace ezlogspace
 #if EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL == FALSE
 
 #if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_FATAL
-#define EZLOGF   ( ezlogspace::EzLogStream(EZLOG_LEVEL_FATAL,__LINE__,__FILE__)  )
+#define EZLOGF   ( ezlogspace::EzLogStream(EZLOG_LEVEL_FATAL,__LINE__,sizeof(__FILE__)-1,__FILE__)  )
 #else
-#define EZLOGF   ( ezlogspace::EzNoLogStream(EZLOG_LEVEL_FATAL,__LINE__,__FILE__)  )
+#define EZLOGF   ( ezlogspace::EzNoLogStream(EZLOG_LEVEL_FATAL,__LINE__,sizeof(__FILE__)-1,__FILE__)  )
 #endif
 
 #if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_ERROR
-#define EZLOGE   (   ezlogspace::EzLogStream(EZLOG_LEVEL_ERROR,__LINE__,__FILE__)  )
+#define EZLOGE   (   ezlogspace::EzLogStream(EZLOG_LEVEL_ERROR,__LINE__,sizeof(__FILE__)-1,__FILE__)  )
 #else
-#define EZLOGE   (   ezlogspace::EzNoLogStream(EZLOG_LEVEL_ERROR,__LINE__,__FILE__)  )
+#define EZLOGE   (   ezlogspace::EzNoLogStream(EZLOG_LEVEL_ERROR,__LINE__,sizeof(__FILE__)-1,__FILE__)  )
 #endif
 
 #if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_WARN
-#define EZLOGW   (   ezlogspace::EzLogStream(EZLOG_LEVEL_WARN,__LINE__,__FILE__)  )
+#define EZLOGW   (   ezlogspace::EzLogStream(EZLOG_LEVEL_WARN,__LINE__,sizeof(__FILE__)-1,__FILE__)  )
 #else
-#define EZLOGW   (   ezlogspace::EzNoLogStream(EZLOG_LEVEL_WARN,__LINE__,__FILE__)  )
+#define EZLOGW   (   ezlogspace::EzNoLogStream(EZLOG_LEVEL_WARN,__LINE__,sizeof(__FILE__)-1,__FILE__)  )
 #endif
 
 #if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_INFO
-#define EZLOGI   (   ezlogspace::EzLogStream(EZLOG_LEVEL_INFO,__LINE__,__FILE__)  )
+#define EZLOGI   (   ezlogspace::EzLogStream(EZLOG_LEVEL_INFO,__LINE__,sizeof(__FILE__)-1,__FILE__)  )
 #else
-#define EZLOGI   (   ezlogspace::EzNoLogStream(EZLOG_LEVEL_INFO,__LINE__,__FILE__)  )
+#define EZLOGI   (   ezlogspace::EzNoLogStream(EZLOG_LEVEL_INFO,__LINE__,sizeof(__FILE__)-1,__FILE__)  )
 #endif
 
 #if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_DEBUG
-#define EZLOGD    (   ezlogspace::EzLogStream(EZLOG_LEVEL_DEBUG,__LINE__,__FILE__)  )
+#define EZLOGD    (   ezlogspace::EzLogStream(EZLOG_LEVEL_DEBUG,__LINE__,sizeof(__FILE__)-1,__FILE__)  )
 #else
-#define EZLOGD    (   ezlogspace::EzNoLogStream(EZLOG_LEVEL_DEBUG,__LINE__,__FILE__)  )
+#define EZLOGD    (   ezlogspace::EzNoLogStream(EZLOG_LEVEL_DEBUG,__LINE__,sizeof(__FILE__)-1,__FILE__)  )
 #endif
 
 #if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_VERBOSE
-#define EZLOGV    (   ezlogspace::EzLogStream(EZLOG_LEVEL_VERBOSE,__LINE__,__FILE__)  )
+#define EZLOGV    (   ezlogspace::EzLogStream(EZLOG_LEVEL_VERBOSE,__LINE__,sizeof(__FILE__)-1,__FILE__)  )
 #else
-#define EZLOGV    (   ezlogspace::EzNoLogStream(EZLOG_LEVEL_VERBOSE,__LINE__,__FILE__)  )
+#define EZLOGV    (   ezlogspace::EzNoLogStream(EZLOG_LEVEL_VERBOSE,__LINE__,sizeof(__FILE__)-1,__FILE__)  )
 #endif
 
 

@@ -4,9 +4,12 @@
 
 #include <iostream>
 #include <time.h>
+#include <signal.h>
+#include <unordered_set>
 #include <chrono>
 #include <string.h>
 #include <thread>
+#include <vector>
 #include "EzLog.h"
 
 #define __________________________________________________EzLoggerTerminalPrinter__________________________________________________
@@ -17,25 +20,49 @@
 #define    __________________________________________________EzLog__________________________________________________
 #define __________________________________________________EzLogStream__________________________________________________
 
+
+
+
+#define EZLOG_CTIME_MAX_LEN 50
+
+
+
 using namespace std;
 using namespace ezlogspace;
 
 
 namespace ezloghelperspace
 {
-	const char *GetThreadIDString()
-	{
-		thread_local static string id;
+#ifdef __GNUC__
+    static mutex threadIDMtx;
+    static unordered_set<char *> threadIDSet; // thread_local key must be used for non-trivial objects in MinGW.
+#endif
 
-		stringstream os;
-		os << (std::this_thread::get_id());
-		id = os.str();
-		return id.data();
-	}
+    const char *GetThreadIDString()
+    {
+#ifdef __GNUC__
+        threadIDMtx.lock();
+        stringstream os;
+        os << (std::this_thread::get_id());
+        string id = os.str();
+        char *cstr = new char[id.size() + 1];  //TODO memory lack
+        cstr[id.size()] = '\0';
+        memcpy(cstr, &id[0], id.size());
+        threadIDSet.insert(cstr);
+        threadIDMtx.unlock();
+        return cstr;
+#else
+        thread_local static string id;
 
-	//C++11后static变量初始化是线程安全的
-    static char timecstr[50];
-    //这个函数不是线程安全的
+        stringstream os;
+        os << (std::this_thread::get_id());
+        id = os.str();
+        return id.data();
+#endif
+    }
+
+    thread_local static char timecstr[EZLOG_CTIME_MAX_LEN];
+    //这个函数某些场景不是线程安全的
     static char *GetCurCTime()
 	{
         time_t t;
@@ -56,7 +83,7 @@ namespace ezloghelperspace
                     std::chrono::seconds s = std::chrono::duration_cast<std::chrono::seconds>(since_epoch);
                     since_epoch -= s;
                     std::chrono::milliseconds milli = std::chrono::duration_cast<std::chrono::milliseconds>(since_epoch);
-                    snprintf(timecstr + len, 50 - 1 - len, ".%03d", milli.count());
+                    snprintf(timecstr + len, EZLOG_CTIME_MAX_LEN - 1 - len, ".%03llu", (uint64_t)milli.count());
                 }
             }
         } else if_constexpr (0 != (EZLOG_GET_TIME_STRATEGY & USE_CTIME))
@@ -175,6 +202,10 @@ namespace ezlogspace
 			static bool init();
 
 			static bool init(EzLoggerPrinter *p_ezLoggerPrinter);
+
+			static void registerSignalFunc();
+
+			static void onSegmentFault(int signal);
 
 			static EzLoggerPrinter *getDefaultTermialLoggerPrinter();
 
@@ -301,32 +332,43 @@ namespace ezlogspace
 
 		EzLogImpl::~EzLogImpl()
 		{
-			if (_printer != nullptr)
-			{
-				delete _printer;
-			}
-
+            delete _printer;
 		}
 
 		bool EzLogImpl::init()
 		{
-			_printer = EzLoggerFilePrinter::getInstance();
+            registerSignalFunc();
+            _printer = EzLoggerFilePrinter::getInstance();
 			return _inited = true;
 		}
 
 		bool EzLogImpl::init(EzLoggerPrinter *p_ezLoggerPrinter)
 		{
-			if (_printer != nullptr && _printer != getDefaultTermialLoggerPrinter() &&
-				_printer != getDefaultFileLoggerPrinter())
-			{
-				delete _printer;
-			}
+            registerSignalFunc();
+            if (!_printer->isStatic())
+            {
+                delete _printer;
+            }
 			_printer = p_ezLoggerPrinter;
 			return _inited = true;
 		}
 
+        void EzLogImpl::registerSignalFunc()
+        {
+		    if(!_inited)
+            {
+                signal(SIGSEGV,onSegmentFault);
+            }
+        }
 
-		void EzLogImpl::pushLog(const EzLogStream *p_stream)
+        void EzLogImpl::onSegmentFault(int signal)
+        {
+            cerr << "accept signal" << signal;
+            EZLOGE << "accept signal" << signal;
+            exit(signal);
+        }
+
+        void EzLogImpl::pushLog(const EzLogStream *p_stream)
 		{
 			EZlogOutputThread::pushLog(p_stream);
 			//            _printer->onAcceptLogs(p_stream->str());
@@ -362,7 +404,7 @@ namespace ezlogspace
 		{
 			return _printer;
 		}
-		
+
 #endif
 
 
@@ -485,19 +527,24 @@ namespace ezlogspace
 
 #ifdef __________________________________________________EzLogStream__________________________________________________
 
-	EzLogStream::EzLogStream(int32_t lv, uint32_t line, const char *file)
+	EzLogStream::EzLogStream(int32_t lv, uint32_t line,uint32_t fileLen ,const char *file)
 	{
 		if (!EzLog::closed())
 		{
 
-			char lvFlag[] = " FEWIDV";
-			char buf[101];
-
-			snprintf(buf, sizeof(buf) - 1, "%c tid: %s [%s] [%s:%u] ", lvFlag[lv], EzLogImpl::tid, GetCurCTime(), file,
-					 line);
-			rThis << buf;
-//                string s = string("") + lvFlag[lv] + " tid " + EzLogImpl::tid + GetCurTime() + " ";
-//                rThis << s;
+            char lvFlag[] = " FEWIDV";
+            uint32_t len = EZLOG_PREFIX_RESERVE_LEN + EZLOG_CTIME_MAX_LEN + fileLen;
+#ifdef __GNUC__
+            char buf[len];
+#else
+            char *buf = new char[len];
+#endif
+            snprintf(buf, len, "%c tid: %s [%s] [%s:%u] ", lvFlag[lv], EzLogImpl::tid, GetCurCTime(), file, line);
+            rThis << buf;
+#ifdef __GNUC__
+#else
+            delete[]buf;
+#endif
 		}
 	}
 
