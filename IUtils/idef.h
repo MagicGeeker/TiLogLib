@@ -9,9 +9,10 @@
 
 #define FALSE 0
 #define TRUE 1
-typedef unsigned char               byte_t;
-typedef unsigned char               uchar_t;
 
+#if __cplusplus>=201103L
+#include <stdint.h>
+#else
 typedef signed char                 int8_t;
 typedef signed short                int16_t;
 typedef signed int                  int32_t;
@@ -21,14 +22,8 @@ typedef unsigned char               uint8_t;
 typedef unsigned short              uint16_t;
 typedef unsigned int                uint32_t;
 typedef unsigned long long          uint64_t;
+#endif
 
-typedef float                       float32_t;
-typedef double                      float64_t;
-
-typedef volatile uint8_t            vuint8_t;
-typedef volatile uint16_t           vuint16_t;
-typedef volatile uint32_t           vuint32_t;
-typedef volatile uint64_t           vuint64_t;
 
 
 

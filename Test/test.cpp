@@ -1,6 +1,3 @@
-//
-// Created***REMOVED*** on 2020/9/16.
-//
 #include "inc.h"
 #include "SimpleTimer.h"
 
@@ -267,8 +264,6 @@ TEST_CASE("file_single_thread_benchmark_test_____________________")
 	uint64_t ms = s1m.GetMillisecondsUpToNOW();
 	EZLOGI << (1000 * loops / ms) << " logs per second";
 	EZLOGI << 1.0 * ms / loops << " milliseconds per log";
-	getchar();
-	getchar();
 }
 
 #endif

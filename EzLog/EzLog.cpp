@@ -1,7 +1,3 @@
-//
-// Created***REMOVED*** on 2020/9/11.
-//
-
 #include <iostream>
 #include <stdlib.h>
 #include <assert.h>
@@ -211,7 +207,7 @@ namespace ezlogspace
 
 			static void onAcceptLogs();
 
-			static void printLogs(std::string mergedLogString);
+			static void printLogs(string &&mergedLogString);
 
 			static std::thread CreateThread();
 
@@ -486,15 +482,21 @@ namespace ezlogspace
 		static_assert(std::is_trivial<LogCacheStru>::value, "fatal error");
 
 		static constexpr size_t _localSize = EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE;
-		static thread_local LogCacheStru _localCache = {(EzLogBean **) ezmalloc(sizeof(EzLogBean *) * _localSize),		//TODO memory Leak
-														&_localCache.cache[0], &_localCache.cache[_localSize - 1],
-														_localCache.pCacheFront};
+		static thread_local LogCacheStru *_pLocalCache = (LogCacheStru *) ezmalloc(
+				sizeof(LogCacheStru));//TODO memory Leak
+		static thread_local LogCacheStru &_localCache = []() -> LogCacheStru & {
+			_pLocalCache->cache = (EzLogBean **) ezmalloc(sizeof(EzLogBean *) * _localSize);//TODO memory Leak
+			_pLocalCache->pCacheFront = _pLocalCache->cache;
+			_pLocalCache->pCacheBack = &_pLocalCache->cache[_localSize - 1];
+			_pLocalCache->pCacheNow = _pLocalCache->cache;
+			return *_pLocalCache;
+		}();
 
 
 		static constexpr size_t _globalSize = EZLOG_GLOBAL_QUEUE_MAX_SIZE;
 		static LogCacheStru _globalCache = {(EzLogBean **) ezmalloc(sizeof(EzLogBean *) * _globalSize), &_globalCache.cache[0],
 											&_globalCache.cache[_globalSize - 1], _globalCache.pCacheFront};
-		static unordered_map<EzLogBean **, const char *> _globalCachesMap;
+		static unordered_map<LogCacheStru*, const char *> _globalCachesMap;
 
 		thread_local bool EZlogOutputThread::_thread_init = InitForEveryThread();
 		std::string EZlogOutputThread::_global_cache;
@@ -534,7 +536,7 @@ namespace ezlogspace
 		bool EZlogOutputThread::InitForEveryThread()
 		{
 			lock_guard<mutex> lgd(_mtx);
-			_globalCachesMap.emplace(_localCache.cache, EzLogImpl::tid);
+			_globalCachesMap.emplace(_pLocalCache, EzLogImpl::tid);
 			return true;
 		}
 
@@ -550,9 +552,19 @@ namespace ezlogspace
 		void EZlogOutputThread::AtExit()
 		{
 			lock_guard<mutex> lgd(_mtx);
-			string mergedLogString= getMergedLogString();
-			printLogs(std::move(mergedLogString));
 
+			for(auto & pa:_globalCachesMap)
+			{
+				LogCacheStru& localCacheStru=*pa.first;
+				const char* tid=pa.second;
+				bool isGlobalFull= moveLocalCacheToGlobal(localCacheStru);
+				if(isGlobalFull){
+					string mergedLogString= getMergedLogString();
+					printLogs(std::move(mergedLogString));
+				}
+			}
+			string remainStrings = getMergedLogString();
+			printLogs(std::move(remainStrings));
 		}
 
 		void EZlogOutputThread::pushLog(const EzLogStream *logs)
@@ -606,7 +618,7 @@ namespace ezlogspace
 			return str;
 		}
 
-		void EZlogOutputThread::printLogs(std::string mergedLogString)
+		void EZlogOutputThread::printLogs(string &&mergedLogString)
 		{
 			EzLoggerPrinter *printer = EzLogImpl::getCurrentPrinter();
 			if (printer->isThreadSafe())
