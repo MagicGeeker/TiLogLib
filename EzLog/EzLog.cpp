@@ -3,12 +3,16 @@
 //
 
 #include <iostream>
+#include <stdlib.h>
+#include <assert.h>
 #include <time.h>
 #include <signal.h>
 #include <unordered_set>
+#include<unordered_map>
 #include <chrono>
 #include <string.h>
 #include <thread>
+#include <future>
 #include <vector>
 #include "EzLog.h"
 
@@ -19,12 +23,21 @@
 
 #define    __________________________________________________EzLog__________________________________________________
 #define __________________________________________________EzLogStream__________________________________________________
+#define __________________________________________________EzLogBean__________________________________________________
 
 
 
 
 #define EZLOG_CTIME_MAX_LEN 50
 #define EZLOG_THREAD_ID_MAX_LEN  (20+1)    //len(UINT64_MAX 64bit)+1
+
+using SystemTimePoint=std::chrono::system_clock::time_point;
+using ezmalloc_t = void *(*)(size_t);
+using ezfree_t=void (*)(void *);
+
+
+static ezmalloc_t ezmalloc = &malloc;
+static ezfree_t ezfree = &free;
 
 
 using namespace std;
@@ -33,70 +46,92 @@ using namespace ezlogspace;
 
 namespace ezloghelperspace
 {
-#ifdef __GNUC__
-	thread_local static char threadIDLocal[EZLOG_THREAD_ID_MAX_LEN];
-#endif
+	thread_local static char* threadIDLocal=(char*)ezmalloc( EZLOG_THREAD_ID_MAX_LEN*sizeof(char));			//TODO memory Leak
 
     const char *GetThreadIDString()
 	{
-#ifdef __GNUC__
 		stringstream os;
 		os << (std::this_thread::get_id());
 		string id = os.str();
 		strncpy(threadIDLocal, id.c_str(), EZLOG_THREAD_ID_MAX_LEN);
 		threadIDLocal[EZLOG_THREAD_ID_MAX_LEN - 1] = '\0';
 		return threadIDLocal;
-#else
-		thread_local static string id;
+	}
 
-		stringstream os;
-		os << (std::this_thread::get_id());
-		id = os.str();
-		return id.data();
+	static void chronoToTimeCStr(char*dst, size_t limitCount, const SystemTimePoint& nowTime)
+	{
+		time_t t;
+		size_t len;
+
+		t = std::chrono::system_clock::to_time_t(nowTime);
+		struct tm *tmd = localtime(&t);
+		len = strftime(dst, limitCount, "%Y-%m-%d %H:%M:%S", tmd);
+
+#ifdef EZLOG_WITH_MILLISECONDS
+		{
+			if (len != 0)
+			{
+				auto since_epoch = nowTime.time_since_epoch();
+				std::chrono::seconds s = std::chrono::duration_cast<std::chrono::seconds>(since_epoch);
+				since_epoch -= s;
+				std::chrono::milliseconds milli = std::chrono::duration_cast<std::chrono::milliseconds>(since_epoch);
+				snprintf(dst + len, EZLOG_CTIME_MAX_LEN - 1 - len, ".%03llu", (uint64_t)milli.count());
+			}
+		}
 #endif
 	}
 
-    thread_local static char timecstr[EZLOG_CTIME_MAX_LEN];
-    //这个函数某些场景不是线程安全的
-    static char *GetCurCTime()
+	static void timeToCStr(char *timecstr, size_t limitCount, time_t t)
 	{
-        time_t t;
-        size_t len;
-
-        if_constexpr (0 != (EZLOG_GET_TIME_STRATEGY & USE_STD_CHRONO))
-        {
-            std::chrono::system_clock::time_point nowTime = std::chrono::system_clock::now();
-            t = std::chrono::system_clock::to_time_t(nowTime);
-            struct tm *tmd = gmtime(&t);
-            len = strftime(timecstr, sizeof(timecstr) - 1, "%Y-%m-%d %H:%M:%S", tmd);
-
-            if_constexpr (0 != (EZLOG_GET_TIME_STRATEGY & WITH_MILLISECONDS))
-            {
-                if (len != 0)
-                {
-                    auto since_epoch = nowTime.time_since_epoch();
-                    std::chrono::seconds s = std::chrono::duration_cast<std::chrono::seconds>(since_epoch);
-                    since_epoch -= s;
-                    std::chrono::milliseconds milli = std::chrono::duration_cast<std::chrono::milliseconds>(since_epoch);
-                    snprintf(timecstr + len, EZLOG_CTIME_MAX_LEN - 1 - len, ".%03llu", (uint64_t)milli.count());
-                }
-            }
-        } else if_constexpr (0 != (EZLOG_GET_TIME_STRATEGY & USE_CTIME))
-        {
-            t = time(NULL);
-            struct tm *tmd = localtime(&t);
-            len = strftime(timecstr, sizeof(timecstr) - 1, "%Y-%m-%d %H:%M:%S", tmd);
-        }
-
-        return timecstr;
-    }
-
-	std::string GetCurTime()
-	{
-		string timestr = string(GetCurCTime());
-//        timestr.pop_back();  //remove '\n'
-		return timestr;
+		struct tm *tmd = localtime(&t);
+		strftime(timecstr, limitCount, "%Y-%m-%d %H:%M:%S", tmd);
 	}
+
+//    thread_local static char timecstr[EZLOG_CTIME_MAX_LEN];
+//    //这个函数某些场景不是线程安全的
+//    static char *GetCurCTime()
+//	{
+//        time_t t;
+//        size_t len;
+//
+//#ifdef EZLOG_USE_STD_CHRONO
+//        {
+//            SystemTimePoint nowTime = std::chrono::system_clock::now();
+//            t = std::chrono::system_clock::to_time_t(nowTime);
+//            struct tm *tmd = gmtime(&t);
+//            len = strftime(timecstr, sizeof(timecstr) - 1, "%Y-%m-%d %H:%M:%S", tmd);
+//
+//#ifdef EZLOG_WITH_MILLISECONDS
+//            {
+//                if (len != 0)
+//                {
+//                    auto since_epoch = nowTime.time_since_epoch();
+//                    std::chrono::seconds s = std::chrono::duration_cast<std::chrono::seconds>(since_epoch);
+//                    since_epoch -= s;
+//                    std::chrono::milliseconds milli = std::chrono::duration_cast<std::chrono::milliseconds>(since_epoch);
+//                    snprintf(timecstr + len, EZLOG_CTIME_MAX_LEN - 1 - len, ".%03llu", (uint64_t)milli.count());
+//                }
+//            }
+//        }
+//#endif
+//#else
+//        {
+//            t = time(NULL);
+//            struct tm *tmd = localtime(&t);
+//            len = strftime(timecstr, sizeof(timecstr) - 1, "%Y-%m-%d %H:%M:%S", tmd);
+//        }
+//
+//        return timecstr;
+//#endif
+//
+//	}
+//
+//	std::string GetCurTime()
+//	{
+//		string timestr = string(GetCurCTime());
+////        timestr.pop_back();  //remove '\n'
+//		return timestr;
+//	}
 
 	char *GetTheadLocalCache()
 	{
@@ -171,14 +206,24 @@ namespace ezlogspace
 		public:
 			static void pushLog(const EzLogStream *logs);
 
-			static void pushLog(std::string &&logs);
-
 		private:
+			static string getMergedLogString();
+
 			static void onAcceptLogs();
+
+			static void printLogs(std::string mergedLogString);
 
 			static std::thread CreateThread();
 
+			static bool InitForEveryThread();
+
 			static bool Init();
+
+			static void AtExit();
+
+
+		private:
+			thread_local static bool _thread_init;
 
 			static std::string _global_cache;
 			static std::mutex _mtx;
@@ -191,6 +236,7 @@ namespace ezlogspace
 
 		class EzLogImpl
 		{
+			friend class EZlogOutputThread;
 			friend class ezlogspace::EzLogStream;
 
 		public:
@@ -218,8 +264,6 @@ namespace ezlogspace
 
 			static void pushLog(const EzLogStream *p_stream);
 
-			static void pushLog(std::string &&str);
-
 
 		private:
 			static EzLoggerPrinter *_printer;
@@ -230,6 +274,37 @@ namespace ezlogspace
 			static thread_local const char *tid;
 			static thread_local char *localCache;
 		};
+
+		class EzLogBean
+		{
+		public:
+			char* data;
+			const char *tid;
+			const char *file;
+#ifdef EZLOG_USE_STD_CHRONO
+			SystemTimePoint* cpptime;
+#else
+			time_t ctime;
+#endif
+			uint32_t fileLen;
+			uint32_t line;
+			char level;
+		public:
+			static EzLogBean* CreateInstance();
+			static void DestroyInstance(EzLogBean* p);
+			static EzLogBean* CreateInstances(size_t count);
+			static void DestroyInstances(EzLogBean* p);
+		private:
+			static void*operator new(size_t size);
+			static void* operator new(size_t size,void* pMemory);
+			static void* operator new[](size_t size);
+
+			static void operator delete(void* p);
+			static void operator delete(void *p, void *pMemory);
+			static void operator delete[](void* p);
+		};
+		static_assert(std::is_pod<EzLogBean>::value, "EzLogBean not pod!");
+
 	}
 }
 
@@ -350,29 +425,24 @@ namespace ezlogspace
 
         void EzLogImpl::registerSignalFunc()
         {
-		    if(!_inited)
-            {
-                signal(SIGSEGV,onSegmentFault);
-            }
+#ifdef NDEBUG
+			if (!_inited)
+			{
+				signal(SIGSEGV, onSegmentFault);
+			}
+#endif
         }
 
         void EzLogImpl::onSegmentFault(int signal)
         {
-            cerr << "accept signal" << signal;
-            EZLOGE << "accept signal" << signal;
+            cerr << "accept signal " << signal;
+            EZLOGE << "accept signal " << signal;
             exit(signal);
         }
 
         void EzLogImpl::pushLog(const EzLogStream *p_stream)
 		{
 			EZlogOutputThread::pushLog(p_stream);
-			//            _printer->onAcceptLogs(p_stream->str());
-		}
-
-		void EzLogImpl::pushLog(string &&str)
-		{
-			EZlogOutputThread::pushLog(std::move(str));
-			//            _printer->onAcceptLogs(str);
 		}
 
 		void EzLogImpl::close()
@@ -406,7 +476,27 @@ namespace ezlogspace
 
 
 #ifdef __________________________________________________EZlogOutputThread__________________________________________________
+		struct LogCacheStru
+		{
+			EzLogBean **cache;
+			EzLogBean **pCacheFront; //cache first
+			EzLogBean **pCacheBack; //cache back
+			EzLogBean **pCacheNow;   // current tail invalid bean
+		};
+		static_assert(std::is_trivial<LogCacheStru>::value, "fatal error");
 
+		static constexpr size_t _localSize = EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE;
+		static thread_local LogCacheStru _localCache = {(EzLogBean **) ezmalloc(sizeof(EzLogBean *) * _localSize),		//TODO memory Leak
+														&_localCache.cache[0], &_localCache.cache[_localSize - 1],
+														_localCache.pCacheFront};
+
+
+		static constexpr size_t _globalSize = EZLOG_GLOBAL_QUEUE_MAX_SIZE;
+		static LogCacheStru _globalCache = {(EzLogBean **) ezmalloc(sizeof(EzLogBean *) * _globalSize), &_globalCache.cache[0],
+											&_globalCache.cache[_globalSize - 1], _globalCache.pCacheFront};
+		static unordered_map<EzLogBean **, const char *> _globalCachesMap;
+
+		thread_local bool EZlogOutputThread::_thread_init = InitForEveryThread();
 		std::string EZlogOutputThread::_global_cache;
 		std::mutex EZlogOutputThread::_mtx;
 		std::condition_variable EZlogOutputThread::_cv;
@@ -416,33 +506,116 @@ namespace ezlogspace
 		bool EZlogOutputThread::_inited = Init();
 		bool EZlogOutputThread::_to_exit = false;
 
+
+		static inline bool localCircularQueuePushBack(EzLogBean *obj)
+		{
+			*_localCache.pCacheNow = obj;
+			_localCache.pCacheNow++;
+			return _localCache.pCacheNow > _localCache.pCacheBack;
+		}
+		static inline bool moveLocalCacheToGlobal(LogCacheStru& bean)
+		{
+			size_t size= bean.pCacheNow - bean.pCacheFront;
+			memcpy(_globalCache.pCacheNow, bean.pCacheFront, size * sizeof(EzLogBean *));  //see Ezlog.h
+			bool isGlobalFull= _globalCache.pCacheNow + size >= _globalCache.pCacheBack;
+			bean.pCacheNow=bean.pCacheFront;
+			_globalCache.pCacheNow+=size;
+			return isGlobalFull;
+		}
+
+
 		std::thread EZlogOutputThread::CreateThread()
 		{
 			thread th( EZlogOutputThread::onAcceptLogs );
 			th.detach();
 			return th;
 		}
-		bool EZlogOutputThread::Init()
+
+		bool EZlogOutputThread::InitForEveryThread()
 		{
-			_global_cache.reserve( 2 * EZLOG_GLOBAL_BUF_SIZE );
+			lock_guard<mutex> lgd(_mtx);
+			_globalCachesMap.emplace(_localCache.cache, EzLogImpl::tid);
 			return true;
 		}
 
+		bool EZlogOutputThread::Init()
+		{
+			lock_guard<mutex> lgd(_mtx);
+//			_global_cache.reserve( 2 * EZLOG_GLOBAL_BUF_SIZE );
+			atexit(AtExit);
+			_inited = true;
+			return true;
+		}
+
+		void EZlogOutputThread::AtExit()
+		{
+			lock_guard<mutex> lgd(_mtx);
+			string mergedLogString= getMergedLogString();
+			printLogs(std::move(mergedLogString));
+
+		}
 
 		void EZlogOutputThread::pushLog(const EzLogStream *logs)
 		{
-			pushLog(logs->str());
+			bool isLocalFull = localCircularQueuePushBack(logs->m_pHead);
+			if (isLocalFull)
+			{
+				std::lock_guard<std::mutex> lk(_mtx);
+				bool isGlobalFull= moveLocalCacheToGlobal(_localCache);
+				if(isGlobalFull)
+				{
+					_logging = true;
+					_cv.notify_all();
+				}
+			}
 		}
 
-		void EZlogOutputThread::pushLog(std::string &&logs)
+		string EZlogOutputThread::getMergedLogString()
 		{
-			std::lock_guard<std::mutex> lk(_mtx);
+			string str;
+			for(EzLogBean** pBean=_globalCache.pCacheFront; pBean < _globalCache.pCacheNow; pBean++)
 			{
-				_global_cache += (logs + "\n");
-			}
+				assert(pBean != nullptr && *pBean != nullptr);
+				EzLogBean &bean=**pBean;
+				uint32_t len = EZLOG_PREFIX_RESERVE_LEN + EZLOG_CTIME_MAX_LEN + bean.fileLen;
+				char ctime[EZLOG_CTIME_MAX_LEN];
+#ifdef __GNUC__
+				char buf[len];
+#else
+				char *buf = (char*)ezmalloc(len*sizeof(char));
+#endif
 
-			_logging = true;
-			_cv.notify_all();
+
+#ifdef EZLOG_USE_STD_CHRONO
+				chronoToTimeCStr(ctime, sizeof(ctime) - 1, *bean.cpptime);
+				snprintf(buf, len, "%c tid: %s [%s] [%s:%u] ", bean.level, bean.tid, ctime, bean.file, bean.line);
+#elif defined(EZLOG_USE_CTIME)
+				timeToCStr(ctime, sizeof(ctime) - 1, bean.ctime);
+				snprintf(buf, len, "%c tid: %s [%s] [%s:%u] ", bean.level, bean.tid, ctime, bean.file, bean.line);
+#endif
+				str+=buf;
+				str+=bean.data;
+
+#ifdef __GNUC__
+#else
+				 ezfree(buf);
+#endif
+				EzLogBean::DestroyInstance(*pBean);
+			}
+			_globalCache.pCacheNow=_globalCache.pCacheFront;
+			return str;
+		}
+
+		void EZlogOutputThread::printLogs(std::string mergedLogString)
+		{
+			EzLoggerPrinter *printer = EzLogImpl::getCurrentPrinter();
+			if (printer->isThreadSafe())
+			{
+				printer->onAcceptLogs(mergedLogString);
+			} else
+			{
+				printer->onAcceptLogs(mergedLogString);
+			}
 		}
 
 		void EZlogOutputThread::onAcceptLogs()
@@ -456,18 +629,12 @@ namespace ezlogspace
 
 				std::unique_lock<std::mutex> lk(_mtx);
 				_cv.wait(lk, []() -> bool {
-					return _logging;
+					return _logging && _inited;
 				});
 
-				EzLoggerPrinter *printer = EzLogImpl::getCurrentPrinter();
-				if (printer->isThreadSafe())
-				{
-					printer->onAcceptLogs(_global_cache);
-				} else
-				{
-					printer->onAcceptLogs(_global_cache);
-				}
-				_global_cache.clear();
+				string mergedLogString= getMergedLogString();
+				printLogs(std::move(mergedLogString));
+
 				_logging = false;
 				lk.unlock();
 				this_thread::yield();
@@ -477,8 +644,75 @@ namespace ezlogspace
 				}
 			}
 		}
+
+
 #endif
 
+#ifdef __________________________________________________EzLogBean__________________________________________________
+
+		EzLogBean *EzLogBean::CreateInstance()
+		{
+			return new EzLogBean();
+		}
+
+		void EzLogBean::DestroyInstance(EzLogBean *p)
+		{
+			ezfree(p->data);
+#ifdef EZLOG_USE_STD_CHRONO
+			delete p->cpptime;
+#endif
+			delete p;
+		}
+
+		EzLogBean *EzLogBean::CreateInstances(size_t count)
+		{
+			return new EzLogBean[count];
+		}
+
+		void EzLogBean::DestroyInstances(EzLogBean *p)
+		{
+			void* pHead=(char*)p- sizeof(size_t);
+			size_t count = (*(size_t *) pHead) / sizeof(EzLogBean);
+			for(EzLogBean* pEnd=p+count;p<pEnd;p++)
+			{
+				DestroyInstance(p);
+			}
+			delete[]p;
+		}
+
+		void *EzLogBean::operator new(size_t size)
+		{
+			return ezmalloc(size);
+		}
+		void *EzLogBean::operator new[](size_t size)
+		{
+			void* pHead= ezmalloc(size+ sizeof(size_t));
+			*(size_t*)pHead=size;
+			return (char*)pHead+ sizeof(size_t);
+		}
+
+		void *EzLogBean::operator new(size_t size, void *pMemory)
+		{
+			return pMemory;
+		}
+
+		void EzLogBean::operator delete(void *p)
+		{
+			ezfree(p);
+		}
+
+		void EzLogBean::operator delete[](void *p)
+		{
+			void* pHead=(char*)p- sizeof(size_t);
+			ezfree(pHead);
+		}
+
+		void EzLogBean::operator delete(void *p, void *pMemory)
+		{
+			return;
+		}
+
+#endif
 	}
 }
 using namespace ezlogspace::internal;
@@ -526,19 +760,18 @@ namespace ezlogspace
 	{
 		if (!EzLog::closed())
 		{
-
-            char lvFlag[] = " FEWIDV";
-            uint32_t len = EZLOG_PREFIX_RESERVE_LEN + EZLOG_CTIME_MAX_LEN + fileLen;
-#ifdef __GNUC__
-            char buf[len];
+			m_pHead = EzLogBean::CreateInstance();
+			assert(m_pHead);
+			EzLogBean &bean = *m_pHead;
+			bean.tid = EzLogImpl::tid;
+			bean.file = file;
+			bean.fileLen=fileLen;
+			bean.line = line;
+			bean.level = " FEWIDV"[lv];
+#ifdef EZLOG_USE_STD_CHRONO
+			bean.cpptime = new SystemTimePoint(std::chrono::system_clock::now());
 #else
-            char *buf = new char[len];
-#endif
-            snprintf(buf, len, "%c tid: %s [%s] [%s:%u] ", lvFlag[lv], EzLogImpl::tid, GetCurCTime(), file, line);
-            rThis << buf;
-#ifdef __GNUC__
-#else
-            delete[]buf;
+			bean.ctime=time(NULL);
 #endif
 		}
 	}
@@ -547,6 +780,10 @@ namespace ezlogspace
 	{
 		if (!EzLog::closed())
 		{
+			string str=this->str();
+			str.push_back('\n');
+			this->m_pHead->data= (char*)ezmalloc(str.size()+1);
+			strcpy(this->m_pHead->data,str.c_str());
 			EzLogImpl::pushLog(this);
 		}
 

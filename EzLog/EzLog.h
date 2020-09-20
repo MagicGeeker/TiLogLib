@@ -13,26 +13,20 @@
 #include <mutex>
 #include <condition_variable>
 
-namespace ezlogspace
-{
-    enum EzLogTimeStrategyEnum
-    {
-        USE_STD_CHRONO = 0x01,
-        USE_CTIME = 0x02,
-
-        WITH_MILLISECONDS = 0x08
-    };
-}
 /**************************************************MACRO FOR USER**************************************************/
+#define    EZLOG_USE_STD_CHRONO  0x01
+//#define    EZLOG_USE_CTIME  0x02
+#define    EZLOG_WITH_MILLISECONDS  0x08
+
+
 #define EZLOG_SINGLE_THREAD_BUF_SIZE  ((size_t)1<<20U)   //1MB
 #define EZLOG_GLOBAL_BUF_SIZE  ((size_t)10<<20U)    //10MB
-#define EZLOG_SINGLE_THREAD_LINKED_LIST_MAX_SIZE  ((size_t)1<<8U)   //256
-#define EZLOG_GLOBAL_LINKED_LIST_MAX_SIZE  ((size_t)1<<12U)   //4096
+#define EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE  ((size_t)1<<8U)   //256
+#define EZLOG_GLOBAL_QUEUE_MAX_SIZE  ((size_t)1<<12U)   //4096
 #define EZLOG_PREFIX_RESERVE_LEN  30     //reserve for log level,tid ...
 
 
 #define EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL   FALSE
-#define EZLOG_GET_TIME_STRATEGY   (ezlogspace::USE_STD_CHRONO|ezlogspace::WITH_MILLISECONDS)
 #define EZLOG_LOG_LEVEL    6
 
 #define       EZLOG_LEVEL_FATAL    1
@@ -46,6 +40,10 @@ namespace ezlogspace
 
 namespace ezlogspace
 {
+	namespace internal{
+		class EzLogBean;
+	}
+
 	class EzLoggerPrinter
 	{
 	public:
@@ -55,10 +53,10 @@ namespace ezlogspace
 
 		virtual void onAcceptLogs(std::string &&logs) = 0;
 
-        virtual bool isThreadSafe() = 0;
+		virtual bool isThreadSafe() = 0;
 
-        virtual bool isStatic()
-        { return true; }
+		virtual bool isStatic()
+		{ return true; }
 
 		virtual ~EzLoggerPrinter() = default;
 
@@ -91,29 +89,30 @@ namespace ezlogspace
 	class EzLogStream : public std::ostringstream
 	{
 	public:
-		EzLogStream(int32_t lv, uint32_t line,uint32_t fileLen ,const char *file);
+		EzLogStream(int32_t lv, uint32_t line, uint32_t fileLen, const char *file);
 
 		virtual ~EzLogStream() override;
 
+		ezlogspace::internal::EzLogBean* m_pHead;
 	};
 
 	class EzNoLogStream
 	{
 	public:
-		EzNoLogStream(int32_t lv, uint32_t line,uint32_t fileLen ,const char *file)
+		EzNoLogStream(int32_t lv, uint32_t line, uint32_t fileLen, const char *file)
 		{};
 
 		~EzNoLogStream()
 		{}
 
-		template <typename T>
-		EzNoLogStream &operator<<(const T& s)
+		template<typename T>
+		EzNoLogStream &operator<<(const T &s)
 		{
 			return *this;
 		}
 
-		template <typename T>
-		EzNoLogStream &operator<<(T&& s)
+		template<typename T>
+		EzNoLogStream &operator<<(T &&s)
 		{
 			return *this;
 		}
@@ -121,7 +120,15 @@ namespace ezlogspace
 }
 
 
+#if (defined(EZLOG_USE_CTIME) && defined(EZLOG_USE_STD_CHRONO)) || (!defined(EZLOG_USE_CTIME) && !defined(EZLOG_USE_STD_CHRONO))
+#error "only one stratrgy can be and must be selected"
+#endif
 
+static_assert(EZLOG_GLOBAL_QUEUE_MAX_SIZE > 0, "fatal err!");
+static_assert(EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE > 0, "fatal err!");
+static_assert(EZLOG_GLOBAL_QUEUE_MAX_SIZE >= EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE, "fatal err!");
+static_assert(EZLOG_GLOBAL_QUEUE_MAX_SIZE % EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE == 0,
+			  "because of internal implement,it must be 0");
 
 //if not support dynamic log level
 #if EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL == FALSE

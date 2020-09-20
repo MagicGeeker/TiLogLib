@@ -11,16 +11,16 @@ using namespace ezlogspace;
 #include "../outlibs/catch/catch.hpp"
 
 
-#define single_thread_log_test_____________________
-#define multi_thread_log_test_____________________
-#define file_multi_thread_log_test_____________________
-#define termial_many_thread_cout_test_____________________
-#define termial_many_thread_log_test_____________________
-#define file_many_thread_log_test_____________________
-#define file_time_many_thread_log_test_with_sleep_____________________
-#define file_time_multi_thread_simulation__log_test_____________________
+//#define single_thread_log_test_____________________
+//#define multi_thread_log_test_____________________
+//#define file_multi_thread_log_test_____________________
+//#define termial_many_thread_cout_test_____________________
+//#define termial_many_thread_log_test_____________________
+//#define file_many_thread_log_test_____________________
+//#define file_time_many_thread_log_test_with_sleep_____________________
+//#define file_time_multi_thread_simulation__log_test_____________________
 #define file_single_thread_benchmark_test_____________________
-#define file_multi_thread_benchmark_test_____________________
+//#define file_multi_thread_benchmark_test_____________________
 
 
 #ifdef single_thread_log_test_____________________
@@ -251,10 +251,14 @@ TEST_CASE("file_time_multi_thread_simulation__log_test_____________________")
 
 TEST_CASE("file_single_thread_benchmark_test_____________________")
 {
-#ifdef NDEBUG
 	EZLOGI << "file_single_thread_benchmark_test_____________________";
-	uint64_t loops = (1 << 20);
+#ifdef NDEBUG
+	constexpr uint64_t loops = (1 << 20);
 	EZLOGI << "1M loops test";
+#else
+	constexpr uint64_t loops = (1 << 10);
+	EZLOGI << "1k loops test";
+#endif
 	SimpleTimer s1m;
 	for (uint64_t i = 0; i < loops; i++)
 	{
@@ -263,7 +267,8 @@ TEST_CASE("file_single_thread_benchmark_test_____________________")
 	uint64_t ms = s1m.GetMillisecondsUpToNOW();
 	EZLOGI << (1000 * loops / ms) << " logs per second";
 	EZLOGI << 1.0 * ms / loops << " milliseconds per log";
-#endif
+	getchar();
+	getchar();
 }
 
 #endif
@@ -273,11 +278,15 @@ TEST_CASE("file_single_thread_benchmark_test_____________________")
 
 TEST_CASE("file_multi_thread_benchmark_test_____________________")
 {
-#ifdef NDEBUG
 	EZLOGI << "file_multi_thread_benchmark_test_____________________";
+#ifdef NDEBUG
 	EZLOGI << "10 threads 1M loops test";
+	constexpr uint64_t loops = (1 << 20);
+#else
+	EZLOGI << "10 threads 1k loops test";
+	constexpr uint64_t loops = (1 << 10);
+#endif
 	SimpleTimer s1m;
-	uint64_t loops = (1 << 20);
 
 	static bool begin = false;
 	static condition_variable_any cva;
@@ -308,7 +317,6 @@ TEST_CASE("file_multi_thread_benchmark_test_____________________")
 	uint64_t ms = s1m.GetMillisecondsUpToNOW();
 	EZLOGI << (1000 * loops / ms) << " logs per second";
 	EZLOGI << 1.0 * ms / loops << " milliseconds per log";
-#endif
 }
 
 #endif
