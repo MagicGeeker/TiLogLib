@@ -526,17 +526,24 @@ namespace ezlogspace
 
 		static inline bool localCircularQueuePushBack(EzLogBean *obj)
 		{
+			assert(_localCache.pCacheNow <= _localCache.pCacheBack);
+			assert(_localCache.pCacheFront <= _localCache.pCacheNow);
 			*_localCache.pCacheNow = obj;
 			_localCache.pCacheNow++;
 			return _localCache.pCacheNow > _localCache.pCacheBack;
 		}
 		static inline bool moveLocalCacheToGlobal(LogCacheStru& bean)
 		{
-			size_t size= bean.pCacheNow - bean.pCacheFront;
-			memcpy(_globalCache.pCacheNow, bean.pCacheFront, size * sizeof(EzLogBean *));  //see Ezlog.h
-			bool isGlobalFull= _globalCache.pCacheNow + size >= _globalCache.pCacheBack;
-			bean.pCacheNow=bean.pCacheFront;
-			_globalCache.pCacheNow+=size;
+			assert(bean.pCacheNow <= bean.pCacheBack + 1);
+			assert(bean.pCacheFront <= bean.pCacheNow);
+			size_t size = bean.pCacheNow - bean.pCacheFront;
+			assert(_globalCache.pCacheFront <= _globalCache.pCacheNow);
+			assert(_globalCache.pCacheNow + size <= _globalCache.pCacheBack);
+			memcpy(_globalCache.pCacheNow, bean.pCacheFront, size * sizeof(EzLogBean *));
+			_globalCache.pCacheNow += size;
+			bean.pCacheNow = bean.pCacheFront;
+			//在拷贝size字节的情况下，还要预留EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE，以便下次调用这个函数拷贝的时候不会溢出
+			bool isGlobalFull = _globalCache.pCacheNow + EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE > _globalCache.pCacheBack;
 			return isGlobalFull;
 		}
 

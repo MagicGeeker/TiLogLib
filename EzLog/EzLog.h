@@ -127,9 +127,8 @@ namespace ezlogspace
 
 static_assert(EZLOG_GLOBAL_QUEUE_MAX_SIZE > 0, "fatal err!");
 static_assert(EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE > 0, "fatal err!");
-static_assert(EZLOG_GLOBAL_QUEUE_MAX_SIZE >= EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE, "fatal err!");
-static_assert(EZLOG_GLOBAL_QUEUE_MAX_SIZE % EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE == 0,
-			  "because of internal implement,it must be 0");
+static_assert(EZLOG_GLOBAL_QUEUE_MAX_SIZE >= 2 * EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE, "fatal err!");   //see func moveLocalCacheToGlobal
+
 
 //if not support dynamic log level
 #if EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL == FALSE
