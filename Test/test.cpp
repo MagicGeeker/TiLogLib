@@ -87,7 +87,9 @@ TEST_CASE("termial_many_thread_cout_test_____________________")
 			mtx.unlock();
 		}, i));
 	}
+	unique_lock<shared_mutex> ulk(smtx);
 	begin = true;
+	ulk.unlock();
 	cva.notify_all();
 	for (auto &th:vec)
 	{
@@ -122,7 +124,9 @@ TEST_CASE("termial_many_thread_log_test_____________________")
 			EZLOGV << "LOGV thr " << index << " " << &a;
 		}, i));
 	}
+	unique_lock<shared_mutex> ulk(smtx);
 	begin = true;
+	ulk.unlock();
 	cva.notify_all();
 	for (auto &th:vec)
 	{
@@ -157,7 +161,9 @@ TEST_CASE("file_many_thread_log_test_____________________")
 			EZLOGV << "LOGV thr " << index << " " << &a;
 		}, i));
 	}
+	unique_lock<shared_mutex> ulk(smtx);
 	begin = true;
+	ulk.unlock();
 	cva.notify_all();
 	for (auto &th:vec)
 	{
@@ -192,7 +198,9 @@ TEST_CASE("file_time_many_thread_log_test_with_sleep_____________________")
 			EZLOGD << "LOGD thr " << index << " " << &a;
 		}, i));
 	}
+	unique_lock<shared_mutex> ulk(smtx);
 	begin = true;
+	ulk.unlock();
 	cva.notify_all();
 	for (auto &th:vec)
 	{
@@ -218,7 +226,7 @@ TEST_CASE("file_time_multi_thread_simulation__log_test_____________________")
 
 	std::vector<std::thread> vec;
 
-	for (int i = 1; i < 10; i++)
+	for (int i = 1; i <= 10; i++)
 	{
 		vec.emplace_back(thread([&](int index) -> void {
 			int a = 0;
@@ -233,7 +241,9 @@ TEST_CASE("file_time_multi_thread_simulation__log_test_____________________")
 			}
 		}, i));
 	}
+	unique_lock<shared_mutex> ulk(smtx);
 	begin = true;
+	ulk.unlock();
 	cva.notify_all();
 	for (auto &th:vec)
 	{
@@ -276,11 +286,13 @@ TEST_CASE("file_multi_thread_benchmark_test_____________________")
 	EZLOGI << "file_multi_thread_benchmark_test_____________________";
 #ifdef NDEBUG
 	EZLOGI << "10 threads 1M loops test";
-	constexpr uint64_t loops = (1 << 20);
+	constexpr uint64_t loops = 10000 + (1 << 20);
 #else
 	EZLOGI << "10 threads 1k loops test";
-	constexpr uint64_t loops = (1 << 10);
+	constexpr uint64_t loops = 10000 + (1 << 16);
 #endif
+	constexpr int32_t threads = 10;
+
 	SimpleTimer s1m;
 
 	static bool begin = false;
@@ -289,7 +301,7 @@ TEST_CASE("file_multi_thread_benchmark_test_____________________")
 
 	std::vector<std::thread> vec;
 
-	for (int i = 1; i < 10; i++)
+	for (int i = 1; i <= 10; i++)
 	{
 		vec.emplace_back(thread([&](int index) -> void {
 			shared_lock<shared_mutex> slck(smtx);
@@ -297,21 +309,22 @@ TEST_CASE("file_multi_thread_benchmark_test_____________________")
 
 			for (uint64_t j = 0; j < loops; j++)
 			{
-				//do something cost 20ms,and log once
-				this_thread::sleep_for(std::chrono::milliseconds(20));
-				EZLOGD << " j= " << j;
+				EZLOGD << "index= " << index << " j= " << j;
 			}
 		}, i));
 	}
+
+	unique_lock<shared_mutex> ulk(smtx);
 	begin = true;
+	ulk.unlock();
 	cva.notify_all();
-	for (auto &th:vec)
+	for (auto &th : vec)
 	{
 		th.join();
 	}
 	uint64_t ms = s1m.GetMillisecondsUpToNOW();
-	EZLOGI << (1000 * loops / ms) << " logs per second";
-	EZLOGI << 1.0 * ms / loops << " milliseconds per log";
+	EZLOGI << (1000 * threads * loops / ms) << " logs per second";
+	EZLOGI << 1.0 * ms / (loops * threads) << " milliseconds per log";
 }
 
 #endif
