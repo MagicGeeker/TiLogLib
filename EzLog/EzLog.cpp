@@ -34,6 +34,7 @@ using ezfree_t=void (*)(void *);
 
 static ezmalloc_t ezmalloc = &malloc;
 static ezfree_t ezfree = &free;
+static const std::string folderPath = "F:/";
 
 
 using namespace std;
@@ -129,11 +130,6 @@ namespace ezloghelperspace
 //		return timestr;
 //	}
 
-	char *GetTheadLocalCache()
-	{
-		return new char[2 * EZLOG_SINGLE_THREAD_BUF_SIZE];
-	}
-
 }
 
 using namespace ezloghelperspace;
@@ -165,6 +161,8 @@ namespace ezlogspace
 
 			void onAcceptLogs(std::string &&logs) override;
 
+			void sync() override;
+
 			bool isThreadSafe() override;
 
 		protected:
@@ -183,6 +181,8 @@ namespace ezlogspace
 			void onAcceptLogs(const std::string &logs) override;
 
 			void onAcceptLogs(std::string &&logs) override;
+
+			void sync() override;
 
 			bool isThreadSafe() override;
 
@@ -221,7 +221,8 @@ namespace ezlogspace
 		private:
 			thread_local static bool _thread_init;
 
-			static std::string _global_cache;
+			static size_t _printedStringLength;
+			static std::string _global_cache_string;
 			static std::mutex _mtx;
 			static std::condition_variable _cv;
 			static bool _logging;
@@ -339,12 +340,18 @@ namespace ezlogspace
 		{
 			return false;
 		}
+
+		void EzLoggerTerminalPrinter::sync()
+		{
+			std::cout.flush();
+		}
+
 #endif
 
 
 #ifdef __________________________________________________EzLoggerFilePrinter__________________________________________________
 		EzLoggerFilePrinter *EzLoggerFilePrinter::_ins = new EzLoggerFilePrinter();
-		std::ofstream EzLoggerFilePrinter::_ofs("./logs.txt");
+		std::ofstream EzLoggerFilePrinter::_ofs(folderPath+"logs.txt");
 
 		EzLoggerFilePrinter *EzLoggerFilePrinter::getInstance()
 		{
@@ -378,6 +385,12 @@ namespace ezlogspace
 		{
 			return true;
 		}
+
+		void EzLoggerFilePrinter::sync()
+		{
+			_ofs.flush();
+		}
+
 #endif
 
 #ifdef __________________________________________________EzLogImpl__________________________________________________
@@ -498,8 +511,10 @@ namespace ezlogspace
 											&_globalCache.cache[_globalSize - 1], _globalCache.pCacheFront};
 		static unordered_map<LogCacheStru*, const char *> _globalCachesMap;
 
+
 		thread_local bool EZlogOutputThread::_thread_init = InitForEveryThread();
-		std::string EZlogOutputThread::_global_cache;
+		size_t EZlogOutputThread::_printedStringLength = 0;
+		std::string EZlogOutputThread::_global_cache_string;
 		std::mutex EZlogOutputThread::_mtx;
 		std::condition_variable EZlogOutputThread::_cv;
 		bool EZlogOutputThread::_logging = true;
@@ -543,7 +558,7 @@ namespace ezlogspace
 		bool EZlogOutputThread::Init()
 		{
 			lock_guard<mutex> lgd(_mtx);
-//			_global_cache.reserve( 2 * EZLOG_GLOBAL_BUF_SIZE );
+			_global_cache_string.reserve(EZLOG_GLOBAL_BUF_SIZE * 1.2);
 			atexit(AtExit);
 			_inited = true;
 			return true;
@@ -572,19 +587,32 @@ namespace ezlogspace
 			bool isLocalFull = localCircularQueuePushBack(logs->m_pHead);
 			if (isLocalFull)
 			{
-				std::lock_guard<std::mutex> lk(_mtx);
+				std::unique_lock<std::mutex> lk(_mtx);
+				if (_logging)		//另外一个线程的本地缓存和全局缓存已满，本线程却拿到锁，应该需要等打印线程打印完
+				{
+					lk.unlock();
+					while (_logging) {
+						_cv.notify_all();
+						std::this_thread::yield();
+					}
+					//全局缓存已经打印完
+					lk.lock();
+				}
 				bool isGlobalFull= moveLocalCacheToGlobal(_localCache);
 				if(isGlobalFull)
 				{
-					_logging = true;
-					_cv.notify_all();
+					_logging = true;		//此时本地缓存和全局缓存已满
+					lk.unlock();
+					_cv.notify_all();		//这个通知后，锁可能会被另一个工作线程拿到
 				}
 			}
 		}
 
 		string EZlogOutputThread::getMergedLogString()
 		{
-			string str;
+			//string str;
+			string& str=_global_cache_string;
+			str.resize(0);
 			for(EzLogBean** pBean=_globalCache.pCacheFront; pBean < _globalCache.pCacheNow; pBean++)
 			{
 				assert(pBean != nullptr && *pBean != nullptr);
@@ -620,13 +648,22 @@ namespace ezlogspace
 
 		void EZlogOutputThread::printLogs(string &&mergedLogString)
 		{
+			static size_t bufSize = 0;
+			bufSize += mergedLogString.length();
+			_printedStringLength += mergedLogString.length();
+
 			EzLoggerPrinter *printer = EzLogImpl::getCurrentPrinter();
 			if (printer->isThreadSafe())
 			{
-				printer->onAcceptLogs(mergedLogString);
+				printer->onAcceptLogs(std::move(mergedLogString));
 			} else
 			{
-				printer->onAcceptLogs(mergedLogString);
+				printer->onAcceptLogs(std::move(mergedLogString));
+			}
+			if (bufSize >= EZLOG_GLOBAL_BUF_SIZE)
+			{
+				printer->sync();
+				bufSize = 0;
 			}
 		}
 

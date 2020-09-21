@@ -19,8 +19,7 @@
 #define    EZLOG_WITH_MILLISECONDS  0x08
 
 
-#define EZLOG_SINGLE_THREAD_BUF_SIZE  ((size_t)1<<20U)   //1MB
-#define EZLOG_GLOBAL_BUF_SIZE  ((size_t)10<<20U)    //10MB
+#define EZLOG_GLOBAL_BUF_SIZE  ((size_t)1<<20U)    //1MB
 #define EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE  ((size_t)1<<8U)   //256
 #define EZLOG_GLOBAL_QUEUE_MAX_SIZE  ((size_t)1<<12U)   //4096
 #define EZLOG_PREFIX_RESERVE_LEN  30     //reserve for log level,tid ...
@@ -52,6 +51,8 @@ namespace ezlogspace
 		virtual void onAcceptLogs(const std::string &logs) = 0;
 
 		virtual void onAcceptLogs(std::string &&logs) = 0;
+
+		virtual void sync() = 0;
 
 		virtual bool isThreadSafe() = 0;
 
