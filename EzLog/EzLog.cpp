@@ -22,7 +22,36 @@
 #define __________________________________________________EzLogBean__________________________________________________
 
 
+//#define EZLOG_ENABLE_ASSERT_ON_RELEASE
 
+#if !defined(NDEBUG) ||  defined(EZLOG_ENABLE_ASSERT_ON_RELEASE)
+
+#ifndef DEBUG_ASSERT
+#define DEBUG_ASSERT(what)   \
+do{ if(!(what)){std::cerr<<"\n ERROR:\n"<<__FILE__<<":"<<__LINE__<<"\n"<<(#what)<<"\n"; exit(-100);  }  }while(0)
+#endif
+
+#ifndef DEBUG_ASSERT1
+#define DEBUG_ASSERT1(what, X)   \
+do{ if(!(what)){std::cerr<<"\n ERROR:\n"<< __FILE__ <<":"<< __LINE__ <<"\n"<<(#what)<<"\n"<<(#X)<<": "<<(X); exit(-100);  }  }while(0)
+#endif
+
+#ifndef DEBUG_ASSERT2
+#define DEBUG_ASSERT2(what, X, Y)   \
+do{ if(!(what)){std::cerr<<"\n ERROR:\n"<< __FILE__ <<":"<< __LINE__ <<"\n"<<(#what)<<"\n"<<(#X)<<": "<<(X)<<" "<<(#Y)<<": "<<(Y); exit(-100);  }  }while(0)
+#endif
+
+#ifndef DEBUG_ASSERT3
+#define DEBUG_ASSERT3(what, X, Y, Z)   \
+do{ if(!(what)){std::cerr<<"\n ERROR:\n"<< __FILE__ <<":"<< __LINE__ <<"\n"<<(#what)<<"\n"<<(#X)<<": "<<(X)<<" "<<(#Y)<<": "<<Y<<" "<<(#Z)<<": "<<(Z); exit(-100);  }  }while(0)
+#endif
+
+#else
+#define DEBUG_ASSERT(what)           do{}while(0)
+#define DEBUG_ASSERT1(what, X)           do{}while(0)
+#define DEBUG_ASSERT2(what, X, Y)       do{}while(0)
+#define DEBUG_ASSERT3(what, X, Y, Z)    do{}while(0)
+#endif
 
 #define EZLOG_CTIME_MAX_LEN 50
 #define EZLOG_THREAD_ID_MAX_LEN  (20+1)    //len(UINT64_MAX 64bit)+1
@@ -129,6 +158,19 @@ namespace ezloghelperspace
 ////        timestr.pop_back();  //remove '\n'
 //		return timestr;
 //	}
+
+    uint32_t fastRand() {
+        static const uint32_t M = 2147483647L;  // 2^31-1
+        static const uint64_t A = 16385;  // 2^14+1
+        static uint32_t _seed=1;
+
+        // Computing _seed * A % M.
+        uint64_t p = _seed * A;
+        _seed = static_cast<uint32_t>((p >> 31) + (p & M));
+        if (_seed > M) _seed -= M;
+
+        return _seed;
+    }
 
 }
 
@@ -526,19 +568,20 @@ namespace ezlogspace
 
 		static inline bool localCircularQueuePushBack(EzLogBean *obj)
 		{
-			assert(_localCache.pCacheNow <= _localCache.pCacheBack);
-			assert(_localCache.pCacheFront <= _localCache.pCacheNow);
+            DEBUG_ASSERT(_localCache.pCacheNow <= _localCache.pCacheBack);
+            DEBUG_ASSERT(_localCache.pCacheFront <= _localCache.pCacheNow);
 			*_localCache.pCacheNow = obj;
 			_localCache.pCacheNow++;
 			return _localCache.pCacheNow > _localCache.pCacheBack;
 		}
 		static inline bool moveLocalCacheToGlobal(LogCacheStru& bean)
 		{
-			assert(bean.pCacheNow <= bean.pCacheBack + 1);
-			assert(bean.pCacheFront <= bean.pCacheNow);
-			size_t size = bean.pCacheNow - bean.pCacheFront;
-			assert(_globalCache.pCacheFront <= _globalCache.pCacheNow);
-			assert(_globalCache.pCacheNow + size <= _globalCache.pCacheBack);
+            DEBUG_ASSERT(bean.pCacheNow <= bean.pCacheBack + 1);
+            DEBUG_ASSERT(bean.pCacheFront <= bean.pCacheNow);
+            size_t size = bean.pCacheNow - bean.pCacheFront;
+            DEBUG_ASSERT(_globalCache.pCacheFront <= _globalCache.pCacheNow);
+            DEBUG_ASSERT2(_globalCache.pCacheNow + size <= 1 + _globalCache.pCacheBack,
+                          _globalCache.pCacheBack - _globalCache.pCacheNow, size);
 			memcpy(_globalCache.pCacheNow, bean.pCacheFront, size * sizeof(EzLogBean *));
 			_globalCache.pCacheNow += size;
 			bean.pCacheNow = bean.pCacheFront;
@@ -595,16 +638,17 @@ namespace ezlogspace
 			if (isLocalFull)
 			{
 				std::unique_lock<std::mutex> lk(_mtx);
-				if (_logging)		//另外一个线程的本地缓存和全局缓存已满，本线程却拿到锁，应该需要等打印线程打印完
-				{
-					lk.unlock();
-					while (_logging) {
-						_cv.notify_all();
-						std::this_thread::yield();
-					}
-					//全局缓存已经打印完
-					lk.lock();
-				}
+                while (_logging)        //另外一个线程的本地缓存和全局缓存已满，本线程却拿到锁，应该需要等打印线程打印完
+                {
+                    lk.unlock();
+                    for (size_t us = EZLOG_GLOBAL_BUF_FULL_SLEEP_US; _logging;)
+                    {
+                        _cv.notify_all();
+                        std::this_thread::sleep_for(std::chrono::microseconds(us + fastRand() % us));
+                    }
+                    //等这个线程拿到锁的时候，可能全局缓存已经打印完，也可能又满了正在打印
+                    lk.lock();
+                }
 				bool isGlobalFull= moveLocalCacheToGlobal(_localCache);
 				if(isGlobalFull)
 				{
@@ -622,7 +666,7 @@ namespace ezlogspace
 			str.resize(0);
 			for(EzLogBean** pBean=_globalCache.pCacheFront; pBean < _globalCache.pCacheNow; pBean++)
 			{
-				assert(pBean != nullptr && *pBean != nullptr);
+				DEBUG_ASSERT(pBean != nullptr && *pBean != nullptr);
 				EzLogBean &bean=**pBean;
 				uint32_t len = EZLOG_PREFIX_RESERVE_LEN + EZLOG_CTIME_MAX_LEN + bean.fileLen;
 				char ctime[EZLOG_CTIME_MAX_LEN];
@@ -817,7 +861,7 @@ namespace ezlogspace
 		if (!EzLog::closed())
 		{
 			m_pHead = EzLogBean::CreateInstance();
-			assert(m_pHead);
+			DEBUG_ASSERT(m_pHead);
 			EzLogBean &bean = *m_pHead;
 			bean.tid = EzLogImpl::tid;
 			bean.file = file;
