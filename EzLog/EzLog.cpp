@@ -5,7 +5,10 @@
 #include <signal.h>
 #include <unordered_set>
 #include<unordered_map>
+#include<map>
+#include<set>
 #include <chrono>
+#include<algorithm>
 #include <string.h>
 #include <thread>
 #include <future>
@@ -54,6 +57,7 @@ do{ if(!(what)){std::cerr<<"\n ERROR:\n"<< __FILE__ <<":"<< __LINE__ <<"\n"<<(#w
 #endif
 
 #define EZLOG_CTIME_MAX_LEN 50
+#define EZLOG_SINGLE_LOG_STRING_FULL_RESERVER_LEN  (EZLOG_PREFIX_RESERVE_LEN+EZLOG_SINGLE_LOG_RESERVE_LEN+EZLOG_CTIME_MAX_LEN)
 #define EZLOG_THREAD_ID_MAX_LEN  (20+1)    //len(UINT64_MAX 64bit)+1
 
 using SystemTimePoint=std::chrono::system_clock::time_point;
@@ -61,8 +65,18 @@ using ezmalloc_t = void *(*)(size_t);
 using ezfree_t=void (*)(void *);
 
 
-static ezmalloc_t ezmalloc = &malloc;
-static ezfree_t ezfree = &free;
+#define ezmalloc  EZLOG_MALLOC_FUNCTION
+#define ezfree EZLOG_FREE_FUNCTION
+
+#define eznewtriv			ezlogspace::EzLogMemoryManager::NewTrivial
+#define eznew 				ezlogspace::EzLogMemoryManager::New
+#define eznewtrivarr		ezlogspace::EzLogMemoryManager::NewTrivialArray
+#define eznewarr			ezlogspace::EzLogMemoryManager::NewArray
+#define ezdelete			ezlogspace::EzLogMemoryManager::Delete
+#define ezdelarr			ezlogspace::EzLogMemoryManager::DeleteArray
+
+
+
 static const std::string folderPath = "F:/";
 
 
@@ -183,7 +197,7 @@ namespace ezlogspace
 
 	namespace internal
 	{
-
+		thread_local const char *tid = GetThreadIDString();
 
 		class EzLogObject
 		{
@@ -265,6 +279,7 @@ namespace ezlogspace
 
 			static size_t _printedStringLength;
 			static std::string _global_cache_string;
+			static std::vector<EzLogBean *> sortedBeanVec;
 			static std::mutex _mtx;
 			static std::condition_variable _cv;
 			static bool _logging;
@@ -309,41 +324,7 @@ namespace ezlogspace
 			static bool _closed;
 			static std::unique_ptr<EzLogImpl> upIns;
 			static bool _inited;
-
-			static thread_local const char *tid;
-			static thread_local char *localCache;
 		};
-
-		class EzLogBean
-		{
-		public:
-			char* data;
-			const char *tid;
-			const char *file;
-#ifdef EZLOG_USE_STD_CHRONO
-			SystemTimePoint* cpptime;
-#else
-			time_t ctime;
-#endif
-			uint32_t fileLen;
-			uint32_t line;
-			char level;
-		public:
-			static EzLogBean* CreateInstance();
-			static void DestroyInstance(EzLogBean* p);
-			static EzLogBean* CreateInstances(size_t count);
-			static void DestroyInstances(EzLogBean* p);
-		private:
-			static void*operator new(size_t size);
-			static void* operator new(size_t size,void* pMemory);
-			static void* operator new[](size_t size);
-
-			static void operator delete(void* p);
-			static void operator delete(void *p, void *pMemory);
-			static void operator delete[](void* p);
-		};
-		static_assert(std::is_pod<EzLogBean>::value, "EzLogBean not pod!");
-
 	}
 }
 
@@ -440,11 +421,10 @@ namespace ezlogspace
 
 		EzLoggerPrinter *EzLogImpl::_printer = nullptr;
 		bool EzLogImpl::_closed = false;
-		unique_ptr<EzLogImpl> EzLogImpl::upIns(new EzLogImpl);
+		unique_ptr<EzLogImpl> EzLogImpl::upIns(eznew<EzLogImpl>());
 		bool EzLogImpl::_inited = init();
 
-		thread_local const char *EzLogImpl::tid = GetThreadIDString();
-		thread_local char *EzLogImpl::localCache = nullptr;
+
 
 		EzLogImpl::EzLogImpl()
 		{
@@ -557,6 +537,7 @@ namespace ezlogspace
 		thread_local bool EZlogOutputThread::_thread_init = InitForEveryThread();
 		size_t EZlogOutputThread::_printedStringLength = 0;
 		std::string EZlogOutputThread::_global_cache_string;
+		std::vector<EzLogBean *> EZlogOutputThread::sortedBeanVec;
 		std::mutex EZlogOutputThread::_mtx;
 		std::condition_variable EZlogOutputThread::_cv;
 		bool EZlogOutputThread::_logging = true;
@@ -601,19 +582,24 @@ namespace ezlogspace
 		bool EZlogOutputThread::InitForEveryThread()
 		{
 			lock_guard<mutex> lgd(_mtx);
-			_globalCachesMap.emplace(_pLocalCache, EzLogImpl::tid);
+			_globalCachesMap.emplace(_pLocalCache, tid);
 			return true;
 		}
 
 		bool EZlogOutputThread::Init()
 		{
 			lock_guard<mutex> lgd(_mtx);
-			_global_cache_string.reserve(EZLOG_GLOBAL_BUF_SIZE * 1.2);
+			std::ios::sync_with_stdio(false);
+			_global_cache_string.reserve((size_t)(EZLOG_GLOBAL_BUF_SIZE * 1.2));
+			sortedBeanVec.reserve((size_t) (EZLOG_GLOBAL_QUEUE_MAX_SIZE * 1.2));
 			atexit(AtExit);
 			_inited = true;
 			return true;
 		}
 
+		//根据c++11标准，在atexit函数构造前的全局变量会在atexit函数结束后析构，
+		//在atexit后构造的函数会先于atexit函数析构，
+		// 故用到全局变量需要在此函数前构造
 		void EZlogOutputThread::AtExit()
 		{
 			lock_guard<mutex> lgd(_mtx);
@@ -621,7 +607,6 @@ namespace ezlogspace
 			for(auto & pa:_globalCachesMap)
 			{
 				LogCacheStru& localCacheStru=*pa.first;
-				const char* tid=pa.second;
 				bool isGlobalFull= moveLocalCacheToGlobal(localCacheStru);
 				if(isGlobalFull){
 					string mergedLogString= getMergedLogString();
@@ -659,40 +644,87 @@ namespace ezlogspace
 			}
 		}
 
+		struct EzlogBeanComp
+		{
+			bool operator()(const EzLogBean *const lhs, const EzLogBean *const rhs) const
+			{
+				return *lhs->cpptime < *rhs->cpptime;
+			}
+		};
+
 		string EZlogOutputThread::getMergedLogString()
 		{
+			using namespace std::chrono;
+
 			//string str;
 			string& str=_global_cache_string;
 			str.resize(0);
-			for(EzLogBean** pBean=_globalCache.pCacheFront; pBean < _globalCache.pCacheNow; pBean++)
+
+			sortedBeanVec.resize(0);
+			for(EzLogBean** ppBean=_globalCache.pCacheFront; ppBean < _globalCache.pCacheNow; ppBean++)
 			{
-				DEBUG_ASSERT(pBean != nullptr && *pBean != nullptr);
-				EzLogBean &bean=**pBean;
-				uint32_t len = EZLOG_PREFIX_RESERVE_LEN + EZLOG_CTIME_MAX_LEN + bean.fileLen;
-				char ctime[EZLOG_CTIME_MAX_LEN];
-#ifdef __GNUC__
-				char buf[len];
-#else
-				char *buf = (char*)ezmalloc(len*sizeof(char));
-#endif
+				DEBUG_ASSERT(ppBean != nullptr && *ppBean != nullptr);
+				EzLogBean *pBean = *ppBean;
+				EzLogBean &bean=**ppBean;
+				DEBUG_ASSERT1(bean.cpptime!= nullptr,bean.cpptime);
+				DEBUG_ASSERT1(bean.data!= nullptr,bean.data);
+				DEBUG_ASSERT1(bean.file!= nullptr,bean.file);
 
-
-#ifdef EZLOG_USE_STD_CHRONO
-				chronoToTimeCStr(ctime, sizeof(ctime) - 1, *bean.cpptime);
-				snprintf(buf, len, "%c tid: %s [%s] [%s:%u] ", bean.level, bean.tid, ctime, bean.file, bean.line);
-#elif defined(EZLOG_USE_CTIME)
-				timeToCStr(ctime, sizeof(ctime) - 1, bean.ctime);
-				snprintf(buf, len, "%c tid: %s [%s] [%s:%u] ", bean.level, bean.tid, ctime, bean.file, bean.line);
-#endif
-				str+=buf;
-				str+=bean.data;
-
-#ifdef __GNUC__
-#else
-				 ezfree(buf);
-#endif
-				EzLogBean::DestroyInstance(*pBean);
+				*bean.cpptime =  time_point_cast<milliseconds>(*bean.cpptime);
+				sortedBeanVec.emplace_back(pBean);
 			}
+			std::sort(sortedBeanVec.begin(), sortedBeanVec.end(), EzlogBeanComp());
+
+			char ctime[EZLOG_CTIME_MAX_LEN]={0};
+			char *dst = ctime;
+			time_t tPre=0;
+			time_t t=0;
+			size_t len;
+			char *buf;
+			string logs;
+			logs.reserve(EZLOG_SINGLE_LOG_STRING_FULL_RESERVER_LEN);
+
+			for (EzLogBean* pBean : sortedBeanVec)
+			{
+				EzLogBean & bean = *pBean;
+				SystemTimePoint & cpptime = *bean.cpptime;
+				t= system_clock::to_time_t(cpptime);
+				if (t != tPre)
+				{
+					struct tm *tmd = localtime(&t);
+					len = strftime(dst, EZLOG_CTIME_MAX_LEN - 1, "%Y-%m-%d %H:%M:%S", tmd);
+#ifdef EZLOG_WITH_MILLISECONDS
+					if (len != 0)
+					{
+						auto since_epoch = cpptime.time_since_epoch();
+						std::chrono::seconds _s = std::chrono::duration_cast<std::chrono::seconds>(since_epoch);
+						since_epoch -= _s;
+						std::chrono::milliseconds milli = std::chrono::duration_cast<std::chrono::milliseconds>(since_epoch);
+						snprintf(dst + len, EZLOG_CTIME_MAX_LEN - 1 - len, ".%03llu", (long long unsigned)milli.count());
+					}
+#endif
+					tPre = t;
+				}
+				else
+				{
+					//time is equal to pre,no need to update
+				}
+				{
+					//it seems that string is faster than snprintf.
+					/*len = EZLOG_PREFIX_RESERVE_LEN + EZLOG_CTIME_MAX_LEN + bean.fileLen;
+					buf = (char*)ezmalloc(len * sizeof(char));
+					snprintf(buf, len, "\n%c tid: %05s [%s] [%s:%u] ", bean.level, bean.tid, ctime, bean.file, bean.line);
+					str += buf;
+					str += *bean.data;
+					ezfree(buf);*/
+					
+					logs = string("\n") + bean.level + " tid: " + bean.tid + " [" + ctime + "] [" + bean.file + ":" + to_string(bean.line) + "] " + *bean.data;
+					str += logs;
+
+				}
+				EzLogBean::DestroyInstance(pBean);
+			}
+
 			_globalCache.pCacheNow=_globalCache.pCacheFront;
 			return str;
 		}
@@ -750,67 +782,7 @@ namespace ezlogspace
 
 #ifdef __________________________________________________EzLogBean__________________________________________________
 
-		EzLogBean *EzLogBean::CreateInstance()
-		{
-			return new EzLogBean();
-		}
 
-		void EzLogBean::DestroyInstance(EzLogBean *p)
-		{
-			ezfree(p->data);
-#ifdef EZLOG_USE_STD_CHRONO
-			delete p->cpptime;
-#endif
-			delete p;
-		}
-
-		EzLogBean *EzLogBean::CreateInstances(size_t count)
-		{
-			return new EzLogBean[count];
-		}
-
-		void EzLogBean::DestroyInstances(EzLogBean *p)
-		{
-			void* pHead=(char*)p- sizeof(size_t);
-			size_t count = (*(size_t *) pHead) / sizeof(EzLogBean);
-			for(EzLogBean* pEnd=p+count;p<pEnd;p++)
-			{
-				DestroyInstance(p);
-			}
-			delete[]p;
-		}
-
-		void *EzLogBean::operator new(size_t size)
-		{
-			return ezmalloc(size);
-		}
-		void *EzLogBean::operator new[](size_t size)
-		{
-			void* pHead= ezmalloc(size+ sizeof(size_t));
-			*(size_t*)pHead=size;
-			return (char*)pHead+ sizeof(size_t);
-		}
-
-		void *EzLogBean::operator new(size_t size, void *pMemory)
-		{
-			return pMemory;
-		}
-
-		void EzLogBean::operator delete(void *p)
-		{
-			ezfree(p);
-		}
-
-		void EzLogBean::operator delete[](void *p)
-		{
-			void* pHead=(char*)p- sizeof(size_t);
-			ezfree(pHead);
-		}
-
-		void EzLogBean::operator delete(void *p, void *pMemory)
-		{
-			return;
-		}
 
 #endif
 	}
@@ -830,6 +802,11 @@ namespace ezlogspace
 	void EzLog::init(EzLoggerPrinter *p_ezLoggerPrinter)
 	{
 		EzLogImpl::init(p_ezLoggerPrinter);
+	}
+
+	void EzLog::pushLog(EzLogStream *p_stream)
+	{
+		EzLogImpl::pushLog(p_stream);
 	}
 
 	void ezlogspace::EzLog::close()
@@ -856,38 +833,6 @@ namespace ezlogspace
 
 #ifdef __________________________________________________EzLogStream__________________________________________________
 
-	EzLogStream::EzLogStream(int32_t lv, uint32_t line,uint32_t fileLen ,const char *file)
-	{
-		if (!EzLog::closed())
-		{
-			m_pHead = EzLogBean::CreateInstance();
-			DEBUG_ASSERT(m_pHead);
-			EzLogBean &bean = *m_pHead;
-			bean.tid = EzLogImpl::tid;
-			bean.file = file;
-			bean.fileLen=fileLen;
-			bean.line = line;
-			bean.level = " FEWIDV"[lv];
-#ifdef EZLOG_USE_STD_CHRONO
-			bean.cpptime = new SystemTimePoint(std::chrono::system_clock::now());
-#else
-			bean.ctime=time(NULL);
-#endif
-		}
-	}
-
-	EzLogStream::~EzLogStream()
-	{
-		if (!EzLog::closed())
-		{
-			string str=this->str();
-			str.push_back('\n');
-			this->m_pHead->data= (char*)ezmalloc(str.size()+1);
-			strcpy(this->m_pHead->data,str.c_str());
-			EzLogImpl::pushLog(this);
-		}
-
-	}
 #endif
 
 

@@ -56,6 +56,11 @@ typedef unsigned long long          uint64_t;
 #define if_constexpr if constexpr
 #endif
 
+#ifndef NDEBUG
+#define DEBUG_CANARY_UINT64(_val_name)  uint64_t _val_name;
+#else
+#define DEBUG_CANARY_UINT64(X)
+#endif
 
 #if !defined NDEBUG && !defined FORCE_DEBUG_PAUSE
 #define DEBUG_PAUSE
