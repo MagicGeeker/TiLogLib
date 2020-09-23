@@ -114,7 +114,7 @@ namespace ezlogspace
 	{
 		class EzLogBean;
 
-		extern thread_local const char *tid;
+		extern thread_local const char *s_tid;
 
 		class EzLogBean : public EzlogObject
 		{
@@ -222,8 +222,6 @@ namespace ezlogspace
 
 		~EzLog();
 
-	private:
-		static thread_local const char *tid;
 	};
 
 #ifdef EZLOG_USE_STD_CHRONO
@@ -232,7 +230,7 @@ namespace ezlogspace
     EzLogBean * m_pHead = EzLogBean::CreateInstance();\
     assert(m_pHead);\
     EzLogBean &bean = *m_pHead;\
-    bean.tid = ezlogspace::internal::tid;\
+    bean.tid = ezlogspace::internal::s_tid;\
     bean.file = __FILE__;\
     bean.fileLen = sizeof(__FILE__)-1;\
     bean.line = __LINE__;\
@@ -246,7 +244,7 @@ namespace ezlogspace
 	EzLogBean * m_pHead = EzLogBean::CreateInstance();\
 	assert(m_pHead);\
 	EzLogBean &bean = *m_pHead;\
-	bean.tid = ezlogspace::internal::tid;\
+	bean.tid = ezlogspace::internal::s_tid;\
 	bean.file = __FILE__;\
 	bean.fileLen = sizeof(__FILE__)-1;\
 	bean.line = __LINE__;\
@@ -261,73 +259,73 @@ namespace ezlogspace
 	public:
 		using EzLogBean = ezlogspace::internal::EzLogBean;
 
-		inline EzLogStream(EzLogBean *pLogBean) : str(*new std::string("")), m_pHead(pLogBean)
+		inline EzLogStream(EzLogBean *pLogBean) : m_str(*new std::string("")), m_pHead(pLogBean)
 		{
 			m_pHead->closed = EzLog::closed();
 		}
 
 		inline  ~EzLogStream()
 		{
-			this->m_pHead->data = &str;
+			this->m_pHead->data = &m_str;
 			EzLog::pushLog(this);
 		}
 
 		inline EzLogStream &operator<<(const char *s)
 		{
-			str += s;
+			m_str += s;
 			return *this;
 		}
 
 		inline EzLogStream &operator<<(const std::string &s)
 		{
-			str += s;
+			m_str += s;
 			return *this;
 		}
 
 		inline EzLogStream &operator<<(std::string &&s)
 		{
-			str += std::move(s);
+			m_str += std::move(s);
 			return *this;
 		}
 
 		inline EzLogStream &operator<<(double s)
 		{
-			str += std::to_string(s);
+			m_str += std::to_string(s);
 			return *this;
 		}
 
 		inline EzLogStream &operator<<(float s)
 		{
-			str += std::to_string(s);
+			m_str += std::to_string(s);
 			return *this;
 		}
 
 		inline EzLogStream &operator<<(uint64_t s)
 		{
-			str += std::to_string(s);
+			m_str += std::to_string(s);
 			return *this;
 		}
 
 		inline EzLogStream &operator<<(int64_t s)
 		{
-			str += std::to_string(s);
+			m_str += std::to_string(s);
 			return *this;
 		}
 
 		inline EzLogStream &operator<<(int32_t s)
 		{
-			str += std::to_string(s);
+			m_str += std::to_string(s);
 			return *this;
 		}
 
 		inline EzLogStream &operator<<(uint32_t s)
 		{
-			str += std::to_string(s);
+			m_str += std::to_string(s);
 			return *this;
 		}
 
 	public:
-		std::string &str;
+		std::string &m_str;
 		EzLogBean *m_pHead;
 	};
 
