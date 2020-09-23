@@ -30,8 +30,8 @@
 #define EZLOG_PREFIX_RESERVE_LEN  30     //reserve for log level,tid ...
 #define EZLOG_SINGLE_LOG_RESERVE_LEN  50     //reserve for every log except for level,tid ...
 
-#define EZLOG_MALLOC_FUNCTION		malloc
-#define EZLOG_FREE_FUNCTION		free
+#define EZLOG_MALLOC_FUNCTION        malloc
+#define EZLOG_FREE_FUNCTION        free
 
 #define EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL   FALSE
 #define EZLOG_LOG_LEVEL    6
@@ -50,11 +50,11 @@ namespace ezlogspace
 	class EzLogMemoryManager
 	{
 	public:
-		template <typename T>
-		static T* NewTrivial()
+		template<typename T>
+		static T *NewTrivial()
 		{
-			static_assert(std::is_trivial<T>::value,"fatal error");
-			return (T*)EZLOG_MALLOC_FUNCTION(sizeof(T));
+			static_assert(std::is_trivial<T>::value, "fatal error");
+			return (T *) EZLOG_MALLOC_FUNCTION(sizeof(T));
 		}
 
 		template<typename T, typename ..._Args>
@@ -71,11 +71,11 @@ namespace ezlogspace
 			EZLOG_FREE_FUNCTION(p);
 		}
 
-		template <typename T>
-		static T* NewTrivialArray(size_t N)
+		template<typename T>
+		static T *NewTrivialArray(size_t N)
 		{
 			static_assert(std::is_trivial<T>::value, "fatal error");
-			return  (T*)EZLOG_MALLOC_FUNCTION(N * sizeof(T));
+			return (T *) EZLOG_MALLOC_FUNCTION(N * sizeof(T));
 		}
 
 		template<typename T, typename ..._Args>
@@ -105,7 +105,7 @@ namespace ezlogspace
 		}
 	};
 
-	class EzlogObject :public EzLogMemoryManager
+	class EzlogObject : public EzLogMemoryManager
 	{
 
 	};
@@ -113,17 +113,19 @@ namespace ezlogspace
 	namespace internal
 	{
 		class EzLogBean;
+
 		extern thread_local const char *tid;
-		class EzLogBean:public EzlogObject
+
+		class EzLogBean : public EzlogObject
 		{
 		public:
 			DEBUG_CANARY_UINT64(flag0)
-			std::string* data;
+			std::string *data;
 			const char *tid;
 			const char *file;
 			DEBUG_CANARY_UINT64(flag1)
 #ifdef EZLOG_USE_STD_CHRONO
-			std::chrono::system_clock::time_point* cpptime;
+			std::chrono::system_clock::time_point *cpptime;
 #else
 			time_t ctime;
 #endif
@@ -134,7 +136,7 @@ namespace ezlogspace
 			DEBUG_CANARY_UINT64(flag2)
 
 		public:
-			inline static EzLogBean* CreateInstance()
+			inline static EzLogBean *CreateInstance()
 			{
 				return NewTrivial<EzLogBean>();
 			}
@@ -156,6 +158,7 @@ namespace ezlogspace
 			}
 
 #else
+
 			inline static void DestroyInstance(EzLogBean *p)
 			{
 				Delete(p->data);
@@ -164,13 +167,16 @@ namespace ezlogspace
 #endif
 				Delete(p);
 			}
+
 #endif
 		};
+
 		static_assert(std::is_pod<EzLogBean>::value, "EzLogBean not pod!");
 	}
 
 	class EzLogStream;
-	class EzLoggerPrinter :public EzlogObject
+
+	class EzLoggerPrinter : public EzlogObject
 	{
 	public:
 		virtual void onAcceptLogs(const char *const logs) = 0;
@@ -205,7 +211,7 @@ namespace ezlogspace
 
 		static EzLoggerPrinter *getDefaultFileLoggerPrinter();
 
-		static void pushLog(EzLogStream* p_stream);
+		static void pushLog(EzLogStream *p_stream);
 
 		static void close();
 
@@ -250,7 +256,7 @@ namespace ezlogspace
 }()
 #endif
 
-	class  EzLogStream :public EzlogObject
+	class EzLogStream : public EzlogObject
 	{
 	public:
 		using EzLogBean = ezlogspace::internal::EzLogBean;
@@ -266,7 +272,7 @@ namespace ezlogspace
 			EzLog::pushLog(this);
 		}
 
-		inline EzLogStream &operator<<(const char * s)
+		inline EzLogStream &operator<<(const char *s)
 		{
 			str += s;
 			return *this;
@@ -283,31 +289,37 @@ namespace ezlogspace
 			str += std::move(s);
 			return *this;
 		}
+
 		inline EzLogStream &operator<<(double s)
 		{
 			str += std::to_string(s);
 			return *this;
 		}
+
 		inline EzLogStream &operator<<(float s)
 		{
 			str += std::to_string(s);
 			return *this;
 		}
+
 		inline EzLogStream &operator<<(uint64_t s)
 		{
 			str += std::to_string(s);
 			return *this;
 		}
+
 		inline EzLogStream &operator<<(int64_t s)
 		{
 			str += std::to_string(s);
 			return *this;
 		}
+
 		inline EzLogStream &operator<<(int32_t s)
 		{
 			str += std::to_string(s);
 			return *this;
 		}
+
 		inline EzLogStream &operator<<(uint32_t s)
 		{
 			str += std::to_string(s);
@@ -315,8 +327,8 @@ namespace ezlogspace
 		}
 
 	public:
-		std::string& str;
-		EzLogBean* m_pHead;
+		std::string &str;
+		EzLogBean *m_pHead;
 	};
 
 	class EzNoLogStream
@@ -351,7 +363,8 @@ namespace ezlogspace
 
 static_assert(EZLOG_GLOBAL_QUEUE_MAX_SIZE > 0, "fatal err!");
 static_assert(EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE > 0, "fatal err!");
-static_assert(EZLOG_GLOBAL_QUEUE_MAX_SIZE >= 2 * EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE, "fatal err!");   //see func moveLocalCacheToGlobal
+static_assert(EZLOG_GLOBAL_QUEUE_MAX_SIZE >= 2 * EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE,
+			  "fatal err!");   //see func moveLocalCacheToGlobal
 
 
 //if not support dynamic log level
