@@ -3,5 +3,4 @@ aux_source_directory(. DIR_LIB_SRCS)
 add_library(EzLog ${DIR_LIB_SRCS} )
 
 add_dependencies(EzLog IUtils)
-add_dependencies(EzLog filesystem)
 target_link_libraries(EzLog PUBLIC IUtils)
