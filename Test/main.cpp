@@ -28,8 +28,8 @@ int main()
 	EZLOGI << "10 threads 1M loops test";
 	constexpr uint64_t loops = 10000 + (1 << 20);
 #else
-	EZLOGI << "10 threads 1k loops test";
-	constexpr uint64_t loops = 10000 + (1 << 16);
+	EZLOGI << "10 threads 128*1k loops test";
+	constexpr uint64_t loops = 10000 + 128*(1 << 10);
 #endif
 	constexpr int32_t threads = 10;
 
@@ -41,7 +41,7 @@ int main()
 
 	std::vector<std::thread> vec;
 
-	for (int i = 1; i <= 10; i++)
+	for (int i = 1; i <= threads; i++)
 	{
 		vec.emplace_back(thread([&](int index) -> void {
 			shared_lock<shared_mutex> slck(smtx);
@@ -62,9 +62,9 @@ int main()
 	{
 		th.join();
 	}
-	uint64_t ms = s1m.GetMillisecondsUpToNOW();
-	EZLOGI << (1000 * threads * loops / ms) << " logs per second";
-	EZLOGI << 1.0 * ms / (loops * threads) << " milliseconds per log";
+	uint64_t us = s1m.GetMicrosecondsUpToNOW();
+	EZCOUT << (1000 * threads * loops / us) << " logs per millisecond\n";
+	EZCOUT << 1.0 * us / (loops * threads) << " us per log\n";
 }
 
 #endif
