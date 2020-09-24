@@ -16,6 +16,9 @@
 #include<type_traits>
 
 #include "../IUtils/idef.h"
+#include "../outlibs/sse/sse2.h"
+#include "../outlibs/miloyip/dtoa_milo.h"
+#include "../outlibs/ftoa-fast/ftoa.h"
 
 /**************************************************MACRO FOR USER**************************************************/
 #define    EZLOG_USE_STD_CHRONO  0x01
@@ -31,6 +34,7 @@
 #define EZLOG_SINGLE_LOG_RESERVE_LEN  50     //reserve for every log except for level,tid ...
 
 #define EZLOG_MALLOC_FUNCTION        malloc
+#define EZLOG_REALLOC_FUNCTION        realloc
 #define EZLOG_FREE_FUNCTION        free
 
 #define EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL   FALSE
@@ -110,17 +114,294 @@ namespace ezlogspace
 
 	};
 
+    constexpr size_t EZLOG_UINT32_MAX_CHAR_LEN= (10+1);
+    constexpr size_t EZLOG_INT32_MAX_CHAR_LEN =(11+1);
+    constexpr size_t EZLOG_UINT64_MAX_CHAR_LEN= (20+1);
+    constexpr size_t EZLOG_INT64_MAX_CHAR_LEN =(20+1);
+    constexpr size_t EZLOG_DOUBLE_MAX_CHAR_LEN =(25+1); //TODO
+    constexpr size_t EZLOG_FLOAT_MAX_CHAR_LEN =(25+1);  //TODO
+
+    class EzLogStream;
 	namespace internal
 	{
 		class EzLogBean;
 
 		extern thread_local const char *s_tid;
 
-		class EzLogBean : public EzlogObject
+        //notice! For faster in append and etc, this is not always end with '\0'
+        //if you want to use c-style on this object, such as strlen(&this->front())
+        //you must call data() function before to ensure end with the '\0'
+        class EzlogString
+        {
+            friend class ezlogspace::EzLogStream;
+
+        public:
+            enum class EzlogStringEnum
+            {
+                DEFAULT = 0
+            };
+
+            ~EzlogString()
+            {
+                assert(m_front <= m_end);
+                assert(m_end <= m_cap);
+                EZLOG_FREE_FUNCTION(m_front);
+            }
+
+            //init with capacity n and front in address if not null
+            inline EzlogString(size_t n, EzlogStringEnum)
+            {
+                m_front = (char *) EZLOG_MALLOC_FUNCTION(n);
+                m_end = m_front;
+                m_cap = m_front + n;
+            }
+
+            //length without '\0'
+            inline EzlogString(const char *s, size_t length)
+            {
+                size_t cap = (size_t) (1 + RESERVE_RATE * length);
+                m_front = (char *) EZLOG_MALLOC_FUNCTION(cap);
+                memcpy(m_front, s, length);
+                m_end = m_front + length;
+                m_cap = m_front + cap;
+                assert(m_cap >= m_end);
+            }
+
+            inline operator std::string() const
+            {
+                return std::string(m_front, size());
+            }
+
+            inline size_t size() const
+            {
+                return m_end - m_front;
+            }
+
+            inline size_t capacity() const
+            {
+                return m_cap - m_front;
+            }
+
+            inline const char &front() const
+            {
+                return *m_front;
+            }
+
+            inline char &front()
+            {
+                return *m_front;
+            }
+
+            inline const char &operator[](size_t index) const
+            {
+                return m_front[index];
+            }
+
+            inline char &operator[](size_t index)
+            {
+                return m_front[index];
+            }
+
+
+            inline const char *data() const
+            {
+                *m_end = '\0';
+                return m_front;
+            }
+
+            inline EzlogString &append(char c)
+            {
+                ensureCap(size_with_zero() + sizeof(char));
+                *m_end++ = c;
+                return *this;
+            }
+
+            inline EzlogString &append(unsigned char c)
+            {
+                ensureCap(size_with_zero() + sizeof(char));
+                *m_end++ = c;
+                return *this;
+            }
+
+            inline EzlogString &append(const char *cstr)
+            {
+                uint32_t length = strlen(cstr);
+                return append(cstr, length);
+            }
+
+            inline EzlogString &append(const char *cstr, size_t length)
+            {
+                ensureCap(size_with_zero() + length);
+                memcpy(m_end, cstr, length);
+                m_end += length;
+                return *this;
+            }
+
+            inline EzlogString &append(const std::string &str)
+            {
+                size_t length = str.length();
+                ensureCap(size_with_zero() + length);
+                memcpy(m_end, str.data(), length);
+                m_end += length;
+                return *this;
+            }
+
+            inline EzlogString &operator+=(char c)
+            {
+                return append(c);
+            }
+
+            inline EzlogString &operator+=(unsigned char c)
+            {
+                return append(c);
+            }
+
+            inline EzlogString &operator+=(const char *cstr)
+            {
+                return append(cstr);
+            }
+
+            inline EzlogString &operator+=(const std::string &str)
+            {
+                return append(str);
+            }
+
+            inline EzlogString &append_unsafe(char c)
+            {
+                *m_end++ = c;
+                return *this;
+            }
+
+            inline EzlogString &append_unsafe(unsigned c)
+            {
+                *m_end++ = c;
+                return *this;
+            }
+
+            inline void reserve(size_t size)
+            {
+                ensureCap(size);
+            }
+
+            inline void resize(size_t size)
+            {
+                ensureCap(size);
+                m_end = m_front + size;
+            }
+
+            inline void operator=(const std::string &str)
+            {
+                resize(0);
+                append(str.data(), str.size());
+            }
+
+            inline void operator=(const EzlogString &str)
+            {
+                resize(0);
+                append(str.data(), str.size());
+            }
+
+        public:
+            inline EzlogString &operator+=(uint64_t x)
+            {
+                ensureCap(size() + EZLOG_UINT64_MAX_CHAR_LEN);
+                u64toa_sse2(x, m_end);
+                size_t off = strlen(m_end);
+                m_end += off;
+                return *this;
+            }
+
+            inline EzlogString &operator+=(int64_t x)
+            {
+                ensureCap(size() + EZLOG_INT64_MAX_CHAR_LEN);
+                i64toa_sse2(x, m_end);
+                size_t off = strlen(m_end);
+                m_end += off;
+                return *this;
+            }
+
+            inline EzlogString &operator+=(uint32_t x)
+            {
+                ensureCap(size() + EZLOG_UINT32_MAX_CHAR_LEN);
+                u32toa_sse2(x, m_end);
+                size_t off = strlen(m_end);
+                m_end += off;
+                return *this;
+            }
+
+            inline EzlogString &operator+=(int32_t x)
+            {
+                ensureCap(size() + EZLOG_UINT32_MAX_CHAR_LEN);
+                i32toa_sse2(x, m_end);
+                size_t off = strlen(m_end);
+                m_end += off;
+                return *this;
+            }
+
+            inline EzlogString &operator+=(double x)
+            {
+                ensureCap(size() + EZLOG_DOUBLE_MAX_CHAR_LEN);
+                dtoa_milo(x, m_end);
+                size_t off = strlen(m_end);
+                m_end += off;
+                return *this;
+            }
+
+            inline EzlogString &operator+=(float x)
+            {
+//                ensureCap(size()+EZLOG_FLOAT_MAX_CHAR_LEN);
+//                dtoa_milo((double)x,m_end);
+//                size_t off=strlen(m_end);
+//                m_end+=off;
+                ensureCap(size() + EZLOG_FLOAT_MAX_CHAR_LEN);
+                size_t off = ftoa(m_end, x, NULL);
+                m_end += off;
+                return *this;
+            }
+
+        protected:
+            inline size_t size_with_zero()
+            {
+                return size() + sizeof(char);
+            }
+
+            inline void ensureCap(size_t ensure_cap)
+            {
+                size_t pre_cap = capacity();
+                if (pre_cap >= ensure_cap)
+                {
+                    return;
+                }
+                size_t pre_size = size();
+
+                size_t new_cap = (size_t) (RESERVE_RATE * ensure_cap);
+                char *pRealloc = (char *) EZLOG_REALLOC_FUNCTION(m_front, new_cap);
+                assert(pRealloc);
+                m_front = pRealloc;
+                m_end = m_front + pre_size;
+                m_cap = m_front + new_cap;
+            }
+
+
+        private:
+            constexpr static float RESERVE_RATE = 2.0;
+            char *m_front = nullptr; //front of c-style str
+            char *m_end;    // the next of the last char of c-style str,
+            char *m_cap;    // the next of buf end,
+
+            static_assert(RESERVE_RATE >= 1.0, "fatal error, see constructor capacity must bigger than length");
+        };
+
+        inline std::string operator+(const std::string& lhs,const EzlogString& rhs)
+        {
+            return std::string(lhs+rhs.data());
+        }
+
+        class EzLogBean : public EzlogObject
 		{
 		public:
 			DEBUG_CANARY_UINT64(flag0)
-			std::string *data;
+            EzlogString *data;
 			const char *tid;
 			const char *file;
 			DEBUG_CANARY_UINT64(flag1)
@@ -254,17 +535,22 @@ namespace ezlogspace
 }()
 #endif
 
+
+
 	class EzLogStream : public EzlogObject
 	{
 	public:
 		using EzLogBean = ezlogspace::internal::EzLogBean;
+		using EzlogString =ezlogspace::internal::EzlogString;
 
-		inline EzLogStream(EzLogBean *pLogBean) : m_str(*new std::string("")), m_pHead(pLogBean)
-		{
-			m_pHead->closed = EzLog::closed();
-		}
+        inline EzLogStream(EzLogBean *pLogBean) :
+            m_str(*New<EzlogString>(EZLOG_SINGLE_LOG_RESERVE_LEN, EzlogString::EzlogStringEnum::DEFAULT)),
+            m_pHead(pLogBean)
+        {
+            m_pHead->closed = EzLog::closed();
+        }
 
-		inline  ~EzLogStream()
+        inline  ~EzLogStream()
 		{
 			this->m_pHead->data = &m_str;
 			EzLog::pushLog(this);
@@ -275,6 +561,18 @@ namespace ezlogspace
 			m_str += s;
 			return *this;
 		}
+
+        inline EzLogStream &operator<<(char c)
+        {
+            m_str += c;
+            return *this;
+        }
+
+        inline EzLogStream &operator<<(unsigned char c)
+        {
+            m_str += c;
+            return *this;
+        }
 
 		inline EzLogStream &operator<<(const std::string &s)
 		{
@@ -290,42 +588,42 @@ namespace ezlogspace
 
 		inline EzLogStream &operator<<(double s)
 		{
-			m_str += std::to_string(s);
+			m_str += s;
 			return *this;
 		}
 
 		inline EzLogStream &operator<<(float s)
 		{
-			m_str += std::to_string(s);
+			m_str += s;
 			return *this;
 		}
 
 		inline EzLogStream &operator<<(uint64_t s)
 		{
-			m_str += std::to_string(s);
-			return *this;
-		}
+            m_str += s;
+            return *this;
+        }
 
 		inline EzLogStream &operator<<(int64_t s)
 		{
-			m_str += std::to_string(s);
-			return *this;
+            m_str += s;
+            return *this;
 		}
 
 		inline EzLogStream &operator<<(int32_t s)
 		{
-			m_str += std::to_string(s);
-			return *this;
+            m_str += s;
+            return *this;
 		}
 
 		inline EzLogStream &operator<<(uint32_t s)
 		{
-			m_str += std::to_string(s);
-			return *this;
+            m_str += s;
+            return *this;
 		}
 
 	public:
-		std::string &m_str;
+		EzlogString &m_str;
 		EzLogBean *m_pHead;
 	};
 
