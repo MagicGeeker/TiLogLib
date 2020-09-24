@@ -1,6 +1,6 @@
+#include<math.h>
 #include "inc.h"
 #include "SimpleTimer.h"
-
 using namespace std;
 using namespace ezlogspace;
 #if USE_CATCH_TEST == TRUE
@@ -16,8 +16,24 @@ using namespace ezlogspace;
 //#define file_many_thread_log_test_____________________
 //#define file_time_many_thread_log_test_with_sleep_____________________
 //#define file_time_multi_thread_simulation__log_test_____________________
-#define file_single_thread_benchmark_test_____________________
-//#define file_multi_thread_benchmark_test_____________________
+//#define file_single_thread_benchmark_test_____________________
+#define file_multi_thread_benchmark_test_____________________
+
+
+uint64_t complexCalFunc(uint64_t x)
+{
+	static int a = 0;
+
+	double m = 0;
+	for (int i = 1; i <= 100; i++)
+	{
+		double m1 = sin(x+i);
+		double m2 = log10(x+i);
+		double m3 = rand() % 1000;
+		m += (m1 + m2 + m3);
+	}
+	return m;
+}
 
 
 #ifdef single_thread_log_test_____________________
@@ -218,25 +234,46 @@ TEST_CASE("file_time_multi_thread_simulation__log_test_____________________")
 	EzLog::init(EzLog::getDefaultFileLoggerPrinter());
 
 	EZLOGI << "file_time_multi_thread_simulation__log_test_____________________";
+	srand(0);
+
+	const uint32_t LOOPS = 40000;
+	const uint32_t threads = 1;
+	uint64_t nano0;
+	uint64_t nano1;
+	double rate = 15;
+	{	
+		SimpleTimer s0;
+		uint64_t xxx=0;
+		for (int loops = LOOPS; loops; loops--)
+		{
+			//do something cost 20ms,and log once
+			//this_thread::sleep_for(std::chrono::milliseconds(1));
+			xxx += complexCalFunc(loops);
+		}
+		nano0 = s0.GetNanosecondsUpToNOW();
+		EZCOUT << "each " << 1.0*nano0 / LOOPS <<" ns\n";
+	}
+
 	SimpleTimer s;
 
 	static bool begin = false;
 	static condition_variable_any cva;
 	static shared_mutex smtx;
-
+	static uint64_t m=0;
 	std::vector<std::thread> vec;
 
-	for (int i = 1; i <= 10; i++)
+	for (int i = 1; i <= threads; i++)
 	{
 		vec.emplace_back(thread([&](int index) -> void {
 			int a = 0;
 			shared_lock<shared_mutex> slck(smtx);
 			cva.wait(slck, []() -> bool { return begin; });
 
-			for (int loops = 500; loops; loops--)
+			for (int loops = rate * LOOPS; loops; loops--)
 			{
 				//do something cost 20ms,and log once
-				this_thread::sleep_for(std::chrono::milliseconds(20));
+				//this_thread::sleep_for(std::chrono::milliseconds(1));
+				m+=complexCalFunc(loops);
 				EZLOGD << "LOGD thr " << index << " loop " << loops << " " << &a;
 			}
 		}, i));
@@ -249,6 +286,10 @@ TEST_CASE("file_time_multi_thread_simulation__log_test_____________________")
 	{
 		th.join();
 	}
+	EZCOUT << "m= " << m<<"\n";
+
+	nano1 = s.GetNanosecondsUpToNOW();
+	EZCOUT << "nano1/nano0= " <<  nano1 /(rate*nano0) << "\n";
 }
 
 #endif
@@ -260,7 +301,7 @@ TEST_CASE("file_single_thread_benchmark_test_____________________")
 {
 	EZLOGI << "file_single_thread_benchmark_test_____________________";
 #ifdef NDEBUG
-	constexpr uint64_t loops = (1 << 20);
+	constexpr uint64_t loops = (1 << 22);
 	EZLOGI << "1M loops test";
 #else
 	constexpr uint64_t loops = (1 << 10);
@@ -288,8 +329,8 @@ TEST_CASE("file_multi_thread_benchmark_test_____________________")
 	EZLOGI << "10 threads 1M loops test";
 	constexpr uint64_t loops = 10000 + (1 << 20);
 #else
-	EZLOGI << "10 threads 1k loops test";
-	constexpr uint64_t loops = 10000 + (1 << 16);
+	EZLOGI << "10 threads 128*1k loops test";
+	constexpr uint64_t loops = 10000 + 128*(1 << 10);
 #endif
 	constexpr int32_t threads = 10;
 
@@ -301,7 +342,7 @@ TEST_CASE("file_multi_thread_benchmark_test_____________________")
 
 	std::vector<std::thread> vec;
 
-	for (int i = 1; i <= 10; i++)
+	for (int i = 1; i <= threads; i++)
 	{
 		vec.emplace_back(thread([&](int index) -> void {
 			shared_lock<shared_mutex> slck(smtx);
@@ -322,9 +363,9 @@ TEST_CASE("file_multi_thread_benchmark_test_____________________")
 	{
 		th.join();
 	}
-	uint64_t ms = s1m.GetMillisecondsUpToNOW();
-	EZLOGI << (1000 * threads * loops / ms) << " logs per second";
-	EZLOGI << 1.0 * ms / (loops * threads) << " milliseconds per log";
+	uint64_t us = s1m.GetMicrosecondsUpToNOW();
+	EZCOUT << (1000 * threads * loops / us) << " logs per millisecond\n";
+	EZCOUT << 1.0 * us / (loops * threads) << " us per log\n";
 }
 
 #endif
