@@ -661,7 +661,11 @@ namespace ezlogspace
 		{
 			bool operator()(const EzLogBean *const lhs, const EzLogBean *const rhs) const
 			{
+#ifdef EZLOG_USE_STD_CHRONO
 				return *lhs->cpptime < *rhs->cpptime;
+#else
+                return lhs->ctime < rhs->ctime;
+#endif
 			}
 		};
 

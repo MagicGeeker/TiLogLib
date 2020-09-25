@@ -49,6 +49,8 @@
 #define       EZLOG_LEVEL_INFO    4
 #define       EZLOG_LEVEL_DEBUG    5
 #define       EZLOG_LEVEL_VERBOSE    6
+
+#define      EZLOG_TIME_T_IS_64BIT  TRUE
 /**************************************************MACRO FOR USER**************************************************/
 
 
@@ -131,7 +133,7 @@ namespace ezlogspace
 	{
 		class EzLogBean;
 		class EzLogStringInternal;
-		using EzLogString=EzLogStringInternal; //can also use std::string
+		using EzLogString=EzLogStringInternal;
 
 		extern thread_local const char *s_tid;
 
@@ -301,7 +303,7 @@ namespace ezlogspace
 				{
 					if(m_end>=m_cap)
 					{
-						ensureCap(RESERVE_RATE * capacity());
+                        ensureCap(capacity());
 						m_end = m_front + off;
 					}
 					*m_end=*p;
@@ -562,7 +564,8 @@ namespace ezlogspace
             inline void ensureCap(size_t ensure_cap)
             {
                 size_t pre_cap = capacity();
-				size_t new_cap = (size_t)(1 + ensure_cap);  //for '\0'
+                size_t new_cap = 1 + ((ensure_cap * RESERVE_RATE_DEFAULT) >> RESERVE_RATE_BASE);
+                //reserve 1 for '\0',you must ensure (ensure_cap * RESERVE_RATE_DEFAULT) will not over-flow
 
 				if (pre_cap >= new_cap)
                 {
@@ -606,12 +609,13 @@ namespace ezlogspace
 
         private:
 			constexpr static size_t DEFAULT_CAPACITY = 32;
-			constexpr static float RESERVE_RATE = 2.0;
+			constexpr static uint32_t RESERVE_RATE_DEFAULT = 16;
+			constexpr static uint32_t RESERVE_RATE_BASE = 3;
             char *m_front = nullptr; //front of c-style str
             char *m_end;    // the next of the last char of c-style str,
             char *m_cap;    // the next of buf end,
 
-            static_assert(RESERVE_RATE >= 1.0, "fatal error, see constructor capacity must bigger than length");
+            static_assert((RESERVE_RATE_DEFAULT>>RESERVE_RATE_BASE) >= 1, "fatal error, see constructor capacity must bigger than length");
         };
 
 		inline std::ostream &operator<<(std::ostream &os, const EzLogStringInternal &internal)
@@ -625,21 +629,21 @@ namespace ezlogspace
 		}
 
 		template<typename T, typename= typename std::enable_if<std::is_arithmetic<T>::value, void>::type>
-		inline EzLogString operator+(EzLogString &&lhs, T rhs)
+		inline EzLogStringInternal operator+(EzLogStringInternal &&lhs, T rhs)
 		{
 			return std::move(lhs += rhs);
 		}
 
-		inline EzLogString operator+(EzLogString &&lhs, EzLogString & rhs)
+		inline EzLogStringInternal operator+(EzLogStringInternal &&lhs, EzLogStringInternal & rhs)
 		{
 			return std::move(lhs += rhs);
 		}
-		inline EzLogString operator+(EzLogString &&lhs, EzLogString && rhs)
+		inline EzLogStringInternal operator+(EzLogStringInternal &&lhs, EzLogStringInternal && rhs)
 		{
 			return std::move(lhs += rhs);
 		}
 
-		inline EzLogString operator+(EzLogString &&lhs, const char* rhs)
+		inline EzLogStringInternal operator+(EzLogStringInternal &&lhs, const char* rhs)
 		{
 			return std::move(lhs += rhs);
 		}
@@ -648,17 +652,21 @@ namespace ezlogspace
 		{
 		public:
 			DEBUG_CANARY_UINT64(flag0)
+#if (defined( EZLOG_USE_CTIME)) && (defined(EZLOG_TIME_T_IS_64BIT))
+			time_t ctime;
+#endif
 			EzLogString *data;
 			const char *tid;
 			const char *file;
 			DEBUG_CANARY_UINT64(flag1)
 #ifdef EZLOG_USE_STD_CHRONO
 			std::chrono::system_clock::time_point *cpptime;
-#else
+#endif
+#if (defined( EZLOG_USE_CTIME)) && (!defined(EZLOG_TIME_T_IS_64BIT))
 			time_t ctime;
 #endif
-			uint32_t fileLen;
-			uint32_t line;
+			uint16_t line;
+			uint16_t fileLen;
 			char level;
 			bool toTernimal;
 			bool closed;
@@ -763,8 +771,10 @@ namespace ezlogspace
     EzLogBean &bean = *m_pHead;\
     bean.tid = ezlogspace::internal::s_tid;\
     bean.file = __FILE__;\
-    bean.fileLen = sizeof(__FILE__)-1;\
-    bean.line = __LINE__;\
+   	static_assert(__LINE__<=UINT16_MAX,"fatal error,file line too big");\
+	static_assert(sizeof(__FILE__)-1<=UINT16_MAX,"fatal error,file path is too long");\
+	bean.fileLen = (uint16_t)(sizeof(__FILE__)-1);\
+	bean.line = (uint16_t)(__LINE__);\
     bean.level = ((char*)ezlogspace::LOG_PREFIX)[lv];\
 	bean.toTernimal=lv==EZLOG_LEVEL_COUT;\
     bean.cpptime = new std::chrono::system_clock::time_point(std::chrono::system_clock::now());\
@@ -778,8 +788,10 @@ namespace ezlogspace
 	EzLogBean &bean = *m_pHead;\
 	bean.tid = ezlogspace::internal::s_tid;\
 	bean.file = __FILE__;\
-	bean.fileLen = sizeof(__FILE__)-1;\
-	bean.line = __LINE__;\
+	static_assert(__LINE__<=UINT16_MAX,"fatal error,file line too big");\
+	static_assert(sizeof(__FILE__)-1<=UINT16_MAX,"fatal error,file path is too long");\
+	bean.fileLen = (uint16_t)(sizeof(__FILE__)-1);\
+	bean.line = (uint16_t)(__LINE__);\
 	bean.level = ((char*)ezlogspace::LOG_PREFIX)[lv];\
 	bean.toTernimal=lv==EZLOG_LEVEL_COUT;\
 	bean.ctime = time(NULL);\
