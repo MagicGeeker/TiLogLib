@@ -17,7 +17,8 @@ using namespace ezlogspace;
 //#define file_time_many_thread_log_test_with_sleep_____________________
 //#define file_time_multi_thread_simulation__log_test_____________________
 //#define file_single_thread_benchmark_test_____________________
-#define file_multi_thread_benchmark_test_____________________
+//#define file_multi_thread_benchmark_test_____________________
+#define file_multi_thread_close_print_benchmark_test_____________________
 
 
 uint64_t complexCalFunc(uint64_t x)
@@ -369,5 +370,64 @@ TEST_CASE("file_multi_thread_benchmark_test_____________________")
 }
 
 #endif
+
+
+#ifdef file_multi_thread_close_print_benchmark_test_____________________
+
+TEST_CASE("file_multi_thread_close_print_benchmark_test_____________________")
+{
+	EZLOGI << "file_multi_thread_close_print_benchmark_test_____________________";
+#ifdef NDEBUG
+	constexpr uint64_t loops = 10000 + 8*(1 << 20);
+#else
+	EZLOGI << "10 threads 128*1k loops test";
+	constexpr uint64_t loops = 10000 + 128*(1 << 10);
+#endif
+	constexpr int32_t threads = 10;
+
+	SimpleTimer s1m;
+
+	static bool begin = false;
+	static condition_variable_any cva;
+	static shared_mutex smtx;
+
+	std::vector<std::thread> vec;
+
+	for (int i = 1; i <= threads; i++)
+	{
+		vec.emplace_back(thread([&](int index) -> void {
+			shared_lock<shared_mutex> slck(smtx);
+			cva.wait(slck, []() -> bool { return begin; });
+
+			for (uint64_t j = 0; j < loops; j++)
+			{
+				EZLOGD << "index= " << index << " j= " << j ;
+				if(j==loops/4)
+				{
+					EzLog::setState(ezlogspace::CLOSED);
+				}
+				if(j==loops*3/4)
+				{
+					EzLog::setState(ezlogspace::OPEN);
+				}
+			}
+		}, i));
+	}
+
+	unique_lock<shared_mutex> ulk(smtx);
+	begin = true;
+	ulk.unlock();
+	cva.notify_all();
+	for (auto &th : vec)
+	{
+		th.join();
+	}
+	uint64_t us = s1m.GetMicrosecondsUpToNOW();
+	EZCOUT << (1000.0 * EzLog::getPrintedLogs() / us) << " logs per millisecond\n";
+	EZCOUT << 1.0 * us / (EzLog::getPrintedLogs()) << " us per log\n";
+}
+
+#endif
+
 
 #endif
