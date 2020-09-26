@@ -249,7 +249,6 @@ namespace ezlogspace
 
 			static size_t s_printedStringLength;
 			static EzLogString s_global_cache_string;
-			static std::vector<EzLogBean *> s_sortedBeanVec;
 
 			static std::mutex s_mtxMerge;
 			static std::condition_variable s_cvMerge;
@@ -528,7 +527,6 @@ namespace ezlogspace
 		thread_local bool EZlogOutputThread::s_thread_init = InitForEveryThread();
 		size_t EZlogOutputThread::s_printedStringLength = 0;
 		EzLogString EZlogOutputThread::s_global_cache_string;
-		std::vector<EzLogBean *> EZlogOutputThread::s_sortedBeanVec;
 
 		std::mutex EZlogOutputThread::s_mtxMerge;
 		std::condition_variable EZlogOutputThread::s_cvMerge;
@@ -597,7 +595,6 @@ namespace ezlogspace
 			lock_guard<mutex> lgd_print(s_mtxPrinter);
 			std::ios::sync_with_stdio(false);
 			s_global_cache_string.reserve((size_t) (EZLOG_GLOBAL_BUF_SIZE * 1.2));
-			s_sortedBeanVec.reserve((size_t) (EZLOG_GLOBAL_QUEUE_MAX_SIZE * 1.2));
 			atexit(AtExit);
 			s_inited = true;
 			return true;
@@ -632,7 +629,7 @@ namespace ezlogspace
 
 		void EZlogOutputThread::pushLog(const EzLogStream *logs)
 		{
-			bool isLocalFull = localCircularQueuePushBack(logs->m_pHead);
+			bool isLocalFull = localCircularQueuePushBack(EzLogBean::GetThisFromData(&logs->m_str));
 			if (isLocalFull)
 			{
 				std::unique_lock<std::mutex> lk(s_mtxMerge);
@@ -662,7 +659,7 @@ namespace ezlogspace
 			bool operator()(const EzLogBean *const lhs, const EzLogBean *const rhs) const
 			{
 #ifdef EZLOG_USE_STD_CHRONO
-				return *lhs->cpptime < *rhs->cpptime;
+				return lhs->cpptime() < rhs->cpptime();
 #else
                 return lhs->ctime < rhs->ctime;
 #endif
@@ -674,26 +671,6 @@ namespace ezlogspace
 			using namespace std::chrono;
 
 			EzLogString &str = s_global_cache_string;
-
-//			s_sortedBeanVec.resize(0);
-//			for (EzLogBean **ppBean = s_globalCache.pCacheFront; ppBean < s_globalCache.pCacheNow; ppBean++)
-//			{
-//				DEBUG_ASSERT(ppBean != nullptr && *ppBean != nullptr);
-//				EzLogBean *pBean = *ppBean;
-//				EzLogBean &bean = **ppBean;
-//				DEBUG_ASSERT1(bean.cpptime != nullptr, bean.cpptime);
-//				DEBUG_ASSERT1(bean.data != nullptr, bean.data);
-//				DEBUG_ASSERT1(bean.file != nullptr, bean.file);
-//
-//				//*bean.cpptime = time_point_cast<milliseconds>(*bean.cpptime);
-//				s_sortedBeanVec.emplace_back(pBean);
-//			}
-//			std::sort(s_sortedBeanVec.begin(), s_sortedBeanVec.end(), EzlogBeanComp());
-//			for (EzLogBean * pBean : s_sortedBeanVec)
-//			{
-//				*pBean->cpptime = time_point_cast<milliseconds>(*pBean->cpptime);;
-//			}
-
 			std::sort(s_globalCache.pCacheFront,s_globalCache.pCacheNow,EzlogBeanComp());
 
 			char ctime[EZLOG_CTIME_MAX_LEN] = {0};
@@ -701,35 +678,32 @@ namespace ezlogspace
 			time_t tPre = 0;
 			time_t t = 0;
 			size_t len;
-			char *buf;
 			EzLogString logs;
 			//logs.reserve(EZLOG_SINGLE_LOG_STRING_FULL_RESERVER_LEN);
 
-//			for (EzLogBean *pBean : s_sortedBeanVec)
 			for (EzLogBean **ppBean = s_globalCache.pCacheFront; ppBean < s_globalCache.pCacheNow; ppBean++)
 			{
 				DEBUG_ASSERT(ppBean != nullptr && *ppBean != nullptr);
 				EzLogBean *pBean = *ppBean;
 				EzLogBean &bean = **ppBean;
-				DEBUG_ASSERT1(bean.cpptime != nullptr, bean.cpptime);
-				DEBUG_ASSERT1(bean.data != nullptr, bean.data);
+				DEBUG_ASSERT1(&bean.data() != nullptr, &bean.data());
 				DEBUG_ASSERT1(bean.file != nullptr, bean.file);
 
-//				EzLogBean &bean = *pBean;
 #ifdef EZLOG_USE_STD_CHRONO
-
+				DEBUG_ASSERT1(&bean.cpptime() != nullptr, &bean.cpptime());
 #ifdef EZLOG_WITH_MILLISECONDS
-				*bean.cpptime=time_point_cast<milliseconds>(*bean.cpptime);
+				bean.cpptime()=time_point_cast<milliseconds>(bean.cpptime());
 #else
 				*bean.cpptime=time_point_cast<seconds>(*bean.cpptime);
 #endif
-				SystemTimePoint &cpptime = *bean.cpptime;
+				SystemTimePoint &cpptime = bean.cpptime();
 				t = system_clock::to_time_t(cpptime);
 #else  //time_t
 				t=bean.ctime;
 #endif
 				if (t != tPre)
 				{
+					tPre = t;
 					struct tm *tmd = localtime(&t);
 					len = strftime(dst, EZLOG_CTIME_MAX_LEN - 1, "%Y-%m-%d %H:%M:%S", tmd);
 #if defined(EZLOG_WITH_MILLISECONDS) && defined(EZLOG_USE_STD_CHRONO)
@@ -742,28 +716,19 @@ namespace ezlogspace
 								since_epoch);
 						snprintf(dst + len, EZLOG_CTIME_MAX_LEN - 1 - len, ".%03llu",
 								 (long long unsigned) milli.count());
+					} else
+					{
+						//this ctimestr is invalid
+						tPre = (time_t) (-1);
 					}
 #endif
-					tPre = t;
 				} else
 				{
 					//time is equal to pre,no need to update
 				}
 				{
-					//it seems that string is faster than snprintf.
-					/*len = EZLOG_PREFIX_RESERVE_LEN + EZLOG_CTIME_MAX_LEN + bean.fileLen;
-					buf = (char*)ezmalloc(len * sizeof(char));
-					snprintf(buf, len, "\n%c tid: %05s [%s] [%s:%u] ", bean.level, bean.tid, ctime, bean.file, bean.line);
-					str += buf;
-					str += *bean.data;
-					ezfree(buf);*/
-
-					/*logs = string("\n") + bean.level + " tid: " + bean.tid + " [" + ctime + "] [" + bean.file + ":" +
-						   to_string(bean.line) + "] " + *bean.data;*/
-
 					//has reserve EZLOG_SINGLE_LOG_STRING_FULL_RESERVER_LEN
-
-					logs.reserve(EZLOG_PREFIX_RESERVE_LEN + EZLOG_CTIME_MAX_LEN + bean.fileLen + bean.data->size());
+					logs.reserve(EZLOG_PREFIX_RESERVE_LEN + EZLOG_CTIME_MAX_LEN + bean.fileLen + bean.data().size());
 
 					logs.resize(0);			
 					logs.append_unsafe('\n');																	//1
@@ -778,7 +743,7 @@ namespace ezlogspace
 					logs.append_unsafe(':');																	//1
 					logs.append_unsafe(bean.line);																//20
 					logs.append_unsafe("] ", EZLOG_STRING_LEN_OF_CHAR_ARRAY("] "));						//2
-					logs.append_unsafe(std::move(*bean.data));												//----bean.data->size()
+					logs.append_unsafe(std::move(bean.data()));												//----bean.data->size()
 					//static len1=56+ EZLOG_CTIME_MAX_LEN 
 					//total =len1 +bean.fileLen+bean.data->size()
 
