@@ -5,6 +5,7 @@
 #ifndef EZLOG_EZLOG_H
 #define EZLOG_EZLOG_H
 
+#include <stdarg.h>
 #include <string.h>
 #include <assert.h>
 #include <sstream>
@@ -872,7 +873,7 @@ namespace ezlogspace
 	static_assert(sizeof(__FILE__)-1<=UINT16_MAX,"fatal error,file path is too long");\
 	bean.fileLen = (uint16_t)(sizeof(__FILE__)-1);\
 	bean.line = (uint16_t)(__LINE__);\
-    bean.level = ((char*)ezlogspace::LOG_PREFIX)[lv];\
+    bean.level = ezlogspace::LOG_PREFIX[lv];\
 	bean.toTernimal=lv==EZLOG_LEVEL_COUT;\
     return m_pHead;\
 }()
@@ -889,7 +890,7 @@ namespace ezlogspace
 	static_assert(sizeof(__FILE__)-1<=UINT16_MAX,"fatal error,file path is too long");\
 	bean.fileLen = (uint16_t)(sizeof(__FILE__)-1);\
 	bean.line = (uint16_t)(__LINE__);\
-	bean.level = ((char*)ezlogspace::LOG_PREFIX)[lv];\
+	bean.level = ezlogspace::LOG_PREFIX[lv];\
 	bean.toTernimal=lv==EZLOG_LEVEL_COUT;\
 	return m_pHead;\
 }()
@@ -921,6 +922,27 @@ namespace ezlogspace
 			this->m_cap= nullptr;
 #endif
 			EzLog::pushLog(m_pBean);
+		}
+		inline EzLogStream&operator()(EzLogString::EzlogStringEnum ,const char* s,size_t length)
+		{
+			this->append(s,length);
+			return *this;
+		}
+
+		inline EzLogStream&operator()(const char* fmt,...)
+		{
+			char buf[EZLOG_SINGLE_LOG_RESERVE_LEN];
+			size_t sz;
+			va_list vaList;
+			va_start(vaList, fmt);
+			sz = vsnprintf(buf, EZLOG_SINGLE_LOG_RESERVE_LEN, fmt, vaList);
+			va_end(vaList);
+			if (sz > 0)
+			{
+				this->append(buf, sz);
+			}
+
+			return *this;
 		}
 
 		template<typename T>
@@ -1087,6 +1109,7 @@ static_assert(EZLOG_GLOBAL_QUEUE_MAX_SIZE >= 2 * EZLOG_SINGLE_THREAD_QUEUE_MAX_S
 #define EZLOGV    (   ezlogspace::EzNoLogStream()  )
 #endif
 
+#define EZLOG_CSTR(str)   [](){ static_assert(!std::is_pointer<decltype(str)>::value,"must be a c-style array");return ezlogspace::internal::EzLogStringInternal::EzlogStringEnum::DEFAULT; }(),str,sizeof(str)-1
 
 //if support dynamic log level
 #else

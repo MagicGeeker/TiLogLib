@@ -18,7 +18,8 @@ using namespace ezlogspace;
 //#define file_time_multi_thread_simulation__log_test_____________________
 //#define file_single_thread_benchmark_test_____________________
 //#define file_multi_thread_benchmark_test_____________________
-#define file_multi_thread_close_print_benchmark_test_____________________
+//#define file_multi_thread_close_print_benchmark_test_____________________
+#define file_single_thread_operator_test_____________________
 
 
 uint64_t complexCalFunc(uint64_t x)
@@ -428,6 +429,60 @@ TEST_CASE("file_multi_thread_close_print_benchmark_test_____________________")
 }
 
 #endif
+
+
+#ifdef file_single_thread_operator_test_____________________
+
+TEST_CASE("file_single_thread_operator_test_____________________")
+{
+	EZLOGI << "file_single_thread_operator_test_____________________";
+	constexpr uint64_t loops = 10000 + 1*(1 << 10);
+	constexpr int32_t threads = 1;
+
+	SimpleTimer s1m;
+
+	static bool begin = false;
+	static condition_variable_any cva;
+	static shared_mutex smtx;
+
+	std::vector<std::thread> vec;
+
+	for (int i = 1; i <= threads; i++)
+	{
+		vec.emplace_back(thread([&](int index) -> void {
+			shared_lock<shared_mutex> slck(smtx);
+			cva.wait(slck, []() -> bool { return begin; });
+
+			for (uint64_t j = 0; j < loops; j++)
+			{
+				EZLOGD("index= %d, j= %lld",index,(long long int)j);
+				EZLOGD(EZLOG_CSTR("hello,world"));
+				EZLOGD("666");
+				EZLOGD("$$ %%D test %%D");
+
+//				Compile error
+//				char s0[]="dsda";
+//				char *p=s0;
+//				EZLOGD(EZLOG_CSTR(p));
+
+			}
+		}, i));
+	}
+
+	unique_lock<shared_mutex> ulk(smtx);
+	begin = true;
+	ulk.unlock();
+	cva.notify_all();
+	for (auto &th : vec)
+	{
+		th.join();
+	}
+	uint64_t us = s1m.GetMicrosecondsUpToNOW();
+	EZCOUT << (1.0 * EzLog::getPrintedLogsLength() / us) << " length per microsecond\n";
+}
+
+#endif
+
 
 
 #endif
