@@ -59,8 +59,8 @@ do{ if(!(what)){std::cerr<<"\n ERROR:\n"<< __FILE__ <<":"<< __LINE__ <<"\n"<<(#w
 #define EZLOG_SIZE_OF_ARRAY(arr)        (sizeof(arr)/sizeof(arr[0]))
 #define EZLOG_STRING_LEN_OF_CHAR_ARRAY(char_str) ((sizeof(char_str)-1)/sizeof(char_str[0]))
 
-#define EZLOG_OTHER_RESERVE_LEN 30   //reserve for "tid: "," [" and other c-strings;
 #define EZLOG_CTIME_MAX_LEN 30
+#define EZLOG_PREFIX_RESERVE_LEN  56      //reserve for " tid: " and other prefix c-strings;
 //#define EZLOG_SINGLE_LOG_STRING_FULL_RESERVER_LEN  (EZLOG_PREFIX_RESERVE_LEN+EZLOG_SINGLE_LOG_RESERVE_LEN+EZLOG_CTIME_MAX_LEN)
 #define EZLOG_THREAD_ID_MAX_LEN  (20+1)    //len(UINT64_MAX 64bit)+1
 
@@ -220,7 +220,13 @@ namespace ezlogspace
 		class EZlogOutputThread
 		{
 		public:
-			static void pushLog(const EzLogStream *logs);
+			static void pushLog(EzLogBean *pBean);
+
+			static uint64_t getPrintedLogs();
+
+			static uint64_t getPrintedLogsLength();
+
+			static void AtExit();
 
 		private:
 			static EzLogString & getMergedLogString();
@@ -241,13 +247,11 @@ namespace ezlogspace
 
 			static bool Init();
 
-			static void AtExit();
-
-
 		private:
 			thread_local static bool s_thread_init;
 
-			static size_t s_printedStringLength;
+			static uint64_t s_printedLogsLength;
+			static uint64_t s_printedLogs;
 			static EzLogString s_global_cache_string;
 
 			static std::mutex s_mtxMerge;
@@ -271,6 +275,18 @@ namespace ezlogspace
 			friend class ezlogspace::EzLogStream;
 
 		public:
+
+			EzLogImpl();
+
+			~EzLogImpl();
+
+			static void pushLog(internal::EzLogBean *pBean);
+
+			static uint64_t getPrintedLogs();
+
+			static uint64_t getPrintedLogsLength();
+
+		public:
 			static bool init();
 
 			static bool init(EzLoggerPrinter *p_ezLoggerPrinter);
@@ -283,22 +299,17 @@ namespace ezlogspace
 
 			static EzLoggerPrinter *getDefaultFileLoggerPrinter();
 
-			static void close();
+		public:
+			//these functions are not thread safe
+			static void setState(EzLogStateEnum state);
 
-			static bool closed();
+			static EzLogStateEnum getState();
 
 			static EzLoggerPrinter *getCurrentPrinter();
 
-			EzLogImpl();
-
-			~EzLogImpl();
-
-			static void pushLog(const EzLogStream *p_stream);
-
-
 		private:
 			static EzLoggerPrinter *s_printer;
-			static bool s_closed;
+			static EzLogStateEnum s_state;
 			static std::unique_ptr<EzLogImpl> s_upIns;
 			static bool s_inited;
 		};
@@ -412,7 +423,7 @@ namespace ezlogspace
 
 
 		EzLoggerPrinter *EzLogImpl::s_printer = nullptr;
-		bool EzLogImpl::s_closed = false;
+		EzLogStateEnum EzLogImpl::s_state = OPEN;
 		unique_ptr<EzLogImpl> EzLogImpl::s_upIns(eznew<EzLogImpl>());
 		bool EzLogImpl::s_inited = init();
 
@@ -462,19 +473,19 @@ namespace ezlogspace
 			exit(signal);
 		}
 
-		void EzLogImpl::pushLog(const EzLogStream *p_stream)
+		void EzLogImpl::pushLog(EzLogBean *pBean)
 		{
-			EZlogOutputThread::pushLog(p_stream);
+			EZlogOutputThread::pushLog(pBean);
 		}
 
-		void EzLogImpl::close()
+		uint64_t EzLogImpl::getPrintedLogs()
 		{
-			s_closed = true;
+			return EZlogOutputThread::getPrintedLogs();
 		}
 
-		bool EzLogImpl::closed()
+		uint64_t EzLogImpl::getPrintedLogsLength()
 		{
-			return s_closed;
+			return EZlogOutputThread::getPrintedLogsLength();
 		}
 
 		EzLoggerPrinter *EzLogImpl::getDefaultTermialLoggerPrinter()
@@ -485,6 +496,16 @@ namespace ezlogspace
 		EzLoggerPrinter *EzLogImpl::getDefaultFileLoggerPrinter()
 		{
 			return EzLoggerFilePrinter::getInstance();
+		}
+
+		void EzLogImpl::setState(EzLogStateEnum state)
+		{
+			s_state=state;
+		}
+
+		EzLogStateEnum EzLogImpl::getState()
+		{
+			return s_state;
 		}
 
 		EzLoggerPrinter *EzLogImpl::getCurrentPrinter()
@@ -525,7 +546,8 @@ namespace ezlogspace
 
 
 		thread_local bool EZlogOutputThread::s_thread_init = InitForEveryThread();
-		size_t EZlogOutputThread::s_printedStringLength = 0;
+		uint64_t EZlogOutputThread::s_printedLogsLength = 0;
+		uint64_t EZlogOutputThread::s_printedLogs = 0;
 		EzLogString EZlogOutputThread::s_global_cache_string;
 
 		std::mutex EZlogOutputThread::s_mtxMerge;
@@ -627,9 +649,9 @@ namespace ezlogspace
 			EzLogImpl::getCurrentPrinter()->sync();
 		}
 
-		void EZlogOutputThread::pushLog(const EzLogStream *logs)
+		void EZlogOutputThread::pushLog(EzLogBean *pBean)
 		{
-			bool isLocalFull = localCircularQueuePushBack(EzLogBean::GetThisFromData(&logs->m_str));
+			bool isLocalFull = localCircularQueuePushBack(pBean);
 			if (isLocalFull)
 			{
 				std::unique_lock<std::mutex> lk(s_mtxMerge);
@@ -756,6 +778,7 @@ namespace ezlogspace
 
 				}
 				EzLogBean::DestroyInstance(pBean);
+				s_printedLogs++;
 			}
 
 			s_globalCache.pCacheNow = s_globalCache.pCacheFront;
@@ -766,7 +789,7 @@ namespace ezlogspace
 		{
 			while (true)
 			{
-				if (EzLogImpl::closed())
+				if (EzLog::getState() == PERMANENT_CLOSED)
 				{
 					s_to_exit = true;
 				}
@@ -804,10 +827,10 @@ namespace ezlogspace
 		{
 			static size_t bufSize = 0;
 			bufSize += mergedLogString.length();
-			s_printedStringLength += mergedLogString.length();
+			s_printedLogsLength += mergedLogString.length();
 
 			EzLoggerPrinter *printer = EzLogImpl::getCurrentPrinter();
-			printer->onAcceptLogs(mergedLogString.data(), mergedLogString.size());
+			//printer->onAcceptLogs(mergedLogString.data(), mergedLogString.size());
 			if (bufSize >= EZLOG_GLOBAL_BUF_SIZE)
 			{
 				printer->sync();
@@ -837,6 +860,16 @@ namespace ezlogspace
 			}
 		}
 
+		uint64_t EZlogOutputThread::getPrintedLogs()
+		{
+			return s_printedLogs;
+		}
+
+		uint64_t EZlogOutputThread::getPrintedLogsLength()
+		{
+			return s_printedLogsLength;
+		}
+
 #endif
 
 	}
@@ -859,21 +892,32 @@ namespace ezlogspace
 		EzLogImpl::init(p_ezLoggerPrinter);
 	}
 
-	void EzLog::pushLog(EzLogStream *p_stream)
+	void EzLog::pushLog(EzLogBean *pBean)
 	{
-		EzLogImpl::pushLog(p_stream);
+		EzLogImpl::pushLog(pBean);
 	}
 
-	void ezlogspace::EzLog::close()
+	uint64_t EzLog::getPrintedLogs()
 	{
-		EzLogImpl::close();
+		return EzLogImpl::getPrintedLogs();
 	}
 
-
-	bool EzLog::closed()
+	uint64_t EzLog::getPrintedLogsLength()
 	{
-		return EzLogImpl::closed();
+		return EzLogImpl::getPrintedLogsLength();
 	}
+
+#if EZLOG_SUPPORT_CLOSE_LOG==TRUE
+	void EzLog::setState(EzLogStateEnum state)
+	{
+		EzLogImpl::setState(state);
+	}
+
+	EzLogStateEnum EzLog::getState()
+	{
+		return EzLogImpl::getState();
+	}
+#endif
 
 	EzLoggerPrinter *EzLog::getDefaultTermialLoggerPrinter()
 	{

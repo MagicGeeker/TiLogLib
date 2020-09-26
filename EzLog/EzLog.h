@@ -31,13 +31,13 @@
 #define EZLOG_GLOBAL_BUF_SIZE  ((size_t)1<<20U)    //1MB
 #define EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE  ((size_t)1<<8U)   //256
 #define EZLOG_GLOBAL_QUEUE_MAX_SIZE  ((size_t)1<<12U)   //4096
-#define EZLOG_PREFIX_RESERVE_LEN  56      //reserve for " tid: " and other prefix c-strings;
 #define EZLOG_SINGLE_LOG_RESERVE_LEN  50     //reserve for every log except for level,tid ...
 
 #define EZLOG_MALLOC_FUNCTION        malloc
 #define EZLOG_REALLOC_FUNCTION        realloc
 #define EZLOG_FREE_FUNCTION        free
 
+#define EZLOG_SUPPORT_CLOSE_LOG           FALSE
 #define EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL   FALSE
 #define EZLOG_LOG_LEVEL    6
 
@@ -609,10 +609,6 @@ namespace ezlogspace
 #endif // !NDEBUG
 			}
 
-
-
-
-
         private:
 			constexpr static size_t DEFAULT_CAPACITY = 32;
 			constexpr static uint32_t RESERVE_RATE_DEFAULT = 16;
@@ -675,7 +671,6 @@ namespace ezlogspace
 			uint16_t fileLen;
 			char level;
 			bool toTernimal;
-			bool closed;
 			DEBUG_CANARY_UINT64(flag2)
 
 		public:
@@ -721,7 +716,6 @@ namespace ezlogspace
 			{
 				constexpr size_t sz = FullSize();
 				EzLogBean *thiz = (EzLogBean *) EZLOG_MALLOC_FUNCTION(sz);
-				PlacementNew(&thiz->data(), EZLOG_SINGLE_LOG_RESERVE_LEN, EzLogString::EzlogStringEnum::DEFAULT);
 				PlacementNew(&thiz->cpptime(), std::chrono::system_clock::now());
 				return thiz;
 			}
@@ -761,7 +755,6 @@ namespace ezlogspace
 			{
 				constexpr size_t sz = FullSize();
 				EzLogBean *thiz = (EzLogBean *) EZLOG_MALLOC_FUNCTION(sz);
-				ImplacementNew(&thiz->data(), EZLOG_SINGLE_LOG_RESERVE_LEN, EzLogString::EzlogStringEnum::DEFAULT);
 				thiz->ctime = time(NULL);
 				return thiz;
 			}
@@ -817,6 +810,12 @@ namespace ezlogspace
 
 	};
 
+	enum EzLogStateEnum
+	{
+		CLOSED,
+		PERMANENT_CLOSED,
+		OPEN,
+	};
 
 	class EzLog
 	{
@@ -830,11 +829,28 @@ namespace ezlogspace
 
 		static EzLoggerPrinter *getDefaultFileLoggerPrinter();
 
-		static void pushLog(EzLogStream *p_stream);
+		static void pushLog(internal::EzLogBean *pBean);
 
-		static void close();
+	public:
+		//these functions are not thread safe
 
-		static bool closed();
+		static uint64_t getPrintedLogs();
+
+		static uint64_t getPrintedLogsLength();
+
+#if EZLOG_SUPPORT_CLOSE_LOG==TRUE
+
+		static void setState(EzLogStateEnum state);
+
+		static EzLogStateEnum getState();
+#else
+
+		static void setState(EzLogStateEnum state)
+		{}
+
+		static constexpr EzLogStateEnum getState()
+		{ return OPEN; }
+#endif
 
 	private:
 		EzLog();
@@ -845,6 +861,7 @@ namespace ezlogspace
 
 #ifdef EZLOG_USE_STD_CHRONO
 #define EZLOG_INTERNAL_CREATE_EZLOGBEAN(lv) []()->ezlogspace::internal::EzLogBean *{            \
+    if(ezlogspace::EzLog::getState()!=ezlogspace::OPEN){return nullptr;}\
     using EzLogBean=ezlogspace::internal::EzLogBean;\
     EzLogBean * m_pHead = EzLogBean::CreateInstance();\
     assert(m_pHead);\
@@ -861,6 +878,7 @@ namespace ezlogspace
 }()
 #else
 #define EZLOG_INTERNAL_CREATE_EZLOGBEAN(lv) []()->ezlogspace::internal::EzLogBean *{			\
+    if(ezlogspace::EzLog::getState()!=ezlogspace::OPEN){return nullptr;}\
 	using EzLogBean=ezlogspace::internal::EzLogBean;\
 	EzLogBean * m_pHead = EzLogBean::CreateInstance();\
 	assert(m_pHead);\
@@ -877,98 +895,109 @@ namespace ezlogspace
 }()
 #endif
 
-	class EzLogStream : public EzLogObject
+	class EzLogStream : private ezlogspace::internal::EzLogStringInternal
 	{
 	public:
 		using EzLogBean = ezlogspace::internal::EzLogBean;
 		using EzLogString =ezlogspace::internal::EzLogStringInternal;
 
 		inline EzLogStream(EzLogBean *pLogBean) :
-			m_str(pLogBean->data())
+				m_pBean(pLogBean)
 		{
-			pLogBean->closed = EzLog::closed();
 		}
 
 		inline  ~EzLogStream()
 		{
-			EzLog::pushLog(this);
+#if EZLOG_SUPPORT_CLOSE_LOG == TRUE
+			if (m_pBean == nullptr)	{ return; }
+#endif
+			EzLogString& str=m_pBean->data();
+			str.m_front=this->m_front;
+			str.m_end=this->m_end;
+			str.m_cap=this->m_cap;
+			this->m_front= nullptr;
+#ifndef NDEBUG
+			this->m_end= nullptr;
+			this->m_cap= nullptr;
+#endif
+			EzLog::pushLog(m_pBean);
 		}
 
 		template<typename T>
 		inline EzLogStream&operator<<(const T *ptr)
 		{
-			m_str += ((uintptr_t)ptr);
+			*this += ((uintptr_t)ptr);
 			return *this;
 		}
 
 		inline EzLogStream &operator<<(const char *s)
 		{
-			m_str += s;
+			*this += s;
 			return *this;
 		}
 
         inline EzLogStream &operator<<(char c)
         {
-            m_str += c;
+			*this += c;
             return *this;
         }
 
         inline EzLogStream &operator<<(unsigned char c)
         {
-            m_str += c;
+			*this += c;
             return *this;
         }
 
 		inline EzLogStream &operator<<(const std::string &s)
 		{
-			m_str += s;
+			*this += s;
 			return *this;
 		}
 
 		inline EzLogStream &operator<<(std::string &&s)
 		{
-			m_str += std::move(s);
+			*this += std::move(s);
 			return *this;
 		}
 
 		inline EzLogStream &operator<<(double s)
 		{
-			m_str += s;
+			*this += s;
 			return *this;
 		}
 
 		inline EzLogStream &operator<<(float s)
 		{
-			m_str += s;
+			*this += s;
 			return *this;
 		}
 
 		inline EzLogStream &operator<<(uint64_t s)
 		{
-            m_str += s;
+			*this += s;
             return *this;
         }
 
 		inline EzLogStream &operator<<(int64_t s)
 		{
-            m_str += s;
+			*this += s;
             return *this;
 		}
 
 		inline EzLogStream &operator<<(int32_t s)
 		{
-            m_str += s;
+			*this += s;
             return *this;
 		}
 
 		inline EzLogStream &operator<<(uint32_t s)
 		{
-            m_str += s;
+            *this += s;
             return *this;
 		}
 
 	public:
-		EzLogString &m_str;
+		EzLogBean* m_pBean;
 	};
 
 	class EzNoLogStream
