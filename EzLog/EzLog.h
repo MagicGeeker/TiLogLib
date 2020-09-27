@@ -434,8 +434,7 @@ namespace ezlogspace
 
 			inline EzLogStringInternal &append_unsafe(uint64_t x)
 			{
-				u64toa_sse2(x, m_end);
-				size_t off = strlen(m_end);
+				size_t off =u64toa_sse2(x, m_end);
 				m_end += off;
 				ensureZero();
 				return *this;
@@ -443,8 +442,7 @@ namespace ezlogspace
 
 			inline EzLogStringInternal &append_unsafe(int64_t x)
 			{
-				i64toa_sse2(x, m_end);
-				size_t off = strlen(m_end);
+				size_t off = i64toa_sse2(x, m_end);
 				m_end += off;
 				ensureZero();
 				return *this;
@@ -452,8 +450,7 @@ namespace ezlogspace
 
 			inline EzLogStringInternal &append_unsafe(uint32_t x)
 			{
-				u32toa_sse2(x, m_end);
-				size_t off = strlen(m_end);
+				size_t off = u32toa_sse2(x, m_end);
 				m_end += off;
 				ensureZero();
 				return *this;
@@ -461,8 +458,7 @@ namespace ezlogspace
 
 			inline EzLogStringInternal &append_unsafe(int32_t x)
 			{
-				i32toa_sse2(x, m_end);
-				size_t off = strlen(m_end);
+				uint32_t off=i32toa_sse2(x, m_end);
 				m_end += off;
 				ensureZero();
 				return *this;

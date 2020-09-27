@@ -104,7 +104,8 @@ inline __m128i ShiftDigits_SSE2(__m128i a, unsigned digit) {
     return a; // should not execute here.
 }
 
-inline void u32toa_sse2(uint32_t value, char* buffer) {
+inline uint32_t u32toa_sse2(uint32_t value, char* buf) {
+	char* buffer=buf;
     if (value < 10000) {
         const uint32_t d1 = (value / 100) << 1;
         const uint32_t d2 = (value % 100) << 1;
@@ -116,7 +117,7 @@ inline void u32toa_sse2(uint32_t value, char* buffer) {
         if (value >= 10)
             *buffer++ = gDigitsLut[d2];
         *buffer++ = gDigitsLut[d2 + 1];
-        *buffer++ = '\0';
+        *buffer = '\0';
     }
     else if (value < 100000000) {
         // Experiment shows that this case SSE2 is slower
@@ -139,7 +140,8 @@ inline void u32toa_sse2(uint32_t value, char* buffer) {
         __m128i result = ShiftDigits_SSE2(va, digit);
         //__m128i result = _mm_srl_epi64(va, _mm_cvtsi32_si128(digit * 8));
         _mm_storel_epi64(reinterpret_cast<__m128i*>(buffer), result);
-        buffer[8 - digit] = '\0';
+        buffer+=(8 - digit)
+        *buffer='\0';
 #else
         // value = bbbbcccc
         const uint32_t b = value / 10000;
@@ -163,7 +165,7 @@ inline void u32toa_sse2(uint32_t value, char* buffer) {
         *buffer++ = gDigitsLut[d3 + 1];
         *buffer++ = gDigitsLut[d4];
         *buffer++ = gDigitsLut[d4 + 1];
-        *buffer++ = '\0';
+		*buffer = '\0';
 #endif
     }
     else {
@@ -184,20 +186,25 @@ inline void u32toa_sse2(uint32_t value, char* buffer) {
         const __m128i ba = _mm_add_epi8(_mm_packus_epi16(_mm_setzero_si128(), b), reinterpret_cast<const __m128i*>(kAsciiZero)[0]);
         const __m128i result = _mm_srli_si128(ba, 8);
         _mm_storel_epi64(reinterpret_cast<__m128i*>(buffer), result);
-        buffer[8] = '\0';
+        buffer+=8;
+        *buffer = '\0';
     }
+	return buffer-buf;
 }
 
-inline void i32toa_sse2(int32_t value, char* buffer) {
+inline uint32_t i32toa_sse2(int32_t value, char* buffer) {
     uint32_t u = static_cast<uint32_t>(value);
+    uint32_t flag=0;
     if (value < 0) {
         *buffer++ = '-';
         u = ~u + 1;
+        flag = 1;
     }
-    u32toa_sse2(u, buffer);
+	return flag + u32toa_sse2(u, buffer);
 }
 
-inline void u64toa_sse2(uint64_t value, char* buffer) {
+inline uint32_t u64toa_sse2(uint64_t value, char* buf) {
+	char* buffer=buf;
     if (value < 100000000) {
         uint32_t v = static_cast<uint32_t>(value);
         if (v < 10000) {
@@ -211,7 +218,7 @@ inline void u64toa_sse2(uint64_t value, char* buffer) {
             if (v >= 10)
                 *buffer++ = gDigitsLut[d2];
             *buffer++ = gDigitsLut[d2 + 1];
-            *buffer++ = '\0';
+            *buffer = '\0';
         }
         else {
             // Experiment shows that this case SSE2 is slower
@@ -233,7 +240,8 @@ inline void u64toa_sse2(uint64_t value, char* buffer) {
             // Shift digits to the beginning
             __m128i result = ShiftDigits_SSE2(va, digit);
             _mm_storel_epi64(reinterpret_cast<__m128i*>(buffer), result);
-            buffer[8 - digit] = '\0';
+            buffer+=(8 - digit);
+           *buffer = '\0';
 #else
             // value = bbbbcccc
             const uint32_t b = v / 10000;
@@ -257,7 +265,7 @@ inline void u64toa_sse2(uint64_t value, char* buffer) {
             *buffer++ = gDigitsLut[d3 + 1];
             *buffer++ = gDigitsLut[d4];
             *buffer++ = gDigitsLut[d4 + 1];
-            *buffer++ = '\0';
+            *buffer = '\0';
 #endif
         }
     }
@@ -283,7 +291,8 @@ inline void u64toa_sse2(uint64_t value, char* buffer) {
         // Shift digits to the beginning
         __m128i result = ShiftDigits_SSE2(va, digit);
         _mm_storeu_si128(reinterpret_cast<__m128i*>(buffer), result);
-        buffer[16 - digit] = '\0';
+        buffer+=(16 - digit);
+        *buffer='\0';
     }
     else {
         const uint32_t a = static_cast<uint32_t>(value / 10000000000000000); // 1 to 1844
@@ -321,17 +330,22 @@ inline void u64toa_sse2(uint64_t value, char* buffer) {
         // Convert to bytes, add '0'
         const __m128i va = _mm_add_epi8(_mm_packus_epi16(a0, a1), reinterpret_cast<const __m128i*>(kAsciiZero)[0]);
         _mm_storeu_si128(reinterpret_cast<__m128i*>(buffer), va);
-        buffer[16] = '\0';
+        buffer+=16;
+        *buffer='\0';
     }
+
+	return buffer-buf;
 }
 
-inline void i64toa_sse2(int64_t value, char* buffer) {
+inline uint32_t i64toa_sse2(int64_t value, char* buffer) {
     uint64_t u = static_cast<uint64_t>(value);
+	uint32_t flag=0;
     if (value < 0) {
         *buffer++ = '-';
         u = ~u + 1;
+		flag = 1;
     }
-    u64toa_sse2(u, buffer);
+	return flag + u64toa_sse2(u, buffer);
 }
 
 
