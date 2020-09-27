@@ -231,6 +231,8 @@ namespace ezlogspace
 		private:
 			static EzLogString & getMergedLogString();
 
+			static void notifyGarbageCollection();
+
 			static void onAcceptLogs();
 
 			static void printLogs(EzLogString &&mergedLogString);
@@ -239,9 +241,13 @@ namespace ezlogspace
 
 			static void printMergedLogs();
 
+			static void garbageCollection();
+
 			static std::thread CreateMergeThread();
 
 			static std::thread CreatePrintThread();
+
+			static std::thread CreateGarbageCollectionThread();
 
 			static bool InitForEveryThread();
 
@@ -263,6 +269,11 @@ namespace ezlogspace
 			static std::condition_variable s_cvPrinter;
 			static bool s_printing;
 			static std::thread s_threadPrinter;
+
+			static std::mutex s_mtxDeleter;
+			static std::condition_variable s_cvDeleter;
+			static bool s_deleting;
+			static std::thread s_threadDeleter;
 
 			static bool s_inited;
 			static bool s_to_exit;
@@ -557,8 +568,16 @@ namespace ezlogspace
 
 		std::mutex EZlogOutputThread::s_mtxPrinter;
 		std::condition_variable EZlogOutputThread::s_cvPrinter;
-		bool EZlogOutputThread::s_printing;
+		bool EZlogOutputThread::s_printing= false;
 		std::thread EZlogOutputThread::s_threadPrinter= CreatePrintThread();
+
+		static LogCacheStru s_garbages = {(EzLogBean **) ezmalloc(sizeof(EzLogBean *) * GLOBAL_SIZE),
+											 &s_garbages.cache[0], &s_garbages.cache[GLOBAL_SIZE - 1],
+											 s_garbages.pCacheFront};
+		std::mutex EZlogOutputThread::s_mtxDeleter;
+		std::condition_variable EZlogOutputThread::s_cvDeleter;
+		bool EZlogOutputThread::s_deleting= false;
+		std::thread EZlogOutputThread::s_threadDeleter = CreateGarbageCollectionThread();
 
 		bool EZlogOutputThread::s_inited = Init();
 		bool EZlogOutputThread::s_to_exit = false;
@@ -604,6 +623,13 @@ namespace ezlogspace
 			return th;
 		}
 
+		std::thread EZlogOutputThread::CreateGarbageCollectionThread()
+		{
+			thread th(EZlogOutputThread::garbageCollection);
+			th.detach();
+			return th;
+		}
+
 		bool EZlogOutputThread::InitForEveryThread()
 		{
 			lock_guard<mutex> lgd(s_mtxMerge);
@@ -615,6 +641,7 @@ namespace ezlogspace
 		{
 			lock_guard<mutex> lgd_merge(s_mtxMerge);
 			lock_guard<mutex> lgd_print(s_mtxPrinter);
+			lock_guard<mutex> lgd_del(s_mtxDeleter);
 			std::ios::sync_with_stdio(false);
 			s_global_cache_string.reserve((size_t) (EZLOG_GLOBAL_BUF_SIZE * 1.2));
 			atexit(AtExit);
@@ -627,8 +654,11 @@ namespace ezlogspace
 		// 故用到全局变量需要在此函数前构造
 		void EZlogOutputThread::AtExit()
 		{
-			lock_guard<mutex> lgd_merge(s_mtxMerge);
+			unique_lock<mutex> lgd_merge(s_mtxMerge);
 			unique_lock<mutex> lgd_print(s_mtxPrinter);
+			s_to_exit = true;
+
+
 			printLogs(std::move(s_global_cache_string));
 			s_global_cache_string.resize(0);
 			EzLogImpl::getCurrentPrinter()->sync();
@@ -647,6 +677,11 @@ namespace ezlogspace
 			EzLogString remainStrings = getMergedLogString();
 			printLogs(remainStrings);
 			EzLogImpl::getCurrentPrinter()->sync();
+
+			lgd_merge.unlock();
+			s_cvDeleter.notify_all();
+			s_cvPrinter.notify_all();
+			s_cvMerge.notify_all();
 		}
 
 		void EZlogOutputThread::pushLog(EzLogBean *pBean)
@@ -777,12 +812,24 @@ namespace ezlogspace
 					}
 
 				}
-				EzLogBean::DestroyInstance(pBean);
 				s_printedLogs++;
 			}
 
-			s_globalCache.pCacheNow = s_globalCache.pCacheFront;
+
+			
 			return str;
+		}
+
+		void EZlogOutputThread::notifyGarbageCollection()
+		{
+			unique_lock<mutex> ulk(s_mtxDeleter);
+			size_t size = (s_globalCache.pCacheNow - s_globalCache.pCacheFront);
+			memcpy(s_garbages.cache, s_globalCache.cache, size * sizeof(EzLogBean *));
+			s_garbages.pCacheNow = s_garbages.cache + size;
+			s_globalCache.pCacheNow = s_globalCache.pCacheFront;
+			s_deleting = true;
+			ulk.unlock();
+			s_cvDeleter.notify_all();
 		}
 
 		void EZlogOutputThread::onAcceptLogs()
@@ -801,6 +848,7 @@ namespace ezlogspace
 
 				std::unique_lock<std::mutex> lk_print(s_mtxPrinter);
 				EzLogString & mergedLogString = getMergedLogString();
+				notifyGarbageCollection();
 				s_merging = false;
 				lk_merge.unlock();
 
@@ -852,6 +900,30 @@ namespace ezlogspace
 
 				s_printing = false;
 				lk_print.unlock();
+				this_thread::yield();
+				if (s_to_exit)
+				{
+					return;
+				}
+			}
+		}
+
+		void EZlogOutputThread::garbageCollection()
+		{
+			while (true)
+			{
+				std::unique_lock<std::mutex> lk_del(s_mtxDeleter);
+				s_cvDeleter.wait(lk_del, []() -> bool {
+					return s_deleting && s_inited;
+				});
+
+				for(EzLogBean **ppBean = s_garbages.pCacheFront; ppBean < s_garbages.pCacheNow; ppBean++)
+				{
+					EzLogBean::DestroyInstance(*ppBean);
+				}
+
+				s_deleting = false;
+				lk_del.unlock();
 				this_thread::yield();
 				if (s_to_exit)
 				{

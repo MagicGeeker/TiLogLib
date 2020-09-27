@@ -899,7 +899,8 @@ namespace ezlogspace
 		using EzLogString =ezlogspace::internal::EzLogStringInternal;
 
 		inline EzLogStream(EzLogBean *pLogBean) :
-				m_pBean(pLogBean)
+			EzLogString(EZLOG_SINGLE_LOG_RESERVE_LEN, EzLogString::EzlogStringEnum::DEFAULT),
+			m_pBean(pLogBean)
 		{
 		}
 
@@ -908,6 +909,7 @@ namespace ezlogspace
 #if EZLOG_SUPPORT_CLOSE_LOG == TRUE
 			if (m_pBean == nullptr)	{ return; }
 #endif
+			//force move this's string to m_pBean
 			EzLogString& str=m_pBean->data();
 			str.m_front=this->m_front;
 			str.m_end=this->m_end;
