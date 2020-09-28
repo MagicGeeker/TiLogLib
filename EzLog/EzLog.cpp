@@ -229,7 +229,14 @@ namespace ezlogspace
 			static void AtExit();
 
 		private:
-			static EzLogString & getMergedLogString();
+#if defined(EZLOG_USE_STD_CHRONO) && defined(EZLOG_WITH_MILLISECONDS)
+			static inline void getMilliTimeStrFromChrono(char *dst, size_t &len, EzLogBean &bean, SystemTimePoint &cpptime_pre);
+#else
+			static inline void getTimeStrFromCTime(char *dst, size_t &len, const EzLogBean &bean, time_t &tPre);
+#endif
+			static void getMergedSingleLog(const char *ctimestr, size_t len, EzLogString &logs, const EzLogBean &bean);
+
+			static EzLogString &getMergedLogString();
 
 			static void notifyGarbageCollection();
 
@@ -730,79 +737,29 @@ namespace ezlogspace
 			EzLogString &str = s_global_cache_string;
 			std::sort(s_globalCache.pCacheFront,s_globalCache.pCacheNow,EzlogBeanComp());
 
-			char ctime[EZLOG_CTIME_MAX_LEN] = {0};
-			char *dst = ctime;
+			char ctimestr[EZLOG_CTIME_MAX_LEN] = {0};
+#if defined(EZLOG_WITH_MILLISECONDS) && defined(EZLOG_USE_STD_CHRONO)
+			SystemTimePoint cpptime_pre = SystemTimePoint::min();
+#else
 			time_t tPre = 0;
-			time_t t = 0;
-			size_t len;
+#endif
+			size_t len = 0;
 			EzLogString logs;
-			//logs.reserve(EZLOG_SINGLE_LOG_STRING_FULL_RESERVER_LEN);
 
 			for (EzLogBean **ppBean = s_globalCache.pCacheFront; ppBean < s_globalCache.pCacheNow; ppBean++)
 			{
 				DEBUG_ASSERT(ppBean != nullptr && *ppBean != nullptr);
-				EzLogBean *pBean = *ppBean;
 				EzLogBean &bean = **ppBean;
 				DEBUG_ASSERT1(&bean.data() != nullptr, &bean.data());
 				DEBUG_ASSERT1(bean.file != nullptr, bean.file);
 
-#ifdef EZLOG_USE_STD_CHRONO
-				DEBUG_ASSERT1(&bean.cpptime() != nullptr, &bean.cpptime());
-#ifdef EZLOG_WITH_MILLISECONDS
-				bean.cpptime()=time_point_cast<milliseconds>(bean.cpptime());
+#if defined(EZLOG_USE_STD_CHRONO) && defined(EZLOG_WITH_MILLISECONDS)
+				getMilliTimeStrFromChrono(ctimestr, len, bean, cpptime_pre);
 #else
-				*bean.cpptime=time_point_cast<seconds>(*bean.cpptime);
+				getTimeStrFromCTime(ctimestr, len, bean, tPre);
 #endif
-				SystemTimePoint &cpptime = bean.cpptime();
-				t = system_clock::to_time_t(cpptime);
-#else  //time_t
-				t=bean.ctime;
-#endif
-				if (t != tPre)
 				{
-					tPre = t;
-					struct tm *tmd = localtime(&t);
-					len = strftime(dst, EZLOG_CTIME_MAX_LEN - 1, "%Y-%m-%d %H:%M:%S", tmd);
-#if defined(EZLOG_WITH_MILLISECONDS) && defined(EZLOG_USE_STD_CHRONO)
-					if (len != 0)
-					{
-						auto since_epoch = cpptime.time_since_epoch();
-						std::chrono::seconds _s = std::chrono::duration_cast<std::chrono::seconds>(since_epoch);
-						since_epoch -= _s;
-						std::chrono::milliseconds milli = std::chrono::duration_cast<std::chrono::milliseconds>(
-								since_epoch);
-						snprintf(dst + len, EZLOG_CTIME_MAX_LEN - 1 - len, ".%03llu",
-								 (long long unsigned) milli.count());
-					} else
-					{
-						//this ctimestr is invalid
-						tPre = (time_t) (-1);
-					}
-#endif
-				} else
-				{
-					//time is equal to pre,no need to update
-				}
-				{
-					//has reserve EZLOG_SINGLE_LOG_STRING_FULL_RESERVER_LEN
-					logs.reserve(EZLOG_PREFIX_RESERVE_LEN + EZLOG_CTIME_MAX_LEN + bean.fileLen + bean.data().size());
-
-					logs.resize(0);			
-					logs.append_unsafe('\n');																	//1
-					logs.append_unsafe(bean.level);															//1
-					logs.append_unsafe(" tid: ", EZLOG_STRING_LEN_OF_CHAR_ARRAY(" tid: "));				//6
-					logs.append_unsafe(bean.tid);																//20
-					logs.append_unsafe(" [", EZLOG_STRING_LEN_OF_CHAR_ARRAY(" ["));						//2
-					logs.append_unsafe(ctime);																	//----EZLOG_CTIME_MAX_LEN 30
-					logs.append_unsafe("] [", EZLOG_STRING_LEN_OF_CHAR_ARRAY("] ["));						//3
-
-					logs.append_unsafe(bean.file, bean.fileLen);												//----bean.fileLen
-					logs.append_unsafe(':');																	//1
-					logs.append_unsafe(bean.line);																//20
-					logs.append_unsafe("] ", EZLOG_STRING_LEN_OF_CHAR_ARRAY("] "));						//2
-					logs.append_unsafe(std::move(bean.data()));												//----bean.data->size()
-					//static len1=56+ EZLOG_CTIME_MAX_LEN 
-					//total =len1 +bean.fileLen+bean.data->size()
+					getMergedSingleLog(ctimestr, len, logs, bean);
 
 
 					str += logs;
@@ -818,6 +775,93 @@ namespace ezlogspace
 
 			
 			return str;
+		}
+
+
+
+
+#if defined(EZLOG_USE_STD_CHRONO) && defined(EZLOG_WITH_MILLISECONDS)
+		inline void EZlogOutputThread::getMilliTimeStrFromChrono(char *dst, size_t &len, EzLogBean &bean,
+														  SystemTimePoint &cpptime_pre)
+		{
+			DEBUG_ASSERT1(&bean.cpptime() != nullptr, &bean.cpptime());
+			bean.cpptime() = chrono::time_point_cast<chrono::milliseconds>(bean.cpptime());
+			SystemTimePoint &cpptime = bean.cpptime();
+			time_t t = chrono::_V2::system_clock::to_time_t(cpptime);
+			if (cpptime == cpptime_pre)
+			{
+				//time is equal to pre,no need to update
+			} else
+			{
+				cpptime_pre = cpptime;
+				struct tm *tmd = localtime(&t);
+				len = strftime(dst, EZLOG_CTIME_MAX_LEN, "%Y-%m-%d %H:%M:%S", tmd);//len without zero
+				if (len == 0)
+				{
+					//this tmd is invalid
+					cpptime_pre = SystemTimePoint::min();
+				} else
+				{
+					auto since_epoch = cpptime.time_since_epoch();
+					chrono::seconds _s = chrono::duration_cast<chrono::seconds>(since_epoch);
+					since_epoch -= _s;
+					chrono::milliseconds milli = chrono::duration_cast<chrono::milliseconds>(
+							since_epoch);
+					size_t n_with_zero = EZLOG_CTIME_MAX_LEN - len;
+					size_t len2 = snprintf(dst + len, n_with_zero, ".%03u", (uint32_t) milli.count());//len2 without zero
+					len += std::min(len2, n_with_zero - 1);
+				}
+			}
+		}
+#else
+		inline void EZlogOutputThread::getTimeStrFromCTime(char *dst, size_t &len, const EzLogBean &bean, time_t &tPre)
+		{
+			time_t t;
+#if defined(EZLOG_USE_CTIME)
+			t=bean.ctime;
+#else
+			t = std::chrono::system_clock::to_time_t(
+					std::chrono::time_point_cast<std::chrono::seconds>(bean.cpptime()));
+#endif
+			if (t == tPre)
+			{
+				//time is equal to pre,no need to update
+			} else
+			{
+				tPre = t;
+				struct tm *tmd = localtime(&t);
+				len = strftime(dst, EZLOG_CTIME_MAX_LEN, "%Y-%m-%d %H:%M:%S", tmd);//len without zero
+				if (len == 0)
+				{
+					//this tmd is invalid
+					tPre = (time_t) 0;
+				}
+			}
+		}
+#endif
+
+		void EZlogOutputThread::getMergedSingleLog(const char *ctimestr, size_t len, EzLogString &logs,
+												   const EzLogBean &bean)
+		{
+//has reserve EZLOG_SINGLE_LOG_STRING_FULL_RESERVE_LEN
+			logs.reserve(EZLOG_PREFIX_RESERVE_LEN + EZLOG_CTIME_MAX_LEN + bean.fileLen + bean.data().size());
+
+			logs.resize(0);
+			logs.append_unsafe('\n');                                                                    //1
+			logs.append_unsafe(bean.level);                                                            //1
+			logs.append_unsafe(" tid: ", EZLOG_STRING_LEN_OF_CHAR_ARRAY(" tid: "));                //6
+			logs.append_unsafe(bean.tid);                                                                //20
+			logs.append_unsafe(" [", EZLOG_STRING_LEN_OF_CHAR_ARRAY(" ["));                        //2
+			logs.append_unsafe(ctimestr, len);                                                                    //----EZLOG_CTIME_MAX_LEN 30
+			logs.append_unsafe("] [", EZLOG_STRING_LEN_OF_CHAR_ARRAY("] ["));                        //3
+
+			logs.append_unsafe(bean.file, bean.fileLen);                                                //----bean.fileLen
+			logs.append_unsafe(':');                                                                    //1
+			logs.append_unsafe(bean.line);                                                                //20
+			logs.append_unsafe("] ", EZLOG_STRING_LEN_OF_CHAR_ARRAY("] "));                        //2
+			logs.append_unsafe(bean.data());                                                //----bean.data->size()
+//static len1=56+ EZLOG_CTIME_MAX_LEN
+//total =len1 +bean.fileLen+bean.data->size()
 		}
 
 		void EZlogOutputThread::notifyGarbageCollection()
@@ -868,7 +912,7 @@ namespace ezlogspace
 
 		void EZlogOutputThread::printLogs(EzLogString &&mergedLogString)
 		{
-			printLogs(mergedLogString);
+			//printLogs(mergedLogString);
 		}
 
 		void EZlogOutputThread::printLogs(const EzLogString &mergedLogString)
@@ -878,7 +922,7 @@ namespace ezlogspace
 			s_printedLogsLength += mergedLogString.length();
 
 			EzLoggerPrinter *printer = EzLogImpl::getCurrentPrinter();
-			//printer->onAcceptLogs(mergedLogString.data(), mergedLogString.size());
+			printer->onAcceptLogs(mergedLogString.data(), mergedLogString.size());
 			if (bufSize >= EZLOG_GLOBAL_BUF_SIZE)
 			{
 				printer->sync();

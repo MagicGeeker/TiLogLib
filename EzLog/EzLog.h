@@ -23,9 +23,9 @@
 #include "../outlibs/ftoa-fast/ftoa.h"
 
 /**************************************************MACRO FOR USER**************************************************/
-#define    EZLOG_USE_STD_CHRONO  0x01
-//#define    EZLOG_USE_CTIME  0x02
-#define    EZLOG_WITH_MILLISECONDS  0x08
+//#define    EZLOG_USE_CTIME
+#define    EZLOG_USE_STD_CHRONO
+#define    EZLOG_WITH_MILLISECONDS
 
 
 #define EZLOG_GLOBAL_BUF_FULL_SLEEP_US  10   //work thread sleep for 10us when global buf is full and logging
@@ -324,7 +324,8 @@ namespace ezlogspace
 //                return append(cstr, length);
             }
 
-            inline EzLogStringInternal &append(const char *cstr, size_t length)
+			//length without '\0'
+			inline EzLogStringInternal &append(const char *cstr, size_t length)
             {
                 ensureCap(size_with_zero() + length);
 				return append_unsafe(cstr,length);
@@ -405,6 +406,7 @@ namespace ezlogspace
 				return append_unsafe(cstr, length);
 			}
 
+			//length without '\0'
 			inline EzLogStringInternal &append_unsafe(const char *cstr, size_t length)
 			{
 				memcpy(m_end, cstr, length);
