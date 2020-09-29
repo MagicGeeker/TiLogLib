@@ -25,13 +25,11 @@ int main()
 {
 	EZLOGI << "file_multi_thread_benchmark_test_____________________";
 #ifdef NDEBUG
-	EZLOGI << "10 threads 1M loops test";
-	constexpr uint64_t loops = 10000 + (1 << 20);
+	constexpr uint64_t loops = 10000 + 3*(1 << 20);
 #else
-	EZLOGI << "10 threads 128*1k loops test";
-	constexpr uint64_t loops = 10000 + 128*(1 << 10);
+	constexpr uint64_t loops = 10000 + 256*(1 << 10);
 #endif
-	constexpr int32_t threads = 10;
+	constexpr int32_t threads = 12;
 
 	SimpleTimer s1m;
 

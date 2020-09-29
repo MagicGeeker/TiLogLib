@@ -11,16 +11,16 @@ using namespace ezlogspace;
 //#define single_thread_log_test_____________________
 //#define multi_thread_log_test_____________________
 //#define file_multi_thread_log_test_____________________
-//#define termial_many_thread_cout_test_____________________
-//#define termial_many_thread_log_test_____________________
+//#define terminal_many_thread_cout_test_____________________
+//#define terminal_many_thread_log_test_____________________
 //#define file_many_thread_log_test_____________________
 //#define file_time_many_thread_log_test_with_sleep_____________________
 //#define file_time_multi_thread_simulation__log_test_____________________
 //#define file_single_thread_benchmark_test_____________________
 //#define file_multi_thread_benchmark_test_____________________
 //#define file_multi_thread_close_print_benchmark_test_____________________
-#define file_single_thread_operator_test_____________________
-
+//#define file_single_thread_operator_test_____________________
+#define terminal_multi_thread_poll__log_test_____________________
 
 uint64_t complexCalFunc(uint64_t x)
 {
@@ -34,7 +34,7 @@ uint64_t complexCalFunc(uint64_t x)
 		double m3 = rand() % 1000;
 		m += (m1 + m2 + m3);
 	}
-	return m;
+	return (uint64_t)m;
 }
 
 
@@ -80,9 +80,9 @@ TEST_CASE("file_multi_thread_log_test_____________________")
 #endif
 
 
-#ifdef termial_many_thread_cout_test_____________________
+#ifdef terminal_many_thread_cout_test_____________________
 
-TEST_CASE("termial_many_thread_cout_test_____________________")
+TEST_CASE("terminal_many_thread_cout_test_____________________")
 {
 	std::mutex mtx;
 	static bool begin = false;
@@ -90,7 +90,7 @@ TEST_CASE("termial_many_thread_cout_test_____________________")
 	static shared_mutex smtx;
 	static condition_variable cv;
 
-	cout << "termial_many_thread_cout_test_____________________" << endl;
+	cout << "terminal_many_thread_cout_test_____________________" << endl;
 	std::vector<std::thread> vec;
 	for (int i = 1; i < 100; i++)
 	{
@@ -118,13 +118,13 @@ TEST_CASE("termial_many_thread_cout_test_____________________")
 #endif
 
 
-#ifdef termial_many_thread_log_test_____________________
+#ifdef terminal_many_thread_log_test_____________________
 
-TEST_CASE("termial_many_thread_log_test_____________________")
+TEST_CASE("terminal_many_thread_log_test_____________________")
 {
-	EzLog::init(EzLog::getDefaultTermialLoggerPrinter());
+	EzLog::init(EzLog::getDefaultterminalLoggerPrinter());
 
-	EZLOGI << "termial_many_thread_log_test_____________________";
+	EZLOGI << "terminal_many_thread_log_test_____________________";
 
 	static bool begin = false;
 	static condition_variable_any cva;
@@ -315,7 +315,7 @@ TEST_CASE("file_single_thread_benchmark_test_____________________")
 		EZLOGD << " i= " << i;
 	}
 	uint64_t ms = s1m.GetMillisecondsUpToNOW();
-	EZLOGI << (1000 * loops / ms) << " logs per second";
+	EZLOGI << (1000.0f * loops / ms) << " logs per second";
 	EZLOGI << 1.0 * ms / loops << " milliseconds per log";
 }
 
@@ -328,11 +328,10 @@ TEST_CASE("file_multi_thread_benchmark_test_____________________")
 {
 	EZLOGI << "file_multi_thread_benchmark_test_____________________";
 #ifdef NDEBUG
-	EZLOGI << "10 threads 1M loops test";
-	constexpr uint64_t loops = 10000 + (1 << 20);
+	constexpr uint64_t loops = 10000 + 4*(1 << 20);
 #else
 	EZLOGI << "10 threads 128*1k loops test";
-	constexpr uint64_t loops = 10000 + 128*(1 << 10);
+	constexpr uint64_t loops = 10000 + 32*(1 << 10);
 #endif
 	constexpr int32_t threads = 10;
 
@@ -366,7 +365,7 @@ TEST_CASE("file_multi_thread_benchmark_test_____________________")
 		th.join();
 	}
 	uint64_t us = s1m.GetMicrosecondsUpToNOW();
-	EZCOUT << (1000 * threads * loops / us) << " logs per millisecond\n";
+	EZCOUT << (1000.0f * threads * loops / us) << " logs per millisecond\n";
 	EZCOUT << 1.0 * us / (loops * threads) << " us per log\n";
 }
 
@@ -424,7 +423,7 @@ TEST_CASE("file_multi_thread_close_print_benchmark_test_____________________")
 		th.join();
 	}
 	uint64_t us = s1m.GetMicrosecondsUpToNOW();
-	EZCOUT << (1000.0 * EzLog::getPrintedLogs() / us) << " logs per millisecond\n";
+	EZCOUT << (1000.0f * EzLog::getPrintedLogs() / us) << " logs per millisecond\n";
 	EZCOUT << 1.0 * us / (EzLog::getPrintedLogs()) << " us per log\n";
 }
 
@@ -482,6 +481,55 @@ TEST_CASE("file_single_thread_operator_test_____________________")
 }
 
 #endif
+
+
+#ifdef terminal_multi_thread_poll__log_test_____________________
+
+TEST_CASE("terminal_multi_thread_poll__log_test_____________________")
+{
+	EzLog::init(EzLog::getDefaultTerminalLoggerPrinter());
+
+	EZLOGI << "file_multi_thread_benchmark_test_____________________";
+	constexpr uint64_t loops = 10000;
+	constexpr int32_t threads = 10;
+
+	SimpleTimer s1m;
+
+	static bool begin = false;
+	static condition_variable_any cva;
+	static shared_mutex smtx;
+
+	std::vector<std::thread> vec;
+
+	for (int i = 1; i <= threads; i++)
+	{
+		vec.emplace_back(thread([&](int index) -> void {
+			shared_lock<shared_mutex> slck(smtx);
+			cva.wait(slck, []() -> bool { return begin; });
+
+			for (uint64_t j = 0; j < loops; j++)
+			{
+				this_thread::sleep_for(chrono::milliseconds(50));
+				EZLOGD << "index= " << index << " j= " << j;
+			}
+		}, i));
+	}
+
+	unique_lock<shared_mutex> ulk(smtx);
+	begin = true;
+	ulk.unlock();
+	cva.notify_all();
+	for (auto &th : vec)
+	{
+		th.join();
+	}
+	uint64_t us = s1m.GetMicrosecondsUpToNOW();
+	EZCOUT << (1000.0f * threads * loops / us) << " logs per millisecond\n";
+	EZCOUT << 1.0 * us / (loops * threads) << " us per log\n";
+}
+
+#endif
+
 
 
 

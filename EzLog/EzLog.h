@@ -28,6 +28,7 @@
 #define    EZLOG_WITH_MILLISECONDS
 
 
+#define EZLOG_POLL_THREAD_SLEEP_MS  100   //poll period 1000ms to move local cache to global cache
 #define EZLOG_GLOBAL_BUF_FULL_SLEEP_US  10   //work thread sleep for 10us when global buf is full and logging
 #define EZLOG_GLOBAL_BUF_SIZE  ((size_t)1<<20U)    //1MB
 #define EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE  ((size_t)1<<8U)   //256
@@ -213,7 +214,7 @@ namespace ezlogspace
             	*this=x;
 			}
 
-			inline EzLogStringInternal(EzLogStringInternal&& x)
+			inline EzLogStringInternal(EzLogStringInternal&& x)noexcept
 			{
 				m_front=m_end=m_cap= nullptr;
 				*this=std::move(x);
@@ -231,7 +232,7 @@ namespace ezlogspace
 				append(str.data(), str.size());
 			}
 
-			inline void operator=(EzLogStringInternal &&str)
+			inline void operator=(EzLogStringInternal &&str)noexcept
 			{
 				this->~EzLogStringInternal();
 				this->m_front = str.m_front;
@@ -824,7 +825,7 @@ namespace ezlogspace
 
 		static void init(EzLoggerPrinter *p_ezLoggerPrinter);
 
-		static EzLoggerPrinter *getDefaultTermialLoggerPrinter();
+		static EzLoggerPrinter *getDefaultTerminalLoggerPrinter();
 
 		static EzLoggerPrinter *getDefaultFileLoggerPrinter();
 
