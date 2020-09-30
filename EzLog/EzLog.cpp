@@ -427,7 +427,10 @@ namespace ezlogspace
 		EzLoggerFilePrinter::~EzLoggerFilePrinter()
 		{
 			fflush(s_pFile);
-			fclose(s_pFile);
+			if (s_pFile != nullptr)
+			{
+				fclose(s_pFile);
+			}
 		}
 
 		void EzLoggerFilePrinter::onAcceptLogs(const char *const logs, size_t size)
@@ -444,14 +447,20 @@ namespace ezlogspace
 			{
 				singleFilePrintedLogSize = 0;
 				fflush(s_pFile);
-				fclose(s_pFile);
+				if (s_pFile != nullptr)
+				{
+					fclose(s_pFile);
+				}
 
 				string s = tryToGetFileName(logs, size, index);
 				index++;
 				s_pFile = fopen(s.data(), "w");
 			}
-			fwrite(logs, sizeof(char), size, s_pFile);
-			singleFilePrintedLogSize += size;
+			if (s_pFile != nullptr)
+			{
+				fwrite(logs, sizeof(char), size, s_pFile);
+				singleFilePrintedLogSize += size;
+			}
 		}
 
 		string EzLoggerFilePrinter::tryToGetFileName(const char *logs, size_t size, uint32_t index)
@@ -1062,8 +1071,13 @@ namespace ezlogspace
 			while (true)
 			{
 				unique_lock<mutex> lk_merge(s_mtxMerge, std::try_to_lock);
+				if (!lk_merge.owns_lock())
+				{
+					this_thread::sleep_for(chrono::milliseconds(EZLOG_POLL_THREAD_SLEEP_MS));
+					continue;
+				}
 				unique_lock<mutex> lk_map(s_mtxMap, std::try_to_lock);
-				if (!lk_merge.owns_lock() || !lk_map.owns_lock())
+				if (!lk_map.owns_lock())
 				{
 					this_thread::sleep_for(chrono::milliseconds(EZLOG_POLL_THREAD_SLEEP_MS));
 					continue;
