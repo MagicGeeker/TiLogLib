@@ -80,9 +80,6 @@ using ezfree_t=void (*)(void *);
 #define ezdelarr            ezlogspace::EzLogMemoryManager::DeleteArray
 
 
-static const std::string folderPath = "F:/";
-
-
 using namespace std;
 using namespace ezlogspace;
 
@@ -102,7 +99,7 @@ namespace ezloghelperspace
 		return s_threadIDLocal;
 	}
 
-	uint32_t FastRand()
+	static uint32_t FastRand()
 	{
 		static const uint32_t M = 2147483647L;  // 2^31-1
 		static const uint64_t A = 16385;  // 2^14+1
@@ -114,6 +111,24 @@ namespace ezloghelperspace
 		if (_seed > M) _seed -= M;
 
 		return _seed;
+	}
+
+	static void transformTimeStrToFileName(char *filename, const char *timeStr, size_t size)
+	{
+		for (size_t i = 0;; filename++, timeStr++, i++)
+		{
+			if (i >= size)
+			{
+				break;
+			}
+			if (*timeStr == ':')
+			{
+				*filename = ',';
+			} else
+			{
+				*filename = *timeStr;
+			}
+		}
 	}
 
 }
@@ -141,13 +156,7 @@ namespace ezlogspace
 		public:
 			static EzLoggerTerminalPrinter *getInstance();
 
-			void onAcceptLogs(const char *const logs) override;
-
-			void onAcceptLogs(const char *const logs,size_t size) override;
-
-			void onAcceptLogs(const std::string &logs) override;
-
-			void onAcceptLogs(std::string &&logs) override;
+			void onAcceptLogs(const char *const logs, size_t size) override;
 
 			void sync() override;
 
@@ -164,13 +173,7 @@ namespace ezlogspace
 		public:
 			static EzLoggerFilePrinter *getInstance();
 
-			void onAcceptLogs(const char *const logs) override;
-
 			void onAcceptLogs(const char *const logs, size_t size) override;
-
-			void onAcceptLogs(const std::string &logs) override;
-
-			void onAcceptLogs(std::string &&logs) override;
 
 			void sync() override;
 
@@ -179,13 +182,17 @@ namespace ezlogspace
 		protected:
 			EzLoggerFilePrinter();
 
-			virtual ~EzLoggerFilePrinter();
+			~EzLoggerFilePrinter() override;
+
+			static const std::string folderPath;
+
+			static string tryToGetFileName(const char *logs, size_t size, uint32_t index);
 
 			static EzLoggerFilePrinter *s_ins;
-			static std::ofstream s_ofs;
 
 		};
 
+		const std::string EzLoggerFilePrinter::folderPath = EZLOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER;
 
 		class EZlogOutputThread
 		{
@@ -204,7 +211,9 @@ namespace ezlogspace
 #else
 			static inline void getTimeStrFromCTime(char *dst, size_t &len, const EzLogBean &bean, time_t &tPre);
 #endif
-			static inline void getMergedSingleLog(const char *ctimestr, size_t len, EzLogString &logs, const EzLogBean &bean);
+
+			static inline void getMergedSingleLog(EzLogString &logs, const char *ctimestr, size_t len,
+												  const EzLogBean &bean);
 
 			static EzLogString &getMergedLogString();
 
@@ -212,11 +221,9 @@ namespace ezlogspace
 
 			static void thrdFuncMergeLogs();
 
-			static void printLogs(EzLogString &&mergedLogString);
+			static void printLogs();
 
-			static void printLogs(const EzLogString &mergedLogString);
-
-			static void thrdFuncMergedLogs();
+			static void thrdFuncPrintLogs();
 
 			static void thrdFuncGarbageCollection();
 
@@ -355,22 +362,7 @@ namespace ezlogspace
 
 		EzLoggerTerminalPrinter::EzLoggerTerminalPrinter() = default;
 
-		void EzLoggerTerminalPrinter::onAcceptLogs(const char *const logs)
-		{
-			std::cout << logs;
-		}
-
-		void EzLoggerTerminalPrinter::onAcceptLogs(const char *const logs,size_t size)
-		{
-			std::cout << logs;
-		}
-
-		void EzLoggerTerminalPrinter::onAcceptLogs(const std::string &logs)
-		{
-			std::cout << logs;
-		}
-
-		void EzLoggerTerminalPrinter::onAcceptLogs(std::string &&logs)
+		void EzLoggerTerminalPrinter::onAcceptLogs(const char *const logs, size_t size)
 		{
 			std::cout << logs;
 		}
@@ -399,8 +391,6 @@ namespace ezlogspace
 
 		EzLoggerFilePrinter::EzLoggerFilePrinter()
 		{
-			string s = folderPath + "clogs.txt";
-			s_pFile = (fopen(s.data(), "w"));
 		}
 
 		EzLoggerFilePrinter::~EzLoggerFilePrinter()
@@ -409,25 +399,51 @@ namespace ezlogspace
 			fclose(s_pFile);
 		}
 
-		void EzLoggerFilePrinter::onAcceptLogs(const char *const logs)
-		{
-			size_t size = strlen(logs);
-			fwrite(logs, sizeof(char), size, s_pFile);
-		}
-
 		void EzLoggerFilePrinter::onAcceptLogs(const char *const logs, size_t size)
 		{
+			static uint32_t index = 1;
+			static bool firstRun = [=]() {
+				string s = tryToGetFileName(logs, size, index);
+				index++;
+				s_pFile = fopen(s.data(), "w");
+				return true;
+			}();
+
+			if (singleFilePrintedLogSize > EZLOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE)
+			{
+				singleFilePrintedLogSize = 0;
+				fflush(s_pFile);
+				fclose(s_pFile);
+
+				string s = tryToGetFileName(logs, size, index);
+				index++;
+				s_pFile = fopen(s.data(), "w");
+			}
 			fwrite(logs, sizeof(char), size, s_pFile);
+			singleFilePrintedLogSize += size;
 		}
 
-		void EzLoggerFilePrinter::onAcceptLogs(const std::string &logs)
+		string EzLoggerFilePrinter::tryToGetFileName(const char *logs, size_t size, uint32_t index)
 		{
-			fwrite(logs.data(), sizeof(char), logs.size(), s_pFile);
-		}
-
-		void EzLoggerFilePrinter::onAcceptLogs(std::string &&logs)
-		{
-			fwrite(logs.data(), sizeof(char), logs.size(), s_pFile);
+			string s;
+			char indexs[9];
+			snprintf(indexs, 9, "%07d ", index);
+			if (size != 0)
+			{
+				char *p1 = strstr(logs, " [") + 2;
+				char *p2 = strstr(logs, "] [");
+				if (p1 && p2 && p2 - p1 < EZLOG_CTIME_MAX_LEN)
+				{
+					char fileName[EZLOG_CTIME_MAX_LEN];
+					transformTimeStrToFileName(fileName, p1, p2 - p1);
+					s.append(folderPath).append(indexs, 8).append(fileName, p2 - p1).append(".log", 4);
+				}
+			}
+			if (s.empty())
+			{
+				s = folderPath + indexs;
+			}
+			return s;
 		}
 
 		bool EzLoggerFilePrinter::isThreadSafe()
@@ -643,7 +659,7 @@ namespace ezlogspace
 
 		std::thread EZlogOutputThread::CreatePrintThread()
 		{
-			thread th(EZlogOutputThread::thrdFuncMergedLogs);
+			thread th(EZlogOutputThread::thrdFuncPrintLogs);
 			th.detach();
 			return th;
 		}
@@ -702,17 +718,17 @@ namespace ezlogspace
 					s_cvPrinter.notify_all();
 				}
 			}
-			s_to_exit = true;  //notify to exit
 			{
 				std::unique_lock<std::mutex> lk_print(s_mtxPrinter);
+				//s_to_exit val is also read by garbage thread,not no need and cannot lock s_mtxDeleter here,
+				// because garbage thread exit early is no problem
+				s_to_exit = true;
 				EzLogString &mergedLogString = getMergedLogString();
 				clearGlobalCacheQueueAndNotifyGarbageCollection();  //notify to exit
 				s_printing = true;
 				lk_print.unlock();
-				s_cvPrinter.notify_all();  //notify to exit
 			}
 			lgd_merge.unlock();
-			s_cvMerge.notify_all();  //notify to exit
 			while(s_remainThreads!=0)
 			{
 				s_cvMerge.notify_all();
@@ -768,7 +784,7 @@ namespace ezlogspace
 			using namespace std::chrono;
 
 			EzLogString &str = s_global_cache_string;
-			std::sort(s_globalCache.pCacheFront,s_globalCache.pCacheNow,EzlogBeanComp());
+			std::stable_sort(s_globalCache.pCacheFront, s_globalCache.pCacheNow, EzlogBeanComp());
 
 			char ctimestr[EZLOG_CTIME_MAX_LEN] = {0};
 #if defined(EZLOG_WITH_MILLISECONDS) && defined(EZLOG_USE_STD_CHRONO)
@@ -792,7 +808,7 @@ namespace ezlogspace
 				getTimeStrFromCTime(ctimestr, len, bean, tPre);
 #endif
 				{
-					getMergedSingleLog(ctimestr, len, logs, bean);
+					getMergedSingleLog(logs, ctimestr, len, bean);
 
 
 					str += logs;
@@ -873,11 +889,11 @@ namespace ezlogspace
 		}
 #endif
 
-		inline void EZlogOutputThread::getMergedSingleLog(const char *ctimestr, size_t len, EzLogString &logs,
-												   const EzLogBean &bean)
+		inline void EZlogOutputThread::getMergedSingleLog(EzLogString &logs, const char *ctimestr, size_t len,
+														  const EzLogBean &bean)
 		{
 //has reserve EZLOG_SINGLE_LOG_STRING_FULL_RESERVE_LEN
-			logs.reserve(bean.data().size()+EZLOG_PREFIX_RESERVE_LEN + EZLOG_CTIME_MAX_LEN + bean.fileLen);
+			logs.reserve(bean.data().size() + EZLOG_PREFIX_RESERVE_LEN + EZLOG_CTIME_MAX_LEN + bean.fileLen);
 
 			logs.resize(0);
 			logs.append_unsafe('\n');                                                                    //1
@@ -915,7 +931,10 @@ namespace ezlogspace
 			{
 				if (EzLog::getState() == PERMANENT_CLOSED)
 				{
+					s_remainThreads--;
 					s_to_exit = true;
+					AtExit();
+					return;
 				}
 
 				std::unique_lock<std::mutex> lk_merge(s_mtxMerge);
@@ -943,15 +962,10 @@ namespace ezlogspace
 		}
 
 
-
-		void EZlogOutputThread::printLogs(EzLogString &&mergedLogString)
-		{
-			printLogs(mergedLogString);
-		}
-
-		void EZlogOutputThread::printLogs(const EzLogString &mergedLogString)
+		void EZlogOutputThread::printLogs()
 		{
 			static size_t bufSize = 0;
+			EzLogString &mergedLogString = s_global_cache_string;
 			bufSize += mergedLogString.length();
 			s_printedLogsLength += mergedLogString.length();
 
@@ -964,7 +978,7 @@ namespace ezlogspace
 			}
 		}
 
-		void EZlogOutputThread::thrdFuncMergedLogs()
+		void EZlogOutputThread::thrdFuncPrintLogs()
 		{
 			while (true)
 			{
@@ -973,7 +987,7 @@ namespace ezlogspace
 					return (s_printing && s_inited) || s_to_exit;
 				});
 
-				printLogs(std::move(s_global_cache_string));
+				printLogs();
 				s_global_cache_string.resize(0);
 
 				s_printing = false;

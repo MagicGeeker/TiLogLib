@@ -35,22 +35,25 @@
 #define EZLOG_GLOBAL_QUEUE_MAX_SIZE  ((size_t)1<<12U)   //4096
 #define EZLOG_SINGLE_LOG_RESERVE_LEN  50     //reserve for every log except for level,tid ...
 
+#define EZLOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER    "H:/"
+#define EZLOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE    (8U<<20U)   // log size per file,it is not accurate,especially EZLOG_GLOBAL_BUF_SIZE is bigger
+
 #define EZLOG_MALLOC_FUNCTION        malloc
 #define EZLOG_REALLOC_FUNCTION        realloc
 #define EZLOG_FREE_FUNCTION        free
 
 #define EZLOG_SUPPORT_CLOSE_LOG           FALSE
 #define EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL   FALSE
-#define EZLOG_LOG_LEVEL    6
+#define EZLOG_LOG_LEVEL    9
 
-#define       EZLOG_LEVEL_COUT     -1
-#define       EZLOG_LEVEL_ALWAYS    0
-#define       EZLOG_LEVEL_FATAL    1
-#define       EZLOG_LEVEL_ERROR    2
-#define       EZLOG_LEVEL_WARN    3
-#define       EZLOG_LEVEL_INFO    4
-#define       EZLOG_LEVEL_DEBUG    5
-#define       EZLOG_LEVEL_VERBOSE    6
+#define       EZLOG_LEVEL_COUT     2
+#define       EZLOG_LEVEL_ALWAYS    3
+#define       EZLOG_LEVEL_FATAL    4
+#define       EZLOG_LEVEL_ERROR    5
+#define       EZLOG_LEVEL_WARN    6
+#define       EZLOG_LEVEL_INFO    7
+#define       EZLOG_LEVEL_DEBUG    8
+#define       EZLOG_LEVEL_VERBOSE    9
 
 #define      EZLOG_TIME_T_IS_64BIT  TRUE
 /**************************************************MACRO FOR USER**************************************************/
@@ -127,7 +130,7 @@ namespace ezlogspace
 
 	};
 
-	constexpr char* LOG_PREFIX = (char*)"  FEWIDV" + 1;
+	constexpr char LOG_PREFIX[] = "EZ  FEWIDV";
 
     constexpr size_t EZLOG_UINT32_MAX_CHAR_LEN= (10+1);
     constexpr size_t EZLOG_INT32_MAX_CHAR_LEN =(11+1);
@@ -220,19 +223,19 @@ namespace ezlogspace
 				*this=std::move(x);
 			}
 
-			inline void operator=(const std::string &str)
+			inline EzLogStringInternal& operator=(const std::string &str)
 			{
 				resize(0);
-				append(str.data(), str.size());
+				return append(str.data(), str.size());
 			}
 
-			inline void operator=(const EzLogStringInternal &str)
+			inline EzLogStringInternal& operator=(const EzLogStringInternal &str)
 			{
 				resize(0);
-				append(str.data(), str.size());
+				return append(str.data(), str.size());
 			}
 
-			inline void operator=(EzLogStringInternal &&str)noexcept
+			inline EzLogStringInternal& operator=(EzLogStringInternal &&str)noexcept
 			{
 				this->~EzLogStringInternal();
 				this->m_front = str.m_front;
@@ -241,6 +244,7 @@ namespace ezlogspace
 				ensureZero();
 				//str.create();
 				str.makeThisInvalid();
+				return *this;
 			}
 
             inline explicit operator std::string() const
@@ -789,18 +793,14 @@ namespace ezlogspace
 	class EzLoggerPrinter : public EzLogObject
 	{
 	public:
-		virtual void onAcceptLogs(const char *const logs) = 0;
 
-		virtual void onAcceptLogs(const char *const logs,size_t size) = 0;
-
-		virtual void onAcceptLogs(const std::string &logs) = 0;
-
-		virtual void onAcceptLogs(std::string &&logs) = 0;
+		virtual void onAcceptLogs(const char *const logs, size_t size) = 0;
 
 		virtual void sync() = 0;
 
 		virtual bool isThreadSafe() = 0;
 
+		//if it is static,it will not be deleted by EzLog init() function
 		virtual bool isStatic()
 		{
 			return true;
@@ -808,6 +808,8 @@ namespace ezlogspace
 
 		virtual ~EzLoggerPrinter() = default;
 
+	protected:
+		size_t singleFilePrintedLogSize = 0;
 	};
 
 	enum EzLogStateEnum
@@ -1026,13 +1028,9 @@ namespace ezlogspace
 	class EzNoLogStream
 	{
 	public:
-		inline EzNoLogStream()
-		{
-		}
+		inline EzNoLogStream() = default;
 
-		inline ~EzNoLogStream()
-		{
-		}
+		inline ~EzNoLogStream() = default;
 
 		template<typename T>
 		inline EzNoLogStream &operator<<(const T &s)
