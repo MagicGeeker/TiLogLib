@@ -150,6 +150,30 @@ namespace ezlogspace
 			virtual ~EzLogObject() = default;
 		};
 
+		template<size_t _SleepWhenAcquireFailedInNanoSeconds = size_t(-1)>
+		class SpinLock
+		{
+			std::atomic_flag locked_flag_ = ATOMIC_FLAG_INIT;
+		public:
+			void lock()
+			{
+				while (locked_flag_.test_and_set())
+				{
+					if_constexpr (_SleepWhenAcquireFailedInNanoSeconds == size_t(-1))
+					{
+						std::this_thread::yield();
+					} else if (_SleepWhenAcquireFailedInNanoSeconds != 0)
+					{
+						std::this_thread::sleep_for(std::chrono::nanoseconds(_SleepWhenAcquireFailedInNanoSeconds));
+					}
+				}
+			}
+
+			void unlock()
+			{
+				locked_flag_.clear();
+			}
+		};
 
 		class EzLoggerTerminalPrinter : public EzLoggerPrinter
 		{
@@ -193,6 +217,27 @@ namespace ezlogspace
 		};
 
 		const std::string EzLoggerFilePrinter::folderPath = EZLOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER;
+
+		struct LogCacheStru
+		{
+			EzLogBean **cache;
+			EzLogBean **pCacheFront; //cache first
+			EzLogBean **pCacheBack; //cache back
+			EzLogBean **pCacheNow;   // current tail invalid bean
+		};
+		static_assert(std::is_trivial<LogCacheStru>::value, "fatal error");
+
+		using ThreadLocalSpinLock =SpinLock<50>;
+
+		struct ThreadLocalStru
+		{
+			const char *tid;
+			ThreadLocalSpinLock spinLock;
+
+			ThreadLocalStru() : tid(s_tid), spinLock()
+			{
+			};
+		};
 
 		class EZlogOutputThread
 		{
@@ -241,9 +286,20 @@ namespace ezlogspace
 
 			static bool Init();
 
+			static inline bool localCircularQueuePushBack(EzLogBean *obj);
+
+			static inline bool moveLocalCacheToGlobal(LogCacheStru &bean);
+
 		private:
 			thread_local static bool s_thread_init;
 
+			static constexpr size_t GLOBAL_SIZE = EZLOG_GLOBAL_QUEUE_MAX_SIZE;
+			static std::mutex* s_pMtxMap;
+			static std::mutex& s_mtxMap;
+			static unordered_map<LogCacheStru *,ThreadLocalStru*> s_globalCachesMap;
+			static volatile bool s_globalCachesMap_inited;
+			
+			static LogCacheStru s_globalCache;
 			static uint64_t s_printedLogsLength;
 			static uint64_t s_printedLogs;
 			static EzLogString s_global_cache_string;
@@ -258,6 +314,7 @@ namespace ezlogspace
 			static bool s_printing;
 			static std::thread s_threadPrinter;
 
+			static LogCacheStru s_garbages;
 			static std::mutex s_mtxDeleter;
 			static std::condition_variable s_cvDeleter;
 			static bool s_deleting;
@@ -316,32 +373,6 @@ namespace ezlogspace
 			static std::unique_ptr<EzLogImpl> s_upIns;
 			static bool s_inited;
 		};
-
-		template<size_t _SleepWhenAcquireFailedInNanoSeconds = size_t(-1)>
-		class SpinLock
-		{
-			std::atomic_flag locked_flag_ = ATOMIC_FLAG_INIT;
-		public:
-			void lock()
-			{
-				while (locked_flag_.test_and_set())
-				{
-					if_constexpr (_SleepWhenAcquireFailedInNanoSeconds == size_t(-1))
-					{
-						std::this_thread::yield();
-					} else if (_SleepWhenAcquireFailedInNanoSeconds != 0)
-					{
-						std::this_thread::sleep_for(std::chrono::nanoseconds(_SleepWhenAcquireFailedInNanoSeconds));
-					}
-				}
-			}
-
-			void unlock()
-			{
-				locked_flag_.clear();
-			}
-		};
-
 
 	}
 }
@@ -430,8 +461,8 @@ namespace ezlogspace
 			snprintf(indexs, 9, "%07d ", index);
 			if (size != 0)
 			{
-				char *p1 = strstr(logs, " [") + 2;
-				char *p2 = strstr(logs, "] [");
+				const char *p1 = strstr(logs, " [") + 2;
+				const char *p2 = strstr(logs, "] [");
 				if (p1 && p2 && p2 - p1 < EZLOG_CTIME_MAX_LEN)
 				{
 					char fileName[EZLOG_CTIME_MAX_LEN];
@@ -556,24 +587,7 @@ namespace ezlogspace
 
 
 #ifdef __________________________________________________EZlogOutputThread__________________________________________________
-		struct LogCacheStru
-		{
-			EzLogBean **cache;
-			EzLogBean **pCacheFront; //cache first
-			EzLogBean **pCacheBack; //cache back
-			EzLogBean **pCacheNow;   // current tail invalid bean
-		};
-		static_assert(std::is_trivial<LogCacheStru>::value, "fatal error");
 
-		using ThreadLocalSpinLock =SpinLock<50>;
-		struct ThreadLocalStru
-		{
-			const char *tid;
-			ThreadLocalSpinLock spinLock;
-			ThreadLocalStru() : tid(s_tid), spinLock()
-			{
-			};
-		};
 		static thread_local ThreadLocalStru* s_pThreadLocalStru= eznew<ThreadLocalStru>();
 		static constexpr size_t LOCAL_SIZE = EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE;
 		static thread_local LogCacheStru *s_pLocalCache = (LogCacheStru *) ezmalloc(
@@ -587,14 +601,16 @@ namespace ezlogspace
 		}();
 
 
-		static constexpr size_t GLOBAL_SIZE = EZLOG_GLOBAL_QUEUE_MAX_SIZE;
-		static LogCacheStru s_globalCache = {(EzLogBean **) ezmalloc(sizeof(EzLogBean *) * GLOBAL_SIZE),
-											 &s_globalCache.cache[0], &s_globalCache.cache[GLOBAL_SIZE - 1],
-											 s_globalCache.pCacheFront};
-		static unordered_map<LogCacheStru *,ThreadLocalStru*> _globalCachesMap;
-
-
 		thread_local bool EZlogOutputThread::s_thread_init = InitForEveryThread();
+
+		std::mutex *EZlogOutputThread::s_pMtxMap = new std::mutex();
+		std::mutex &EZlogOutputThread::s_mtxMap = *s_pMtxMap;
+		unordered_map<LogCacheStru *, ThreadLocalStru *> EZlogOutputThread::s_globalCachesMap;
+		volatile bool EZlogOutputThread::s_globalCachesMap_inited = true;
+
+		LogCacheStru EZlogOutputThread::s_globalCache = {(EzLogBean **) ezmalloc(sizeof(EzLogBean *) * GLOBAL_SIZE),
+														 &s_globalCache.cache[0], &s_globalCache.cache[GLOBAL_SIZE - 1],
+														 s_globalCache.pCacheFront};
 		uint64_t EZlogOutputThread::s_printedLogsLength = 0;
 		uint64_t EZlogOutputThread::s_printedLogs = 0;
 		EzLogString EZlogOutputThread::s_global_cache_string;
@@ -609,8 +625,8 @@ namespace ezlogspace
 		bool EZlogOutputThread::s_printing= false;
 		std::thread EZlogOutputThread::s_threadPrinter= CreatePrintThread();
 
-		static LogCacheStru s_garbages = {(EzLogBean **) ezmalloc(sizeof(EzLogBean *) * GLOBAL_SIZE),
-											 &s_garbages.cache[0], &s_garbages.cache[GLOBAL_SIZE - 1],
+		LogCacheStru EZlogOutputThread::s_garbages = {(EzLogBean **) ezmalloc(sizeof(EzLogBean *) * GLOBAL_SIZE),
+													  &s_garbages.cache[0], &s_garbages.cache[GLOBAL_SIZE - 1],
 											 s_garbages.pCacheFront};
 		std::mutex EZlogOutputThread::s_mtxDeleter;
 		std::condition_variable EZlogOutputThread::s_cvDeleter;
@@ -619,12 +635,12 @@ namespace ezlogspace
 
 		std::thread EZlogOutputThread::s_threadPoll = CreatePollThread();
 
-		bool EZlogOutputThread::s_inited = Init();
 		bool EZlogOutputThread::s_to_exit = false;
 		atomic_int32_t EZlogOutputThread::s_remainThreads(4);
+		bool EZlogOutputThread::s_inited = Init();
 
 
-		static inline bool localCircularQueuePushBack(EzLogBean *obj)
+		inline bool EZlogOutputThread::localCircularQueuePushBack(EzLogBean *obj)
 		{
 			DEBUG_ASSERT(s_localCache.pCacheNow <= s_localCache.pCacheBack);
 			DEBUG_ASSERT(s_localCache.pCacheFront <= s_localCache.pCacheNow);
@@ -633,7 +649,7 @@ namespace ezlogspace
 			return s_localCache.pCacheNow > s_localCache.pCacheBack;
 		}
 
-		static inline bool moveLocalCacheToGlobal(LogCacheStru &bean)
+		inline bool EZlogOutputThread::moveLocalCacheToGlobal(LogCacheStru &bean)
 		{
 			DEBUG_ASSERT(bean.pCacheNow <= bean.pCacheBack + 1);
 			DEBUG_ASSERT(bean.pCacheFront <= bean.pCacheNow);
@@ -680,8 +696,17 @@ namespace ezlogspace
 
 		bool EZlogOutputThread::InitForEveryThread()
 		{
-			lock_guard<mutex> lgd(s_mtxMerge);
-			_globalCachesMap.emplace(s_pLocalCache, s_pThreadLocalStru);
+			//some thread begin before main thread,so global var not inited,this happens in msvc in some version,
+			//and cause crash because s_mtxMerge is not inited,it is often a thread created bu kernel
+			if ((volatile std::mutex *) EZlogOutputThread::s_pMtxMap == nullptr ||
+				EZlogOutputThread::s_globalCachesMap_inited != true)  //s_globalCachesMap is not inited
+			{
+				printf("!EZlogOutputThread::s_globalCachesMap_inited %s\n", GetThreadIDString());
+				fflush(stdout);
+				return false;
+			}
+			lock_guard<mutex> lgd(s_mtxMap);
+			s_globalCachesMap.emplace(s_pLocalCache, s_pThreadLocalStru);
 			return true;
 		}
 
@@ -703,8 +728,9 @@ namespace ezlogspace
 		void EZlogOutputThread::AtExit()
 		{
 			unique_lock<mutex> lgd_merge(s_mtxMerge);
+			unique_lock<mutex> lk_map(s_mtxMap);
 
-			for (auto &pa:_globalCachesMap)
+			for (auto &pa:s_globalCachesMap)
 			{
 				LogCacheStru &localCacheStru = *pa.first;
 				bool isGlobalFull = moveLocalCacheToGlobal(localCacheStru);
@@ -718,6 +744,7 @@ namespace ezlogspace
 					s_cvPrinter.notify_all();
 				}
 			}
+			lk_map.unlock();
 			{
 				std::unique_lock<std::mutex> lk_print(s_mtxPrinter);
 				//s_to_exit val is also read by garbage thread,not no need and cannot lock s_mtxDeleter here,
@@ -1034,13 +1061,14 @@ namespace ezlogspace
 			//return;
 			while (true)
 			{
-				unique_lock<mutex> lgd_merge(s_mtxMerge, std::try_to_lock);
-				if (!lgd_merge.owns_lock())
+				unique_lock<mutex> lk_merge(s_mtxMerge, std::try_to_lock);
+				unique_lock<mutex> lk_map(s_mtxMap, std::try_to_lock);
+				if (!lk_merge.owns_lock() || !lk_map.owns_lock())
 				{
 					this_thread::sleep_for(chrono::milliseconds(EZLOG_POLL_THREAD_SLEEP_MS));
 					continue;
 				}
-				for(auto& pa:_globalCachesMap)
+				for(auto& pa:s_globalCachesMap)
 				{
 					LogCacheStru &localCacheStru = *pa.first;
 					ThreadLocalSpinLock &lk=pa.second->spinLock;
@@ -1057,6 +1085,7 @@ namespace ezlogspace
 						s_cvPrinter.notify_all();
 					}
 				}
+				lk_map.unlock();
 				{
 					std::unique_lock<std::mutex> lk_print(s_mtxPrinter);
 					EzLogString& mergedLogString = getMergedLogString();
@@ -1067,7 +1096,7 @@ namespace ezlogspace
 				}
 				
 				s_merging = false;
-				lgd_merge.unlock();
+				lk_merge.unlock();
 				if (s_to_exit)
 				{
 					s_remainThreads--;
