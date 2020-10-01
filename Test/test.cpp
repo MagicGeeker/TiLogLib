@@ -17,10 +17,11 @@ using namespace ezlogspace;
 //#define file_time_many_thread_log_test_with_sleep_____________________
 //#define file_time_multi_thread_simulation__log_test_____________________
 //#define file_single_thread_benchmark_test_____________________
-//#define file_multi_thread_benchmark_test_____________________
+#define file_multi_thread_benchmark_test_____________________
 //#define file_multi_thread_close_print_benchmark_test_____________________
 //#define file_single_thread_operator_test_____________________
-#define terminal_multi_thread_poll__log_test_____________________
+//#define terminal_multi_thread_poll__log_test_____________________
+//#define file_multi_thread_memory_leak_stress_test_____________________
 
 uint64_t complexCalFunc(uint64_t x)
 {
@@ -526,6 +527,44 @@ TEST_CASE("terminal_multi_thread_poll__log_test_____________________")
 	uint64_t us = s1m.GetMicrosecondsUpToNOW();
 	EZCOUT << (1000.0f * threads * loops / us) << " logs per millisecond\n";
 	EZCOUT << 1.0 * us / (loops * threads) << " us per log\n";
+}
+
+#endif
+
+#ifdef file_multi_thread_memory_leak_stress_test_____________________
+
+TEST_CASE("file_multi_thread_memory_leak_stress_test_____________________")
+{
+	EZLOGI << "file_multi_thread_memory_leak_stress_test_____________________";
+#ifdef NDEBUG
+	constexpr int32_t threads = 20000;
+#else
+	constexpr int32_t threads = 100;
+#endif
+	constexpr uint64_t loops = 50;
+
+	atomic_uint64_t tt(threads);
+	SimpleTimer s1m;
+
+	static bool begin = false;
+	static condition_variable_any cva;
+
+	for (int i = 1; i <= threads; i++)
+	{
+		thread([=, &tt]() -> void {
+			for (uint64_t j = 0; j < loops; j++)
+			{
+				EZLOGD << "loop= " << loops << " j= " << j;
+			}
+			tt--;
+			EZCOUT << " " << i << " to exit \n";
+		}).detach();
+		this_thread::sleep_for(chrono::microseconds(1000));
+	}
+	while (tt != 0)
+	{
+		this_thread::sleep_for(chrono::milliseconds(1000));
+	}
 }
 
 #endif

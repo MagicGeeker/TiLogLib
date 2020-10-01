@@ -65,5 +65,5 @@ typedef unsigned long long          uint64_t;
 #if !defined NDEBUG && !defined FORCE_DEBUG_PAUSE
 #define DEBUG_PAUSE
 #else
-#define DEBUG_PAUSE {getchar();getchar();}
+#define DEBUG_PAUSE {volatile char* p=NULL;p++;}
 #endif
