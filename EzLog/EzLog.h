@@ -28,14 +28,14 @@
 #define    EZLOG_WITH_MILLISECONDS
 
 
-#define EZLOG_POLL_THREAD_SLEEP_MS  100   //poll period 1000ms to move local cache to global cache
+#define EZLOG_POLL_DEFAULT_THREAD_SLEEP_MS  1000   //poll period 1000ms to move local cache to global cache
 #define EZLOG_GLOBAL_BUF_FULL_SLEEP_US  10   //work thread sleep for 10us when global buf is full and logging
 #define EZLOG_GLOBAL_BUF_SIZE  ((size_t)1<<20U)    //1MB
 #define EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE  ((size_t)1<<8U)   //256
 #define EZLOG_GLOBAL_QUEUE_MAX_SIZE  ((size_t)1<<12U)   //4096
 #define EZLOG_SINGLE_LOG_RESERVE_LEN  50     //reserve for every log except for level,tid ...
 
-#define EZLOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER    "H:/"
+#define EZLOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER    "F:/"
 #define EZLOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE    (8U<<20U)   // log size per file,it is not accurate,especially EZLOG_GLOBAL_BUF_SIZE is bigger
 
 #define EZLOG_MALLOC_FUNCTION        malloc
