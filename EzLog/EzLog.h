@@ -661,8 +661,12 @@ namespace ezlogspace
 
 		public:
 			DEBUG_CANARY_UINT64(flag0)
+			EzLogString dataStr;
 #if (defined( EZLOG_USE_CTIME)) && (defined(EZLOG_TIME_T_IS_64BIT))
 			time_t ctime;
+#endif
+#if defined(EZLOG_USE_STD_CHRONO)
+			TimePoint chronoTime;
 #endif
 			const char *tid;
 			const char *file;
@@ -678,48 +682,32 @@ namespace ezlogspace
 			DEBUG_CANARY_UINT64(flag2)
 
 		public:
-			static EzLogBean *GetThisFromData(EzLogString *data)
-			{
-				return (EzLogBean *) (void *) data - 1;
-			}
 
 			EzLogString &data()
 			{
-				return *(EzLogString *) (this + 1);
+				return dataStr;
 			}
 
 			const EzLogString &data() const
 			{
-				return *(EzLogString *) (this + 1);
+				return dataStr;
 			}
 
 #ifdef EZLOG_USE_STD_CHRONO
 
 			const TimePoint &cpptime() const
 			{
-				constexpr size_t beanSize = sizeof(EzLogBean);
-				constexpr size_t stringSize = sizeof(EzLogString);
-				constexpr size_t offset_cpptime = beanSize + stringSize;
-				return *(TimePoint *) ((char *) this + offset_cpptime);
+				return chronoTime;
 			};
 
 			TimePoint &cpptime()
 			{
-				constexpr size_t beanSize = sizeof(EzLogBean);
-				constexpr size_t stringSize = sizeof(EzLogString);
-				constexpr size_t offset_cpptime = beanSize + stringSize;
-				return *(TimePoint *) ((char *) this + offset_cpptime);
+				return chronoTime;
 			};
-
-			inline static constexpr size_t FullSize()
-			{
-				return sizeof(EzLogBean) + sizeof(std::chrono::system_clock::time_point) + sizeof(EzLogString);
-			}
 
 			inline static EzLogBean *CreateInstance()
 			{
-				constexpr size_t sz = FullSize();
-				EzLogBean *thiz = (EzLogBean *) EZLOG_MALLOC_FUNCTION(sz);
+				EzLogBean *thiz = (EzLogBean *) EZLOG_MALLOC_FUNCTION(sizeof(EzLogBean));
 				PlacementNew(&thiz->cpptime(), std::chrono::system_clock::now());
 				return thiz;
 			}
@@ -735,7 +723,7 @@ namespace ezlogspace
 				p->data().~EzLogString();
 				p->cpptime().~TimePoint();
 				memset(p, UINT8_MAX, sizeof(EzLogBean));
-				Delete(p);
+				EZLOG_FREE_FUNCTION(p);
 				p = (EzLogBean *) UINT64_MAX;
 			}
 
@@ -744,21 +732,15 @@ namespace ezlogspace
 			{
 				p->data().~EzLogString();
 				p->cpptime().~TimePoint();
-				Delete(p);
+				EZLOG_FREE_FUNCTION(p);
 			}
 #endif
 
 #else
 
-			inline static constexpr size_t FullSize()
-			{
-				return sizeof(EzLogBean) + sizeof(EzLogString);
-			}
-
 			inline static EzLogBean *CreateInstance()
 			{
-				constexpr size_t sz = FullSize();
-				EzLogBean *thiz = (EzLogBean *) EZLOG_MALLOC_FUNCTION(sz);
+				EzLogBean *thiz = (EzLogBean *) EZLOG_MALLOC_FUNCTION(sizeof(EzLogBean));
 				thiz->ctime = time(NULL);
 				return thiz;
 			}
@@ -770,22 +752,21 @@ namespace ezlogspace
 				assert((uint8_t)p->level != UINT8_MAX);
 				assert((uintptr_t)&p->data() != (uintptr_t)UINT64_MAX);
 				p->data().~EzLogString();
-				memset(p, UINT8_MAX, FullSize());
-				Delete(p);
+				memset(p, UINT8_MAX, sizeof(EzLogBean));
+				EZLOG_FREE_FUNCTION(p);
 				p = (EzLogBean *)UINT64_MAX;
 			}
 #else
 			inline static void DestroyInstance(EzLogBean *p)
 			{
 				p->data().~EzLogString();
-				Delete(p);
+				EZLOG_FREE_FUNCTION(p);
 			}
 #endif
 
 #endif
 		};
 
-		static_assert(std::is_pod<EzLogBean>::value, "EzLogBean not pod!");
 	}
 
 	class EzLogStream;
