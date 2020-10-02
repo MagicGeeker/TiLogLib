@@ -35,7 +35,7 @@
 #define EZLOG_GLOBAL_QUEUE_MAX_SIZE  ((size_t)1<<12U)   //4096
 #define EZLOG_SINGLE_LOG_RESERVE_LEN  50     //reserve for every log except for level,tid ...
 
-#define EZLOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER    "F:/"
+#define EZLOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER    "a:/"
 #define EZLOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE    (8U<<20U)   // log size per file,it is not accurate,especially EZLOG_GLOBAL_BUF_SIZE is bigger
 
 #define EZLOG_MALLOC_FUNCTION        malloc
@@ -653,6 +653,30 @@ namespace ezlogspace
 		{
 			return std::move(lhs += rhs);
 		}
+
+		class EzLogTime
+		{
+		private:
+			using SystemLock=std::chrono::system_clock;
+			using TimePoint=std::chrono::system_clock::time_point;
+		public:
+#if defined(EZLOG_USE_STD_CHRONO)
+			TimePoint chronoTime;
+			EzLogTime()
+			{
+				chronoTime = TimePoint::min();
+			}
+
+#else
+			time_t ctime;
+			EzLogTime()
+			{
+				ctime=(time_t)0;
+			}
+#endif
+
+
+		};
 
 		class EzLogBean : public EzLogObject
 		{

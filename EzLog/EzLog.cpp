@@ -89,7 +89,7 @@ using namespace ezlogspace;
 namespace ezloghelperspace
 {
 	thread_local static char *s_threadIDLocal = (char *) ezmalloc(
-			EZLOG_THREAD_ID_MAX_LEN * sizeof(char));            //TODO memory Leak
+			EZLOG_THREAD_ID_MAX_LEN * sizeof(char));
 
 	const char *GetThreadIDString()
 	{
@@ -243,20 +243,35 @@ namespace ezlogspace
 			EzLogBean **pCacheFront; //cache first
 			EzLogBean **pCacheBack; //cache back
 			EzLogBean **pCacheNow;   // current tail invalid bean
+			ThreadLocalSpinLock spinLock;//protect cache
 
 			const char *tid;
-			ThreadLocalSpinLock spinLock;
 			std::mutex thrdExistMtx;
 			std::condition_variable thrdExistCV;
 
-			ThreadStru(size_t cacheSize) : tid(s_tid), spinLock(), thrdExistMtx(), thrdExistCV()
+			explicit ThreadStru(size_t cacheSize) : tid(s_tid), spinLock(), thrdExistMtx(), thrdExistCV()
 			{
-				cache = (EzLogBean **) ezmalloc(sizeof(EzLogBean *) * cacheSize);//TODO memory Leak
+				cache = (EzLogBean **) ezmalloc(sizeof(EzLogBean *) * cacheSize);
 				DEBUG_ASSERT(cache != NULL);
 				pCacheFront = cache;
 				pCacheBack = &cache[cacheSize - 1];
 				pCacheNow = cache;
 			};
+
+			explicit ThreadStru(size_t cacheSize, const char* _tid) : tid(_tid), spinLock(), thrdExistMtx(), thrdExistCV()
+			{
+				cache = (EzLogBean**)ezmalloc(sizeof(EzLogBean*) * cacheSize);
+				DEBUG_ASSERT(cache != NULL);
+				pCacheFront = cache;
+				pCacheBack = &cache[cacheSize - 1];
+				pCacheNow = cache;
+			};
+
+			~ThreadStru()
+			{
+				ezfree(cache);
+				ezfree((void*)tid);
+			}
 		};
 
 		struct ThreadStruQueue
@@ -355,6 +370,7 @@ namespace ezlogspace
 			static std::thread s_threadDeleter;
 
 			static uint32_t s_pollPeriodms;
+			static EzLogTime s_poll_last_time;
 			static std::thread s_threadPoll;
 
 			static bool s_inited;
@@ -641,7 +657,7 @@ namespace ezlogspace
 		ThreadStruQueue EZLogOutputThread::s_threadStruQueue;
 		volatile bool EZLogOutputThread::s_threadStruQueue_inited = true;
 
-		ThreadStru EZLogOutputThread::s_globalCache(GLOBAL_SIZE);
+		ThreadStru EZLogOutputThread::s_globalCache(GLOBAL_SIZE, nullptr);
 		uint64_t EZLogOutputThread::s_printedLogsLength = 0;
 		uint64_t EZLogOutputThread::s_printedLogs = 0;
 		EzLogString EZLogOutputThread::s_global_cache_string;
@@ -657,13 +673,14 @@ namespace ezlogspace
 		bool EZLogOutputThread::s_isQueueEmpty = false;
 		std::thread EZLogOutputThread::s_threadPrinter= CreatePrintThread();
 
-		ThreadStru EZLogOutputThread::s_garbages(GLOBAL_SIZE);
+		ThreadStru EZLogOutputThread::s_garbages(GLOBAL_SIZE, nullptr);
 		std::mutex EZLogOutputThread::s_mtxDeleter;
 		std::condition_variable EZLogOutputThread::s_cvDeleter;
 		bool EZLogOutputThread::s_deleting= false;
 		std::thread EZLogOutputThread::s_threadDeleter = CreateGarbageCollectionThread();
 
 		uint32_t EZLogOutputThread::s_pollPeriodms = EZLOG_POLL_DEFAULT_THREAD_SLEEP_MS;
+		EzLogTime EZLogOutputThread::s_poll_last_time;
 		std::thread EZLogOutputThread::s_threadPoll = CreatePollThread();
 
 		bool EZLogOutputThread::s_to_exit = false;
@@ -1077,10 +1094,7 @@ namespace ezlogspace
 					for (auto it = s_threadStruQueue.toDelQueue.begin(); it != s_threadStruQueue.toDelQueue.end();)
 					{
 						ThreadStru &threadStru = **it;
-
-						ezfree((char *) threadStru.tid);
-						ezfree(threadStru.cache);
-						ezfree(&threadStru);
+						ezdelete(&threadStru);
 						it = s_threadStruQueue.toDelQueue.erase(it);
 					}
 					lk_map.unlock();
@@ -1099,6 +1113,10 @@ namespace ezlogspace
 		void EZLogOutputThread::thrdFuncPoll()
 		{
 			freeInternalThreadMemory();//this thread is no need log
+			ezfree((char*)s_pThreadLocalStru->tid);
+			s_pThreadLocalStru->tid= nullptr;
+			//try_lock for this thread handled mutex is undefined behaviour,
+			//hack! make it to nullptr and not to try_lock thrdExistMtx
 			while (true)
 			{
 				unique_lock<mutex> lk_merge;
@@ -1113,13 +1131,19 @@ namespace ezlogspace
 				for (auto it = s_threadStruQueue.availQueue.begin(); it != s_threadStruQueue.availQueue.end();)
 				{
 					ThreadStru &threadStru = *(*it);
+					ThreadLocalSpinLock& lk = threadStru.spinLock;
+					lk.lock();
 					DEBUG_ASSERT(threadStru.pCacheNow >= threadStru.cache);
-					if (isQueueEmpty==true && threadStru.pCacheNow > threadStru.cache)
+					if (threadStru.pCacheNow > threadStru.cache)
 					{
 						isQueueEmpty = false;
 					}
+					bool isGlobalFull = moveLocalCacheToGlobal(threadStru);
+					lk.unlock();
+
+					
 					std::mutex &mtx = threadStru.thrdExistMtx;
-					if (mtx.try_lock())
+					if (threadStru.tid!= nullptr && mtx.try_lock())
 					{
 						mtx.unlock();
 						s_threadStruQueue.toPrintQueue.emplace_back(*it);
@@ -1129,10 +1153,6 @@ namespace ezlogspace
 						++it;
 					}
 
-					ThreadLocalSpinLock &lk=threadStru.spinLock;
-					lk.lock();
-					bool isGlobalFull = moveLocalCacheToGlobal(threadStru);
-					lk.unlock();
 					if (isGlobalFull)
 					{
 						std::unique_lock<std::mutex> lk_print(s_mtxPrinter);
@@ -1168,10 +1188,10 @@ namespace ezlogspace
 
 		void EZLogOutputThread::freeInternalThreadMemory()
 		{
-			ezfree((char*)s_pThreadLocalStru->tid);
+			//ezfree((char*)s_pThreadLocalStru->tid);  //no need,for debug
 			ezfree(s_pThreadLocalStru->cache);
 			//set it to NULL,make sure will not free again by thrdFuncGarbageCollection
-			s_pThreadLocalStru->tid = NULL;
+			//s_pThreadLocalStru->tid = NULL;
 			s_pThreadLocalStru->cache = NULL;
 			s_pThreadLocalStru->pCacheFront = NULL;
 			s_pThreadLocalStru->pCacheNow = NULL;
