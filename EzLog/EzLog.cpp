@@ -744,13 +744,14 @@ namespace ezlogspace
 
 		bool EZLogOutputThread::InitForEveryThread()
 		{
-			//some thread begin before main thread,so global var not inited,this happens in msvc in some version,
-			//and cause crash because s_mtxMerge is not inited,it is often a thread created bu kernel
+			//some thread run before main thread,so global var are not inited,which happens in msvc in some version,
+			//and cause crash because s_mtxMerge is not inited,these threads are often created by kernel.
 			if ((volatile std::mutex *) EZLogOutputThread::s_pMtxMap == nullptr ||
 				EZLogOutputThread::s_threadStruQueue_inited != true)  //s_threadStruQueue is not inited
 			{
-				printf("!EZLogOutputThread::s_threadStruQueue_inited %s\n", GetThreadIDString());
+				printf("!EZLogOutputThread::s_threadStruQueue_inited tid= %s\n", GetThreadIDString());
 				fflush(stdout);
+				ezdelete(s_pThreadLocalStru);
 				return false;
 			}
 			lock_guard<mutex> lgd(s_mtxQueue);
