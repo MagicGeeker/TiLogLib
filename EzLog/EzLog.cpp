@@ -133,6 +133,12 @@ namespace ezloghelperspace
 		}
 	}
 
+	static bool tryLocks(std::unique_lock<mutex> &lk1, std::mutex &mtx1)
+	{
+		lk1 = unique_lock<mutex>(mtx1, std::try_to_lock);
+		return lk1.owns_lock();
+	}
+
 	static bool tryLocks(std::unique_lock<mutex> &lk1, std::mutex &mtx1, std::unique_lock<mutex> &lk2, std::mutex &mtx2)
 	{
 		lk1 = unique_lock<mutex>(mtx1, std::try_to_lock);
@@ -304,7 +310,17 @@ namespace ezlogspace
 
 			static EzLogString &getMergedLogString();
 
-			static void clearGlobalCacheQueueAndNotifyGarbageCollection();
+			static void getMergePermission(std::unique_lock<std::mutex> &lk);
+
+			static bool tryGetMergePermission(std::unique_lock<std::mutex> &lk);
+
+			static void waitForMerge(std::unique_lock<std::mutex> &lk);
+
+			static void getMoveGarbagePermission(std::unique_lock<std::mutex> &lk);
+
+			static void waitForGC(std::unique_lock<std::mutex> &lk);
+
+			static void clearGlobalCacheQueueAndNotifyGC();
 
 			static void thrdFuncMergeLogs();
 
@@ -673,7 +689,7 @@ namespace ezlogspace
 		bool EZLogOutputThread::s_isQueueEmpty = false;
 		std::thread EZLogOutputThread::s_threadPrinter= CreatePrintThread();
 
-		ThreadStru EZLogOutputThread::s_garbages(GLOBAL_SIZE, nullptr);
+		ThreadStru EZLogOutputThread::s_garbages(4 * GLOBAL_SIZE, nullptr);
 		std::mutex EZLogOutputThread::s_mtxDeleter;
 		std::condition_variable EZLogOutputThread::s_cvDeleter;
 		bool EZLogOutputThread::s_deleting= false;
@@ -800,18 +816,8 @@ namespace ezlogspace
 			s_pThreadLocalStru->spinLock.unlock();
 			if (isLocalFull)
 			{
-				std::unique_lock<std::mutex> lk(s_mtxMerge);
-				while (s_merging)        //另外一个线程的本地缓存和全局缓存已满，本线程却拿到锁，应该需要等打印线程打印完
-				{
-					lk.unlock();
-					for (size_t us = EZLOG_GLOBAL_BUF_FULL_SLEEP_US; s_merging;)
-					{
-						s_cvMerge.notify_all();
-						std::this_thread::sleep_for(std::chrono::microseconds(us + FastRand() % us));
-					}
-					//等这个线程拿到锁的时候，可能全局缓存已经打印完，也可能又满了正在打印
-					lk.lock();
-				}
+				std::unique_lock<std::mutex> lk;
+				getMergePermission(lk);
 				bool isGlobalFull = moveLocalCacheToGlobal(s_localCache);
 				if (isGlobalFull)
 				{
@@ -968,12 +974,74 @@ namespace ezlogspace
 //total =len1 +bean.fileLen+bean.data->size()
 		}
 
-		void EZLogOutputThread::clearGlobalCacheQueueAndNotifyGarbageCollection()
+		void EZLogOutputThread::getMergePermission(std::unique_lock<std::mutex> &lk)
 		{
-			unique_lock<mutex> ulk(s_mtxDeleter);
+			DEBUG_ASSERT(!lk.owns_lock());
+			lk = std::unique_lock<std::mutex>(s_mtxMerge);
+			waitForMerge(lk);
+		}
+
+		bool EZLogOutputThread::tryGetMergePermission(std::unique_lock<std::mutex> &lk)
+		{
+			DEBUG_ASSERT(!lk.owns_lock());
+			lk = std::unique_lock<std::mutex>(s_mtxMerge, std::try_to_lock);
+			if (lk.owns_lock())
+			{
+				waitForMerge(lk);
+				return true;
+			}
+			return false;
+		}
+
+		void EZLogOutputThread::waitForMerge(std::unique_lock<std::mutex> &lk)
+		{
+			DEBUG_ASSERT(lk.owns_lock());
+			while (s_merging)        //另外一个线程的本地缓存和全局缓存已满，本线程却拿到锁，应该需要等打印线程打印完
+			{
+				lk.unlock();
+				for (size_t us = EZLOG_GLOBAL_BUF_FULL_SLEEP_US; s_merging;)
+				{
+					s_cvMerge.notify_all();
+					std::this_thread::sleep_for(std::chrono::microseconds(us + FastRand() % us));
+				}
+				//等这个线程拿到锁的时候，可能全局缓存已经打印完，也可能又满了正在打印
+				lk.lock();
+			}
+		}
+
+		void EZLogOutputThread::getMoveGarbagePermission(std::unique_lock<std::mutex> &lk)
+		{
+			DEBUG_ASSERT(!lk.owns_lock());
+			lk = std::unique_lock<std::mutex>(s_mtxDeleter);
 			size_t size = (s_globalCache.pCacheNow - s_globalCache.pCacheFront);
-			memcpy(s_garbages.cache, s_globalCache.cache, size * sizeof(EzLogBean *));
-			s_garbages.pCacheNow = s_garbages.cache + size;
+			if (s_garbages.pCacheNow + size > 1 + s_garbages.pCacheBack)
+			{
+				waitForGC(lk);
+			}
+		}
+
+		void EZLogOutputThread::waitForGC(std::unique_lock<std::mutex> &lk)
+		{
+			DEBUG_ASSERT(lk.owns_lock());
+			while (s_deleting)
+			{
+				lk.unlock();
+				for (; s_deleting;)
+				{
+					s_cvDeleter.notify_all();
+					std::this_thread::yield();
+				}
+				lk.lock();
+			}
+		}
+
+		void EZLogOutputThread::clearGlobalCacheQueueAndNotifyGC()
+		{
+			unique_lock<mutex> ulk;
+			getMoveGarbagePermission(ulk);
+			size_t size = (s_globalCache.pCacheNow - s_globalCache.pCacheFront);
+			memcpy(s_garbages.pCacheNow, s_globalCache.cache, size * sizeof(EzLogBean *));
+			s_garbages.pCacheNow += size;
 			s_globalCache.pCacheNow = s_globalCache.pCacheFront;
 			s_deleting = true;
 			ulk.unlock();
@@ -999,12 +1067,12 @@ namespace ezlogspace
 				});
 
 				std::unique_lock<std::mutex> lk_print(s_mtxPrinter);
-				EzLogString & mergedLogString = getMergedLogString();
-				clearGlobalCacheQueueAndNotifyGarbageCollection();
+				EzLogString &mergedLogString = getMergedLogString();
+				clearGlobalCacheQueueAndNotifyGC();
 				s_merging = false;
 				lk_merge.unlock();
 
-				s_printing= true;
+				s_printing = true;
 				lk_print.unlock();
 				s_cvPrinter.notify_all();
 
@@ -1122,7 +1190,7 @@ namespace ezlogspace
 			{
 				unique_lock<mutex> lk_merge;
 				unique_lock<mutex> lk_queue;
-				if (!tryLocks(lk_merge, s_mtxMerge, lk_queue, s_mtxQueue))
+				if (!tryGetMergePermission(lk_merge) || !tryLocks(lk_queue, s_mtxQueue))
 				{
 					this_thread::sleep_for(chrono::milliseconds(s_pollPeriodms));
 					continue;
@@ -1158,7 +1226,7 @@ namespace ezlogspace
 					{
 						std::unique_lock<std::mutex> lk_print(s_mtxPrinter);
 						EzLogString& mergedLogString = getMergedLogString();
-						clearGlobalCacheQueueAndNotifyGarbageCollection();
+						clearGlobalCacheQueueAndNotifyGC();
 						s_printing = true;
 						lk_print.unlock();
 						s_cvPrinter.notify_all();
@@ -1169,7 +1237,7 @@ namespace ezlogspace
 				{
 					std::unique_lock<std::mutex> lk_print(s_mtxPrinter);
 					EzLogString& mergedLogString = getMergedLogString();
-					clearGlobalCacheQueueAndNotifyGarbageCollection();
+					clearGlobalCacheQueueAndNotifyGC();
 					s_printing = true;
 					lk_print.unlock();
 					s_cvPrinter.notify_all();
