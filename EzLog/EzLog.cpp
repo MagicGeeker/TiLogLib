@@ -133,13 +133,13 @@ namespace ezloghelperspace
 		}
 	}
 
-	static bool tryLocks(std::unique_lock<mutex> &lk1, std::mutex &mtx1)
+	static inline bool tryLocks(std::unique_lock<mutex> &lk1, std::mutex &mtx1)
 	{
 		lk1 = unique_lock<mutex>(mtx1, std::try_to_lock);
 		return lk1.owns_lock();
 	}
 
-	static bool tryLocks(std::unique_lock<mutex> &lk1, std::mutex &mtx1, std::unique_lock<mutex> &lk2, std::mutex &mtx2)
+	static inline bool tryLocks(std::unique_lock<mutex> &lk1, std::mutex &mtx1, std::unique_lock<mutex> &lk2, std::mutex &mtx2)
 	{
 		lk1 = unique_lock<mutex>(mtx1, std::try_to_lock);
 		if (lk1.owns_lock())
@@ -231,9 +231,10 @@ namespace ezlogspace
 
 			~EzLoggerFilePrinter() override;
 
-			static const std::string folderPath;
-
 			static string tryToGetFileName(const char *logs, size_t size, uint32_t index);
+
+		protected:
+			static const std::string folderPath;
 
 			static EzLoggerFilePrinter *s_ins;
 
@@ -310,13 +311,13 @@ namespace ezlogspace
 
 			static EzLogString &getMergedLogString();
 
-			static void getMergePermission(std::unique_lock<std::mutex> &lk);
+			static inline void getMergePermission(std::unique_lock<std::mutex> &lk);
 
 			static bool tryGetMergePermission(std::unique_lock<std::mutex> &lk);
 
 			static void waitForMerge(std::unique_lock<std::mutex> &lk);
 
-			static void getMoveGarbagePermission(std::unique_lock<std::mutex> &lk);
+			static inline void getMoveGarbagePermission(std::unique_lock<std::mutex> &lk);
 
 			static void waitForGC(std::unique_lock<std::mutex> &lk);
 
@@ -358,7 +359,7 @@ namespace ezlogspace
 			thread_local static ThreadStru &s_localCache;
 			thread_local static bool s_thread_init;
 
-			static std::mutex* s_pMtxMap;
+			static std::mutex* s_pMtxQueue;
 			static std::mutex& s_mtxQueue;
 			static ThreadStruQueue s_threadStruQueue;
 			static volatile bool s_threadStruQueue_inited;
@@ -668,8 +669,8 @@ namespace ezlogspace
 		thread_local ThreadStru &EZLogOutputThread::s_localCache = *s_pThreadLocalStru;
 		thread_local bool EZLogOutputThread::s_thread_init = InitForEveryThread();
 
-		std::mutex *EZLogOutputThread::s_pMtxMap = new std::mutex();
-		std::mutex &EZLogOutputThread::s_mtxQueue = *s_pMtxMap;
+		std::mutex *EZLogOutputThread::s_pMtxQueue = new std::mutex();
+		std::mutex &EZLogOutputThread::s_mtxQueue = *s_pMtxQueue;
 		ThreadStruQueue EZLogOutputThread::s_threadStruQueue;
 		volatile bool EZLogOutputThread::s_threadStruQueue_inited = true;
 
@@ -762,7 +763,7 @@ namespace ezlogspace
 		{
 			//some thread run before main thread,so global var are not inited,which happens in msvc in some version,
 			//and cause crash because s_mtxMerge is not inited,these threads are often created by kernel.
-			if ((volatile std::mutex *) EZLogOutputThread::s_pMtxMap == nullptr ||
+			if ((volatile std::mutex *) EZLogOutputThread::s_pMtxQueue == nullptr ||
 				EZLogOutputThread::s_threadStruQueue_inited != true)  //s_threadStruQueue is not inited
 			{
 				printf("!EZLogOutputThread::s_threadStruQueue_inited tid= %s\n", GetThreadIDString());
@@ -828,7 +829,7 @@ namespace ezlogspace
 			}
 		}
 
-		struct EzlogBeanComp
+		struct EzLogBeanComp
 		{
 			bool operator()(const EzLogBean *const lhs, const EzLogBean *const rhs) const
 			{
@@ -845,7 +846,7 @@ namespace ezlogspace
 			using namespace std::chrono;
 
 			EzLogString &str = s_global_cache_string;
-			std::stable_sort(s_globalCache.pCacheFront, s_globalCache.pCacheNow, EzlogBeanComp());
+			std::stable_sort(s_globalCache.pCacheFront, s_globalCache.pCacheNow, EzLogBeanComp());
 
 			char ctimestr[EZLOG_CTIME_MAX_LEN] = {0};
 #if defined(EZLOG_WITH_MILLISECONDS) && defined(EZLOG_USE_STD_CHRONO)
@@ -974,7 +975,7 @@ namespace ezlogspace
 //total =len1 +bean.fileLen+bean.data->size()
 		}
 
-		void EZLogOutputThread::getMergePermission(std::unique_lock<std::mutex> &lk)
+		inline void EZLogOutputThread::getMergePermission(std::unique_lock<std::mutex> &lk)
 		{
 			DEBUG_ASSERT(!lk.owns_lock());
 			lk = std::unique_lock<std::mutex>(s_mtxMerge);
@@ -1009,7 +1010,7 @@ namespace ezlogspace
 			}
 		}
 
-		void EZLogOutputThread::getMoveGarbagePermission(std::unique_lock<std::mutex> &lk)
+		inline void EZLogOutputThread::getMoveGarbagePermission(std::unique_lock<std::mutex> &lk)
 		{
 			DEBUG_ASSERT(!lk.owns_lock());
 			lk = std::unique_lock<std::mutex>(s_mtxDeleter);
