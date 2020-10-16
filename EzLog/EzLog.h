@@ -125,6 +125,8 @@ namespace ezlogspace
 		}
 	};
 
+#define EZLOG_MEMORY_MANAGER_FRIEND     friend class ezlogspace::EzLogMemoryManager;
+
 	class EzLogObject : public EzLogMemoryManager
 	{
 

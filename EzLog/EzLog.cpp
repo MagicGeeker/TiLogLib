@@ -27,6 +27,13 @@
 
 
 //#define EZLOG_ENABLE_ASSERT_ON_RELEASE
+//#define EZLOG_ENABLE_PRINT_ON_RELEASE
+
+#if defined(NDEBUG) && !defined(EZLOG_ENABLE_PRINT_ON_RELEASE)
+#define DEBUG_PRINT(lv,fmt, ... )
+#else
+#define DEBUG_PRINT(lv,fmt, ... )  do{ if_constexpr(lv<=EZLOG_LOG_LEVEL)  printf(fmt,__VA_ARGS__ ); }while(0)
+#endif
 
 #if !defined(NDEBUG) || defined(EZLOG_ENABLE_ASSERT_ON_RELEASE)
 
@@ -88,19 +95,6 @@ using namespace ezlogspace;
 
 namespace ezloghelperspace
 {
-	thread_local static char *s_threadIDLocal = (char *) ezmalloc(
-			EZLOG_THREAD_ID_MAX_LEN * sizeof(char));
-
-	const char *GetThreadIDString()
-	{
-		stringstream os;
-		os << (std::this_thread::get_id());
-		string id = os.str();
-		strncpy(s_threadIDLocal, id.c_str(), EZLOG_THREAD_ID_MAX_LEN);
-		s_threadIDLocal[EZLOG_THREAD_ID_MAX_LEN - 1] = '\0';
-		return s_threadIDLocal;
-	}
-
 	static uint32_t FastRand()
 	{
 		static const uint32_t M = 2147483647L;  // 2^31-1
@@ -165,7 +159,19 @@ namespace ezlogspace
 
 	namespace internal
 	{
-		thread_local const char *s_tid = GetThreadIDString();
+		const char* GetThreadIDString()
+		{
+			stringstream os;
+			os << ( std::this_thread::get_id() );
+			string id = os.str();
+			char* tidstr = (char*)ezmalloc(
+				EZLOG_THREAD_ID_MAX_LEN * sizeof( char ) );
+			DEBUG_ASSERT( tidstr != NULL );
+			strncpy( tidstr, id.c_str(), EZLOG_THREAD_ID_MAX_LEN );
+			tidstr[EZLOG_THREAD_ID_MAX_LEN - 1] = '\0';
+			return tidstr;
+		}
+		thread_local const char* s_tid = GetThreadIDString();
 
 		class EzLogObject
 		{
@@ -200,6 +206,7 @@ namespace ezlogspace
 
 		class EzLoggerTerminalPrinter : public EzLoggerPrinter
 		{
+			EZLOG_MEMORY_MANAGER_FRIEND
 		public:
 			static EzLoggerTerminalPrinter *getInstance();
 
@@ -217,6 +224,7 @@ namespace ezlogspace
 
 		class EzLoggerFilePrinter : public EzLoggerPrinter
 		{
+			EZLOG_MEMORY_MANAGER_FRIEND
 		public:
 			static EzLoggerFilePrinter *getInstance();
 
@@ -451,7 +459,7 @@ namespace ezlogspace
 	{
 
 #ifdef __________________________________________________EzLoggerTerminalPrinter__________________________________________________
-		EzLoggerTerminalPrinter *EzLoggerTerminalPrinter::s_ins = new EzLoggerTerminalPrinter();
+		EzLoggerTerminalPrinter *EzLoggerTerminalPrinter::s_ins = eznew<EzLoggerTerminalPrinter>();
 
 		EzLoggerTerminalPrinter *EzLoggerTerminalPrinter::getInstance()
 		{
@@ -479,7 +487,7 @@ namespace ezlogspace
 
 
 #ifdef __________________________________________________EzLoggerFilePrinter__________________________________________________
-		EzLoggerFilePrinter *EzLoggerFilePrinter::s_ins = new EzLoggerFilePrinter();
+		EzLoggerFilePrinter *EzLoggerFilePrinter::s_ins = eznew<EzLoggerFilePrinter>();
 		std::FILE *s_pFile = nullptr;
 
 		EzLoggerFilePrinter *EzLoggerFilePrinter::getInstance()
@@ -517,6 +525,7 @@ namespace ezlogspace
 				if (s_pFile != nullptr)
 				{
 					fclose(s_pFile);
+					DEBUG_PRINT( EZLOG_LEVEL_VERBOSE, "sync and write" );
 				}
 
 				string s = tryToGetFileName(logs, size, index);
@@ -766,12 +775,13 @@ namespace ezlogspace
 			if ((volatile std::mutex *) EZLogOutputThread::s_pMtxQueue == nullptr ||
 				EZLogOutputThread::s_threadStruQueue_inited != true)  //s_threadStruQueue is not inited
 			{
-				printf("!EZLogOutputThread::s_threadStruQueue_inited tid= %s\n", GetThreadIDString());
+				DEBUG_PRINT(EZLOG_LEVEL_WARN, "s_threadStruQueue not inited tid= %s\n", s_tid);
 				fflush(stdout);
 				ezdelete(s_pThreadLocalStru);
 				return false;
 			}
 			lock_guard<mutex> lgd(s_mtxQueue);
+			DEBUG_PRINT( EZLOG_LEVEL_VERBOSE, "availQueue insert thrd tid= %s\n", s_tid );
 			s_threadStruQueue.availQueue.emplace_back(s_pThreadLocalStru);
 			unique_lock<mutex> lk(s_pThreadLocalStru->thrdExistMtx);
 			notify_all_at_thread_exit(s_pThreadLocalStru->thrdExistCV, std::move(lk));
@@ -1183,10 +1193,6 @@ namespace ezlogspace
 		void EZLogOutputThread::thrdFuncPoll()
 		{
 			freeInternalThreadMemory();//this thread is no need log
-			ezfree((char*)s_pThreadLocalStru->tid);
-			s_pThreadLocalStru->tid= nullptr;
-			//try_lock for this thread handled mutex is undefined behaviour,
-			//hack! make it to nullptr and not to try_lock thrdExistMtx
 			while (true)
 			{
 				unique_lock<mutex> lk_merge;
@@ -1213,9 +1219,10 @@ namespace ezlogspace
 
 					
 					std::mutex &mtx = threadStru.thrdExistMtx;
-					if (threadStru.tid!= nullptr && mtx.try_lock())
+					if (mtx.try_lock())
 					{
 						mtx.unlock();
+						DEBUG_PRINT( EZLOG_LEVEL_VERBOSE, "thrd %s exit.move to toPrintQueue\n", threadStru.tid );
 						s_threadStruQueue.toPrintQueue.emplace_back(*it);
 						it = s_threadStruQueue.availQueue.erase(it);
 					} else
@@ -1258,14 +1265,22 @@ namespace ezlogspace
 
 		void EZLogOutputThread::freeInternalThreadMemory()
 		{
-			//ezfree((char*)s_pThreadLocalStru->tid);  //no need,for debug
+			DEBUG_PRINT( EZLOG_LEVEL_INFO, "free mem tid: %s\n", s_pThreadLocalStru->tid );
+			ezfree((char*)s_pThreadLocalStru->tid);
+			s_pThreadLocalStru->tid = NULL;
 			ezfree(s_pThreadLocalStru->cache);
-			//set it to NULL,make sure will not free again by thrdFuncGarbageCollection
-			//s_pThreadLocalStru->tid = NULL;
 			s_pThreadLocalStru->cache = NULL;
 			s_pThreadLocalStru->pCacheFront = NULL;
 			s_pThreadLocalStru->pCacheNow = NULL;
 			s_pThreadLocalStru->pCacheBack = NULL;
+			{
+				lock_guard<mutex> lgd( s_mtxQueue );
+				auto it = std::find( s_threadStruQueue.availQueue.begin(), s_threadStruQueue.availQueue.end(), s_pThreadLocalStru );
+				DEBUG_ASSERT( it != s_threadStruQueue.availQueue.end() );
+				s_threadStruQueue.availQueue.erase( it );
+				//thrdExistMtx and thrdExistCV is not deleted here
+				//erase from availQueue,and s_pThreadLocalStru will be deleted by system at exit,no need to delete here.
+			}
 		}
 
 
