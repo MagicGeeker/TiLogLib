@@ -32,7 +32,7 @@
 #if defined(NDEBUG) && !defined(EZLOG_ENABLE_PRINT_ON_RELEASE)
 #define DEBUG_PRINT(lv,fmt, ... )
 #else
-#define DEBUG_PRINT(lv,fmt, ... )  do{ if_constexpr(lv<=EZLOG_LOG_LEVEL)  printf(fmt,__VA_ARGS__ ); }while(0)
+#define DEBUG_PRINT(lv, ...)  do{ if_constexpr(lv<=EZLOG_LOG_LEVEL)  printf(__VA_ARGS__); }while(0)
 #endif
 
 #if !defined(NDEBUG) || defined(EZLOG_ENABLE_ASSERT_ON_RELEASE)
@@ -286,6 +286,14 @@ namespace ezlogspace
 			{
 				ezfree(cache);
 				ezfree((void*)tid);
+#ifndef NDEBUG
+				cache = NULL;
+				pCacheFront = NULL;
+				pCacheBack = NULL;
+				pCacheNow = NULL;
+				tid = NULL;
+#endif // NDEBUG
+
 			}
 		};
 
@@ -351,7 +359,9 @@ namespace ezlogspace
 
 			static std::thread CreatePollThread();
 
-			static bool InitForEveryThread();
+			static ThreadStru *InitForEveryThread();
+
+			static void InitForValidThread();
 
 			static bool Init();
 
@@ -364,8 +374,6 @@ namespace ezlogspace
 			static constexpr size_t GLOBAL_SIZE = EZLOG_GLOBAL_QUEUE_MAX_SIZE;
 
 			thread_local static ThreadStru *s_pThreadLocalStru;
-			thread_local static ThreadStru &s_localCache;
-			thread_local static bool s_thread_init;
 
 			static std::mutex* s_pMtxQueue;
 			static std::mutex& s_mtxQueue;
@@ -674,9 +682,7 @@ namespace ezlogspace
 #ifdef __________________________________________________EZLogOutputThread__________________________________________________
 
 //		thread_local ThreadStru *EZLogOutputThread::s_pThreadLocalStru = eznew<ThreadStru>(LOCAL_SIZE);
-		thread_local ThreadStru *EZLogOutputThread::s_pThreadLocalStru = eznew<ThreadStru>(EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE);
-		thread_local ThreadStru &EZLogOutputThread::s_localCache = *s_pThreadLocalStru;
-		thread_local bool EZLogOutputThread::s_thread_init = InitForEveryThread();
+		thread_local ThreadStru *EZLogOutputThread::s_pThreadLocalStru = InitForEveryThread();
 
 		std::mutex *EZLogOutputThread::s_pMtxQueue = new std::mutex();
 		std::mutex &EZLogOutputThread::s_mtxQueue = *s_pMtxQueue;
@@ -716,11 +722,11 @@ namespace ezlogspace
 
 		inline bool EZLogOutputThread::localCircularQueuePushBack(EzLogBean *obj)
 		{
-			DEBUG_ASSERT(s_localCache.pCacheNow <= s_localCache.pCacheBack);
-			DEBUG_ASSERT(s_localCache.pCacheFront <= s_localCache.pCacheNow);
-			*s_localCache.pCacheNow = obj;
-			s_localCache.pCacheNow++;
-			return s_localCache.pCacheNow > s_localCache.pCacheBack;
+			DEBUG_ASSERT((*s_pThreadLocalStru).pCacheNow <= (*s_pThreadLocalStru).pCacheBack);
+			DEBUG_ASSERT((*s_pThreadLocalStru).pCacheFront <= (*s_pThreadLocalStru).pCacheNow);
+			*(*s_pThreadLocalStru).pCacheNow = obj;
+			(*s_pThreadLocalStru).pCacheNow++;
+			return (*s_pThreadLocalStru).pCacheNow > (*s_pThreadLocalStru).pCacheBack;
 		}
 
 		inline bool EZLogOutputThread::moveLocalCacheToGlobal(ThreadStru &bean)
@@ -768,28 +774,48 @@ namespace ezlogspace
 			return th;
 		}
 
-		bool EZLogOutputThread::InitForEveryThread()
+		ThreadStru *EZLogOutputThread::InitForEveryThread()
 		{
 			//some thread run before main thread,so global var are not inited,which happens in msvc in some version,
 			//and cause crash because s_mtxMerge is not inited,these threads are often created by kernel.
+			//and in main thread,thread local var also may init before global var.and it cause s_pThreadLocalStru be deleted
 			if ((volatile std::mutex *) EZLogOutputThread::s_pMtxQueue == nullptr ||
 				EZLogOutputThread::s_threadStruQueue_inited != true)  //s_threadStruQueue is not inited
 			{
 				DEBUG_PRINT(EZLOG_LEVEL_WARN, "s_threadStruQueue not inited tid= %s\n", s_tid);
 				fflush(stdout);
-				ezdelete(s_pThreadLocalStru);
-				return false;
+				ezfree((void *) s_tid);
+				s_pThreadLocalStru = nullptr;
+				s_tid = nullptr;
+				return s_pThreadLocalStru;
 			}
-			lock_guard<mutex> lgd(s_mtxQueue);
-			DEBUG_PRINT( EZLOG_LEVEL_VERBOSE, "availQueue insert thrd tid= %s\n", s_tid );
-			s_threadStruQueue.availQueue.emplace_back(s_pThreadLocalStru);
+			InitForValidThread();
+			return s_pThreadLocalStru;
+		}
+
+		void EZLogOutputThread::InitForValidThread()
+		{
+			if (s_tid == nullptr)
+			{
+				s_tid = GetThreadIDString();
+			}
+			s_pThreadLocalStru = eznew<ThreadStru>(EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE);
+			DEBUG_ASSERT(s_pThreadLocalStru != nullptr);
+			{
+				lock_guard<mutex> lgd(s_mtxQueue);
+				DEBUG_PRINT(EZLOG_LEVEL_VERBOSE, "availQueue insert thrd tid= %s\n", s_tid);
+				s_threadStruQueue.availQueue.emplace_back(s_pThreadLocalStru);
+			}
 			unique_lock<mutex> lk(s_pThreadLocalStru->thrdExistMtx);
 			notify_all_at_thread_exit(s_pThreadLocalStru->thrdExistCV, std::move(lk));
-			return true;
 		}
 
 		bool EZLogOutputThread::Init()
 		{
+			if (s_pThreadLocalStru == nullptr)
+			{
+				InitForValidThread();
+			}
 			lock_guard<mutex> lgd_merge(s_mtxMerge);
 			lock_guard<mutex> lgd_print(s_mtxPrinter);
 			lock_guard<mutex> lgd_del(s_mtxDeleter);
@@ -829,7 +855,7 @@ namespace ezlogspace
 			{
 				std::unique_lock<std::mutex> lk;
 				getMergePermission(lk);
-				bool isGlobalFull = moveLocalCacheToGlobal(s_localCache);
+				bool isGlobalFull = moveLocalCacheToGlobal((*s_pThreadLocalStru));
 				if (isGlobalFull)
 				{
 					s_merging = true;        //此时本地缓存和全局缓存已满
@@ -1265,6 +1291,7 @@ namespace ezlogspace
 
 		void EZLogOutputThread::freeInternalThreadMemory()
 		{
+			if( s_pThreadLocalStru == nullptr ) { return; }
 			DEBUG_PRINT( EZLOG_LEVEL_INFO, "free mem tid: %s\n", s_pThreadLocalStru->tid );
 			ezfree((char*)s_pThreadLocalStru->tid);
 			s_pThreadLocalStru->tid = NULL;
