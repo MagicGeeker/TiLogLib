@@ -14,6 +14,7 @@
 #include <future>
 #include <atomic>
 #include <list>
+#include <vector>
 #include "EzLog.h"
 
 #define __________________________________________________EzLoggerTerminalPrinter__________________________________________________
@@ -76,6 +77,7 @@ using SystemTimePoint=std::chrono::system_clock::time_point;
 using ezmalloc_t = void *(*)(size_t);
 using ezfree_t=void (*)(void *);
 template<typename T> using List= std::list<T>;
+template<typename T> using Vector= std::vector<T>;
 
 
 #define ezmalloc  EZLOG_MALLOC_FUNCTION
@@ -254,10 +256,7 @@ namespace ezlogspace
 
 		struct ThreadStru
 		{
-			EzLogBean **cache;//cache first
-			EzLogBean **pCacheFront; //cache first
-			EzLogBean **pCacheBack; //cache back
-			EzLogBean **pCacheNow;   // current tail invalid bean
+			Vector<EzLogBean *> vcache;
 			ThreadLocalSpinLock spinLock;//protect cache
 
 			const char *tid;
@@ -266,31 +265,18 @@ namespace ezlogspace
 
 			explicit ThreadStru(size_t cacheSize) : tid(s_tid), spinLock(), thrdExistMtx(), thrdExistCV()
 			{
-				cache = (EzLogBean **) ezmalloc(sizeof(EzLogBean *) * cacheSize);
-				DEBUG_ASSERT(cache != NULL);
-				pCacheFront = cache;
-				pCacheBack = &cache[cacheSize - 1];
-				pCacheNow = cache;
+				vcache.reserve(cacheSize);
 			};
 
 			explicit ThreadStru(size_t cacheSize, const char* _tid) : tid(_tid), spinLock(), thrdExistMtx(), thrdExistCV()
 			{
-				cache = (EzLogBean**)ezmalloc(sizeof(EzLogBean*) * cacheSize);
-				DEBUG_ASSERT(cache != NULL);
-				pCacheFront = cache;
-				pCacheBack = &cache[cacheSize - 1];
-				pCacheNow = cache;
+				vcache.reserve(cacheSize);
 			};
 
 			~ThreadStru()
 			{
-				ezfree(cache);
 				ezfree((void*)tid);
 #ifndef NDEBUG
-				cache = NULL;
-				pCacheFront = NULL;
-				pCacheBack = NULL;
-				pCacheNow = NULL;
 				tid = NULL;
 #endif // NDEBUG
 
@@ -403,8 +389,8 @@ namespace ezlogspace
 			static std::thread s_threadDeleter;
 
 			static uint32_t s_pollPeriodms;
-			static EzLogTime s_poll_last_time;
 			static std::thread s_threadPoll;
+			static EzLogTime s_log_last_time;
 
 			static bool s_inited;
 			static bool s_to_exit;
@@ -533,7 +519,7 @@ namespace ezlogspace
 				if (s_pFile != nullptr)
 				{
 					fclose(s_pFile);
-					DEBUG_PRINT( EZLOG_LEVEL_VERBOSE, "sync and write" );
+					DEBUG_PRINT(EZLOG_LEVEL_VERBOSE, "sync and write index=%u \n", (unsigned)index);
 				}
 
 				string s = tryToGetFileName(logs, size, index);
@@ -681,7 +667,6 @@ namespace ezlogspace
 
 #ifdef __________________________________________________EZLogOutputThread__________________________________________________
 
-//		thread_local ThreadStru *EZLogOutputThread::s_pThreadLocalStru = eznew<ThreadStru>(LOCAL_SIZE);
 		thread_local ThreadStru *EZLogOutputThread::s_pThreadLocalStru = InitForEveryThread();
 
 		std::mutex *EZLogOutputThread::s_pMtxQueue = new std::mutex();
@@ -705,14 +690,14 @@ namespace ezlogspace
 		bool EZLogOutputThread::s_isQueueEmpty = false;
 		std::thread EZLogOutputThread::s_threadPrinter= CreatePrintThread();
 
-		ThreadStru EZLogOutputThread::s_garbages(4 * GLOBAL_SIZE, nullptr);
+		ThreadStru EZLogOutputThread::s_garbages(EZLOG_GARBAGE_COLLECTION_QUEUE_MAX_SIZE, nullptr);
 		std::mutex EZLogOutputThread::s_mtxDeleter;
 		std::condition_variable EZLogOutputThread::s_cvDeleter;
 		bool EZLogOutputThread::s_deleting= false;
 		std::thread EZLogOutputThread::s_threadDeleter = CreateGarbageCollectionThread();
 
 		uint32_t EZLogOutputThread::s_pollPeriodms = EZLOG_POLL_DEFAULT_THREAD_SLEEP_MS;
-		EzLogTime EZLogOutputThread::s_poll_last_time;
+		EzLogTime EZLogOutputThread::s_log_last_time;
 		std::thread EZLogOutputThread::s_threadPoll = CreatePollThread();
 
 		bool EZLogOutputThread::s_to_exit = false;
@@ -722,26 +707,17 @@ namespace ezlogspace
 
 		inline bool EZLogOutputThread::localCircularQueuePushBack(EzLogBean *obj)
 		{
-			DEBUG_ASSERT((*s_pThreadLocalStru).pCacheNow <= (*s_pThreadLocalStru).pCacheBack);
-			DEBUG_ASSERT((*s_pThreadLocalStru).pCacheFront <= (*s_pThreadLocalStru).pCacheNow);
-			*(*s_pThreadLocalStru).pCacheNow = obj;
-			(*s_pThreadLocalStru).pCacheNow++;
-			return (*s_pThreadLocalStru).pCacheNow > (*s_pThreadLocalStru).pCacheBack;
+			s_pThreadLocalStru->vcache.emplace_back(obj);
+			return s_pThreadLocalStru->vcache.size() >= EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE;
 		}
 
 		inline bool EZLogOutputThread::moveLocalCacheToGlobal(ThreadStru &bean)
 		{
-			DEBUG_ASSERT(bean.pCacheNow <= bean.pCacheBack + 1);
-			DEBUG_ASSERT(bean.pCacheFront <= bean.pCacheNow);
-			size_t size = bean.pCacheNow - bean.pCacheFront;
-			DEBUG_ASSERT(s_globalCache.pCacheFront <= s_globalCache.pCacheNow);
-			DEBUG_ASSERT2(s_globalCache.pCacheNow + size <= 1 + s_globalCache.pCacheBack,
-						  s_globalCache.pCacheBack - s_globalCache.pCacheNow, size);
-			memcpy(s_globalCache.pCacheNow, bean.pCacheFront, size * sizeof(EzLogBean *));
-			s_globalCache.pCacheNow += size;
-			bean.pCacheNow = bean.pCacheFront;
-			//在拷贝size字节的情况下，还要预留EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE，以便下次调用这个函数拷贝的时候不会溢出
-			bool isGlobalFull = s_globalCache.pCacheNow + EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE > s_globalCache.pCacheBack;
+			s_globalCache.vcache.insert(s_globalCache.vcache.end(), bean.vcache.begin(), bean.vcache.end());
+			bean.vcache.resize(0);
+			//预留EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE
+			bool isGlobalFull =
+					s_globalCache.vcache.size() >= EZLOG_GLOBAL_QUEUE_MAX_SIZE - EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE;
 			return isGlobalFull;
 		}
 
@@ -882,7 +858,7 @@ namespace ezlogspace
 			using namespace std::chrono;
 
 			EzLogString &str = s_global_cache_string;
-			std::stable_sort(s_globalCache.pCacheFront, s_globalCache.pCacheNow, EzLogBeanComp());
+			std::stable_sort(s_globalCache.vcache.begin(), s_globalCache.vcache.end(), EzLogBeanComp());
 
 			char ctimestr[EZLOG_CTIME_MAX_LEN] = {0};
 #if defined(EZLOG_WITH_MILLISECONDS) && defined(EZLOG_USE_STD_CHRONO)
@@ -893,10 +869,10 @@ namespace ezlogspace
 			size_t len = 0;
 			EzLogString logs;
 
-			for (EzLogBean **ppBean = s_globalCache.pCacheFront; ppBean < s_globalCache.pCacheNow; ppBean++)
+			for (EzLogBean *pBean:s_globalCache.vcache)
 			{
-				DEBUG_ASSERT(ppBean != nullptr && *ppBean != nullptr);
-				EzLogBean &bean = **ppBean;
+				DEBUG_ASSERT(pBean != nullptr);
+				EzLogBean &bean = *pBean;
 				DEBUG_ASSERT1(&bean.data() != nullptr, &bean.data());
 				DEBUG_ASSERT1(bean.file != nullptr, bean.file);
 
@@ -919,8 +895,7 @@ namespace ezlogspace
 				s_printedLogs++;
 			}
 
-
-			
+			s_log_last_time = EzLogTime::now();
 			return str;
 		}
 
@@ -1050,8 +1025,7 @@ namespace ezlogspace
 		{
 			DEBUG_ASSERT(!lk.owns_lock());
 			lk = std::unique_lock<std::mutex>(s_mtxDeleter);
-			size_t size = (s_globalCache.pCacheNow - s_globalCache.pCacheFront);
-			if (s_garbages.pCacheNow + size > 1 + s_garbages.pCacheBack)
+			if (s_garbages.vcache.size() >= EZLOG_GARBAGE_COLLECTION_QUEUE_MAX_SIZE)
 			{
 				waitForGC(lk);
 			}
@@ -1076,10 +1050,9 @@ namespace ezlogspace
 		{
 			unique_lock<mutex> ulk;
 			getMoveGarbagePermission(ulk);
-			size_t size = (s_globalCache.pCacheNow - s_globalCache.pCacheFront);
-			memcpy(s_garbages.pCacheNow, s_globalCache.cache, size * sizeof(EzLogBean *));
-			s_garbages.pCacheNow += size;
-			s_globalCache.pCacheNow = s_globalCache.pCacheFront;
+			s_garbages.vcache.insert(s_garbages.vcache.end(), s_globalCache.vcache.begin(), s_globalCache.vcache.end());
+			s_globalCache.vcache.resize(0);
+
 			s_deleting = true;
 			ulk.unlock();
 			s_cvDeleter.notify_all();
@@ -1186,11 +1159,12 @@ namespace ezlogspace
 					return (s_deleting && s_inited) || s_to_exit;
 				});
 
-				for(EzLogBean **ppBean = s_garbages.pCacheFront; ppBean < s_garbages.pCacheNow; ppBean++)
+				for (EzLogBean *pBean:s_garbages.vcache)
 				{
-					EzLogBean::DestroyInstance(*ppBean);
+					EzLogBean::DestroyInstance(pBean);
 				}
-				s_garbages.pCacheNow = s_garbages.pCacheFront;
+				s_garbages.vcache.resize(0);
+
 				s_deleting = false;
 				lk_del.unlock();
 
@@ -1235,8 +1209,7 @@ namespace ezlogspace
 					ThreadStru &threadStru = *(*it);
 					ThreadLocalSpinLock& lk = threadStru.spinLock;
 					lk.lock();
-					DEBUG_ASSERT(threadStru.pCacheNow >= threadStru.cache);
-					if (threadStru.pCacheNow > threadStru.cache)
+					if (!threadStru.vcache.empty())
 					{
 						isQueueEmpty = false;
 					}
@@ -1295,11 +1268,8 @@ namespace ezlogspace
 			DEBUG_PRINT( EZLOG_LEVEL_INFO, "free mem tid: %s\n", s_pThreadLocalStru->tid );
 			ezfree((char*)s_pThreadLocalStru->tid);
 			s_pThreadLocalStru->tid = NULL;
-			ezfree(s_pThreadLocalStru->cache);
-			s_pThreadLocalStru->cache = NULL;
-			s_pThreadLocalStru->pCacheFront = NULL;
-			s_pThreadLocalStru->pCacheNow = NULL;
-			s_pThreadLocalStru->pCacheBack = NULL;
+			Vector<EzLogBean *> temp;
+			s_pThreadLocalStru->vcache.swap(temp);//free memory
 			{
 				lock_guard<mutex> lgd( s_mtxQueue );
 				auto it = std::find( s_threadStruQueue.availQueue.begin(), s_threadStruQueue.availQueue.end(), s_pThreadLocalStru );

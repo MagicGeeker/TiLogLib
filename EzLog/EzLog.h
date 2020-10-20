@@ -33,6 +33,7 @@
 #define EZLOG_GLOBAL_BUF_SIZE  ((size_t)1<<20U)    //1MB
 #define EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE  ((size_t)1<<8U)   //256
 #define EZLOG_GLOBAL_QUEUE_MAX_SIZE  ((size_t)1<<12U)   //4096
+#define EZLOG_GARBAGE_COLLECTION_QUEUE_MAX_SIZE  ((size_t)4<<12U)   //4*4096
 #define EZLOG_SINGLE_LOG_RESERVE_LEN  50     //reserve for every log except for level,tid ...
 
 #define EZLOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER    "a:/"
@@ -667,6 +668,17 @@ namespace ezlogspace
 			EzLogTime()
 			{
 				chronoTime = TimePoint::min();
+			}
+
+			EzLogTime&operator=(TimePoint tp)
+			{
+				chronoTime=tp;
+				return *this;
+			}
+
+			static inline TimePoint now()
+			{
+				return SystemLock::now();
 			}
 
 #else
