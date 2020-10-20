@@ -28,12 +28,12 @@
 #define    EZLOG_WITH_MILLISECONDS
 
 
-#define EZLOG_POLL_DEFAULT_THREAD_SLEEP_MS  1000   //poll period 1000ms to move local cache to global cache
-#define EZLOG_GLOBAL_BUF_FULL_SLEEP_US  10   //work thread sleep for 10us when global buf is full and logging
-#define EZLOG_GLOBAL_BUF_SIZE  ((size_t)1<<20U)    //1MB
-#define EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE  ((size_t)1<<8U)   //256
-#define EZLOG_GLOBAL_QUEUE_MAX_SIZE  ((size_t)1<<12U)   //4096
-#define EZLOG_GARBAGE_COLLECTION_QUEUE_MAX_SIZE  ((size_t)4<<12U)   //4*4096
+#define EZLOG_POLL_DEFAULT_THREAD_SLEEP_MS  1000   //poll period to move local cache to global cache
+#define EZLOG_GLOBAL_BUF_FULL_SLEEP_US  10   //work thread sleep for period when global buf is full and logging
+#define EZLOG_GLOBAL_BUF_SIZE  ((size_t)1<<20U)    //global cache string reserve length
+#define EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE  ((size_t)1<<8U)   //single thread cache queue max length
+#define EZLOG_GLOBAL_QUEUE_MAX_SIZE  ((size_t)1<<12U)   //global cache queue max length
+#define EZLOG_GARBAGE_COLLECTION_QUEUE_MAX_SIZE  ((size_t)4<<12U)   //garbage collection queue max length
 #define EZLOG_SINGLE_LOG_RESERVE_LEN  50     //reserve for every log except for level,tid ...
 
 #define EZLOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER    "a:/"

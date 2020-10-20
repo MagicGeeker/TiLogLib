@@ -74,6 +74,7 @@ do{ if(!(what)){std::cerr<<"\n ERROR:\n"<< __FILE__ <<":"<< __LINE__ <<"\n"<<(#w
 #define EZLOG_THREAD_ID_MAX_LEN  (20+1)    //len(UINT64_MAX 64bit)+1
 
 using SystemTimePoint=std::chrono::system_clock::time_point;
+using SystemClock=std::chrono::system_clock;
 using ezmalloc_t = void *(*)(size_t);
 using ezfree_t=void (*)(void *);
 template<typename T> using List= std::list<T>;
@@ -335,6 +336,8 @@ namespace ezlogspace
 
 			static void thrdFuncPoll();
 
+			static inline bool pollThreadSleep();
+
 			static void freeInternalThreadMemory();
 
 			static std::thread CreateMergeThread();
@@ -388,7 +391,8 @@ namespace ezlogspace
 			static bool s_deleting;
 			static std::thread s_threadDeleter;
 
-			static uint32_t s_pollPeriodms;
+			static constexpr uint32_t s_pollPeriodSplitNum = 100;
+			static atomic_uint32_t s_pollPeriodus;
 			static std::thread s_threadPoll;
 			static EzLogTime s_log_last_time;
 
@@ -696,7 +700,8 @@ namespace ezlogspace
 		bool EZLogOutputThread::s_deleting= false;
 		std::thread EZLogOutputThread::s_threadDeleter = CreateGarbageCollectionThread();
 
-		uint32_t EZLogOutputThread::s_pollPeriodms = EZLOG_POLL_DEFAULT_THREAD_SLEEP_MS;
+		atomic_uint32_t EZLogOutputThread::s_pollPeriodus(
+				EZLOG_POLL_DEFAULT_THREAD_SLEEP_MS * 1000 / s_pollPeriodSplitNum);
 		EzLogTime EZLogOutputThread::s_log_last_time;
 		std::thread EZLogOutputThread::s_threadPoll = CreatePollThread();
 
@@ -807,11 +812,13 @@ namespace ezlogspace
 		// 故用到全局变量需要在此函数前构造
 		void EZLogOutputThread::AtExit()
 		{
-			s_pollPeriodms = 10;
+			DEBUG_PRINT(EZLOG_LEVEL_INFO, "wait poll and printer\n");
+			s_pollPeriodus = 1;//make poll faster
 			while (!s_isQueueEmpty)
 			{
 				this_thread::yield();
 			}
+			DEBUG_PRINT(EZLOG_LEVEL_INFO, "prepare to exit\n");
 			s_to_exit = true;
 			while (s_remainThreads != 0)
 			{
@@ -820,6 +827,7 @@ namespace ezlogspace
 				s_cvDeleter.notify_all();
 				this_thread::yield();
 			}
+			DEBUG_PRINT(EZLOG_LEVEL_INFO, "exit\n");
 		}
 
 		void EZLogOutputThread::pushLog(EzLogBean *pBean)
@@ -1190,16 +1198,29 @@ namespace ezlogspace
 			return;
 		}
 
+		//return false when s_to_exit is true
+		inline bool EZLogOutputThread::pollThreadSleep()
+		{
+			for (uint32_t t = s_pollPeriodSplitNum; t--;)
+			{
+				if (s_to_exit)
+				{
+					return false;
+				}
+				this_thread::sleep_for(chrono::microseconds(s_pollPeriodus));
+			}
+			return true;
+		}
+
 		void EZLogOutputThread::thrdFuncPoll()
 		{
 			freeInternalThreadMemory();//this thread is no need log
-			while (true)
+			do
 			{
 				unique_lock<mutex> lk_merge;
 				unique_lock<mutex> lk_queue;
 				if (!tryGetMergePermission(lk_merge) || !tryLocks(lk_queue, s_mtxQueue))
 				{
-					this_thread::sleep_for(chrono::milliseconds(s_pollPeriodms));
 					continue;
 				}
 
@@ -1252,12 +1273,7 @@ namespace ezlogspace
 				
 				s_merging = false;
 				lk_merge.unlock();
-				if (s_to_exit)
-				{
-					break;
-				}
-				this_thread::sleep_for(chrono::milliseconds(s_pollPeriodms));
-			}
+			} while (pollThreadSleep());
 			s_remainThreads--;
 			return;
 		}
