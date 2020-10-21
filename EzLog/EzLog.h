@@ -39,9 +39,10 @@
 #define EZLOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER    "a:/"
 #define EZLOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE    (8U<<20U)   // log size per file,it is not accurate,especially EZLOG_GLOBAL_BUF_SIZE is bigger
 
-#define EZLOG_MALLOC_FUNCTION        malloc
-#define EZLOG_REALLOC_FUNCTION        realloc
-#define EZLOG_FREE_FUNCTION        free
+#define EZLOG_MALLOC_FUNCTION(size)                   malloc(size)
+#define EZLOG_CALLOC_FUNCTION(num, size)              calloc(num,size)
+#define EZLOG_REALLOC_FUNCTION(ptr, new_size)         realloc(ptr,new_size)
+#define EZLOG_FREE_FUNCTION(ptr)                      free(ptr)
 
 #define EZLOG_SUPPORT_CLOSE_LOG           FALSE
 #define EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL   FALSE
@@ -62,6 +63,11 @@
 
 namespace ezlogspace
 {
+
+#ifndef NDEBUG
+#undef EZLOG_MALLOC_FUNCTION
+#define	EZLOG_MALLOC_FUNCTION(size) EZLOG_CALLOC_FUNCTION(size,1)
+#endif
 	class EzLogMemoryManager
 	{
 	public:
@@ -665,30 +671,60 @@ namespace ezlogspace
 		public:
 #if defined(EZLOG_USE_STD_CHRONO)
 			TimePoint chronoTime;
-			EzLogTime()
+
+			inline EzLogTime()
 			{
 				chronoTime = TimePoint::min();
 			}
 
-			EzLogTime&operator=(TimePoint tp)
+			inline EzLogTime(int)
 			{
-				chronoTime=tp;
+				chronoTime = now();
+			}
+
+			bool operator<(const EzLogTime &rhs) const
+			{
+				return chronoTime < rhs.chronoTime;
+			}
+
+			inline EzLogTime &operator=(TimePoint tp)
+			{
+				chronoTime = tp;
 				return *this;
 			}
 
-			static inline TimePoint now()
+			inline static TimePoint now()
 			{
 				return SystemLock::now();
 			}
 
 #else
 			time_t ctime;
-			EzLogTime()
+			inline EzLogTime()
 			{
 				ctime=(time_t)0;
 			}
-#endif
+			inline EzLogTime(int)
+			{
+				ctime=now();
+			}
 
+			bool operator<(const EzLogTime &rhs) const
+			{
+				return ctime < rhs.ctime;
+			}
+
+			inline EzLogTime& operator=( time_t t )
+			{
+				ctime = t;
+				return *this;
+			}
+
+			inline static time_t now()
+			{
+				return time(NULL);
+			}
+#endif
 
 		};
 
@@ -698,26 +734,17 @@ namespace ezlogspace
 			using TimePoint=std::chrono::system_clock::time_point;
 
 		public:
-			DEBUG_CANARY_UINT64(flag0)
+			DEBUG_CANARY_BOOL(flag0)
 			EzLogString dataStr;
-#if (defined( EZLOG_USE_CTIME)) && (defined(EZLOG_TIME_T_IS_64BIT))
-			time_t ctime;
-#endif
-#if defined(EZLOG_USE_STD_CHRONO)
-			TimePoint chronoTime;
-#endif
 			const char *tid;
 			const char *file;
-			DEBUG_CANARY_UINT64(flag1)
-
-#if (defined( EZLOG_USE_CTIME)) && (!defined(EZLOG_TIME_T_IS_64BIT))
-			time_t ctime;
-#endif
+			DEBUG_CANARY_BOOL(flag1)
+			EzLogTime ezLogTime;
 			uint16_t line;
 			uint16_t fileLen;
 			char level;
 			bool toTernimal;
-			DEBUG_CANARY_UINT64(flag2)
+			DEBUG_CANARY_BOOL(flag2)
 
 		public:
 
@@ -731,78 +758,31 @@ namespace ezlogspace
 				return dataStr;
 			}
 
-#ifdef EZLOG_USE_STD_CHRONO
-
-			const TimePoint &cpptime() const
+			const EzLogTime &time() const
 			{
-				return chronoTime;
-			};
+				return ezLogTime;
+			}
 
-			TimePoint &cpptime()
+			EzLogTime &time()
 			{
-				return chronoTime;
-			};
+				return ezLogTime;
+			}
 
 			inline static EzLogBean *CreateInstance()
 			{
 				EzLogBean *thiz = (EzLogBean *) EZLOG_MALLOC_FUNCTION(sizeof(EzLogBean));
-				PlacementNew(&thiz->cpptime(), std::chrono::system_clock::now());
+				PlacementNew(&thiz->time(), 0);
 				return thiz;
 			}
 
-#ifndef NDEBUG
-
-			inline static void DestroyInstance(EzLogBean *&p)
-			{
-				assert((uintptr_t) p != (uintptr_t) UINT64_MAX);
-				assert((uint8_t) p->level != UINT8_MAX);
-				assert((uintptr_t) &p->data() != (uintptr_t) UINT64_MAX);
-				assert((uintptr_t) &p->cpptime() != (uintptr_t) UINT64_MAX);
-				p->data().~EzLogString();
-				p->cpptime().~TimePoint();
-				memset(p, UINT8_MAX, sizeof(EzLogBean));
-				EZLOG_FREE_FUNCTION(p);
-				p = (EzLogBean *) UINT64_MAX;
-			}
-
-#else
 			inline static void DestroyInstance(EzLogBean *p)
 			{
+				RUN_ON_DEBUG(assert(!(p->flag0 || p->flag1 || p->flag2)););
+				p->time().~EzLogTime();
 				p->data().~EzLogString();
-				p->cpptime().~TimePoint();
+				RUN_ON_DEBUG(p->flag0 = p->flag1 = p->flag2 = 1;);
 				EZLOG_FREE_FUNCTION(p);
 			}
-#endif
-
-#else
-
-			inline static EzLogBean *CreateInstance()
-			{
-				EzLogBean *thiz = (EzLogBean *) EZLOG_MALLOC_FUNCTION(sizeof(EzLogBean));
-				thiz->ctime = time(NULL);
-				return thiz;
-			}
-
-#ifndef NDEBUG
-			inline static void DestroyInstance(EzLogBean* & p)
-			{
-				assert((uintptr_t)p != (uintptr_t)UINT64_MAX);
-				assert((uint8_t)p->level != UINT8_MAX);
-				assert((uintptr_t)&p->data() != (uintptr_t)UINT64_MAX);
-				p->data().~EzLogString();
-				memset(p, UINT8_MAX, sizeof(EzLogBean));
-				EZLOG_FREE_FUNCTION(p);
-				p = (EzLogBean *)UINT64_MAX;
-			}
-#else
-			inline static void DestroyInstance(EzLogBean *p)
-			{
-				p->data().~EzLogString();
-				EZLOG_FREE_FUNCTION(p);
-			}
-#endif
-
-#endif
 		};
 
 	}

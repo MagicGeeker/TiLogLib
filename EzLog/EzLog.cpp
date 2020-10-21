@@ -17,6 +17,7 @@
 #include <vector>
 #include "EzLog.h"
 
+#define __________________________________________________EzLogCircularQueue__________________________________________________
 #define __________________________________________________EzLoggerTerminalPrinter__________________________________________________
 #define __________________________________________________EzLoggerFilePrinter__________________________________________________
 #define __________________________________________________EzLogImpl__________________________________________________
@@ -81,8 +82,8 @@ template<typename T> using List= std::list<T>;
 template<typename T> using Vector= std::vector<T>;
 
 
-#define ezmalloc  EZLOG_MALLOC_FUNCTION
-#define ezfree EZLOG_FREE_FUNCTION
+#define ezmalloc(size)  EZLOG_MALLOC_FUNCTION(size)
+#define ezfree(ptr)     EZLOG_FREE_FUNCTION(ptr)
 
 #define eznewtriv            ezlogspace::EzLogMemoryManager::NewTrivial
 #define eznew                ezlogspace::EzLogMemoryManager::New
@@ -182,6 +183,234 @@ namespace ezlogspace
 			virtual ~EzLogObject() = default;
 		};
 
+#ifdef        __________________________________________________EzLogCircularQueue__________________________________________________
+
+		template<typename T>
+		class PodCircularQueue
+		{
+			static_assert(std::is_pod<T>::value, "fatal error");
+		public:
+			using iterator=T *;
+			using const_iterator=const T *;
+
+			explicit PodCircularQueue(size_t size)
+			{
+				pMem = (T *) ezmalloc((1 + size) * sizeof(T));
+				pMemEnd = pMem + 1 + size;
+				pFirst = pEnd = pMem;
+			}
+
+			~PodCircularQueue()
+			{
+				ezfree(pMem);
+			}
+
+			bool empty() const
+			{
+				return pFirst == pEnd;
+			}
+
+			bool full() const
+			{
+				return (size_t) (pEnd - pFirst) == capacity() || pFirst == pEnd + 1;
+			}
+
+			size_t size() const
+			{
+				return pEnd >= pFirst ? pEnd - pFirst : capacity() - (pFirst - pEnd - 1);
+			}
+
+			size_t capacity() const
+			{
+				return pMemEnd - pMem - 1;
+			}
+
+			bool normalized() const
+			{
+				return pEnd >= pFirst;
+			}
+
+			//------------------------------------------sub queue------------------------------------------//
+			size_t first_sub_queue_size() const
+			{
+				return normalized() ? pEnd - pFirst : pMemEnd - pFirst;
+			}
+
+			const_iterator first_sub_queue_begin() const
+			{
+				return pFirst;
+			}
+
+			iterator first_sub_queue_begin()
+			{
+				return pFirst;
+			}
+
+			const_iterator first_sub_queue_end() const
+			{
+				return normalized() ? pEnd : pMemEnd;
+			};
+
+			iterator first_sub_queue_end()
+			{
+				return normalized() ? pEnd : pMemEnd;
+			}
+
+
+			size_t second_sub_queue_size() const
+			{
+				return normalized() ? 0 : pEnd - pMem;
+			}
+
+			const_iterator second_sub_queue_begin() const
+			{
+				return normalized() ? NULL : pMem;
+			}
+
+			iterator second_sub_queue_begin()
+			{
+				return normalized() ? NULL : pMem;
+			}
+
+			const_iterator second_sub_queue_end() const
+			{
+				return normalized() ? NULL : pEnd;
+			}
+
+			iterator second_sub_queue_end()
+			{
+				return normalized() ? NULL : pEnd;
+			}
+			//------------------------------------------sub queue------------------------------------------//
+
+			void swap(PodCircularQueue &rhs)
+			{
+				std::swap(pMem, rhs.pMem);
+				std::swap(pMemEnd, rhs.pMemEnd);
+				std::swap(pFirst, rhs.pFirst);
+				std::swap(pEnd, rhs.pEnd);
+			}
+
+			void normalize()
+			{
+				if (normalized())
+				{
+					return;
+				}
+				size_t size_first_sub = pMemEnd - pFirst;
+				size_t size_second_sub = pEnd - pMem;
+				size_t sz0 = pFirst - pEnd;
+
+				if (sz0 >= size_second_sub)
+				{
+					memcpy(pMem + size_first_sub, pMem, size_second_sub * sizeof(T));
+					memcpy(pMem, pFirst, size_first_sub * sizeof(T));
+				} else
+				{
+					PodCircularQueue<T> q2(capacity());
+					memcpy(q2.pMem, pFirst, size_first_sub * sizeof(T));
+					memcpy(q2.pMem + size_first_sub, pMem, size_second_sub * sizeof(T));
+					q2.pEnd = q2.pMem + (size_first_sub + size_second_sub);
+					swap(q2);
+				}
+			}
+
+			void resize(size_t sz)
+			{
+				{
+					DEBUG_ASSERT(sz == 0);
+					pEnd = pFirst = pMem;
+				}
+			}
+
+			void emplace_back(T t)
+			{
+				if (full())
+				{
+					std::terminate();
+				}
+				*pEnd = t;
+				if (pEnd != pMemEnd - 1)
+				{
+					pEnd++;
+				} else
+				{
+					pEnd = pMem;
+				}
+			}
+
+			void pop_front()
+			{
+				if (empty())
+				{
+					std::terminate();
+				}
+				if (pFirst == pMemEnd - 1)
+				{
+					pFirst = pMem;
+				} else
+				{
+					pFirst++;
+				}
+			}
+
+		public:
+			static void to_vector(Vector<T> &v, const PodCircularQueue<T> &q)
+			{
+				v.reserve(q.size());
+				v.resize(0);
+				v.insert(v.end(), q.first_sub_queue_begin(), q.first_sub_queue_end());
+				v.insert(v.end(), q.second_sub_queue_begin(), q.second_sub_queue_end());
+			}
+
+			static void to_vector(Vector<T> &v, PodCircularQueue<T>::const_iterator _beg,
+								  PodCircularQueue<T>::const_iterator _end)
+			{
+				DEBUG_ASSERT(_beg < _end);
+				v.reserve(_end - _beg);
+				v.resize(0);
+				v.insert(v.end(), _beg, _end);
+			}
+
+		public:
+			class PodCircularQueueView
+			{
+
+			};
+
+		private:
+
+			iterator begin()
+			{
+				return pFirst;
+			}
+
+			iterator end()
+			{
+				return pEnd;
+			}
+
+			const_iterator begin() const
+			{
+				return pFirst;
+			}
+
+			const_iterator end() const
+			{
+				return pEnd;
+			}
+
+		private:
+			T *pFirst;
+			T *pEnd;
+			T *pMem;
+			T *pMemEnd;
+		};
+
+		using EzLogBeanCircularQueue=PodCircularQueue<EzLogBean *>;
+		using EzLogBeanVector=Vector<EzLogBean *>;
+#endif
+
 		template<size_t _SleepWhenAcquireFailedInNanoSeconds = size_t(-1)>
 		class SpinLock
 		{
@@ -257,21 +486,21 @@ namespace ezlogspace
 
 		struct ThreadStru
 		{
-			Vector<EzLogBean *> vcache;
+			EzLogBeanCircularQueue vcache;
 			ThreadLocalSpinLock spinLock;//protect cache
 
 			const char *tid;
 			std::mutex thrdExistMtx;
 			std::condition_variable thrdExistCV;
 
-			explicit ThreadStru(size_t cacheSize) : tid(s_tid), spinLock(), thrdExistMtx(), thrdExistCV()
+			explicit ThreadStru(size_t cacheSize) : vcache(cacheSize), spinLock(), tid(s_tid), thrdExistMtx(),
+													thrdExistCV()
 			{
-				vcache.reserve(cacheSize);
 			};
 
-			explicit ThreadStru(size_t cacheSize, const char* _tid) : tid(_tid), spinLock(), thrdExistMtx(), thrdExistCV()
+			explicit ThreadStru(size_t cacheSize, const char *_tid) : vcache(cacheSize), spinLock(), tid(_tid),
+																	  thrdExistMtx(), thrdExistCV()
 			{
-				vcache.reserve(cacheSize);
 			};
 
 			~ThreadStru()
@@ -282,6 +511,23 @@ namespace ezlogspace
 #endif // NDEBUG
 
 			}
+		};
+
+		struct CacheStru
+		{
+			EzLogBeanVector vcache;
+
+			explicit CacheStru(size_t cacheSize)
+			{
+				vcache.reserve(cacheSize);
+			};
+
+			explicit CacheStru(size_t cacheSize, const char *_tid)
+			{
+				vcache.reserve(cacheSize);
+			};
+
+			~CacheStru() = default;
 		};
 
 		struct ThreadStruQueue
@@ -313,6 +559,8 @@ namespace ezlogspace
 												  const EzLogBean &bean);
 
 			static EzLogString &getMergedLogString();
+
+			static void MergeSortForGlobalQueue();
 
 			static inline void getMergePermission(std::unique_lock<std::mutex> &lk);
 
@@ -369,7 +617,7 @@ namespace ezlogspace
 			static ThreadStruQueue s_threadStruQueue;
 			static volatile bool s_threadStruQueue_inited;
 			
-			static ThreadStru s_globalCache;
+			static CacheStru s_globalCache;
 			static uint64_t s_printedLogsLength;
 			static uint64_t s_printedLogs;
 			static EzLogString s_global_cache_string;
@@ -385,7 +633,7 @@ namespace ezlogspace
 			static bool s_isQueueEmpty;
 			static std::thread s_threadPrinter;
 
-			static ThreadStru s_garbages;
+			static CacheStru s_garbages;
 			static std::mutex s_mtxDeleter;
 			static std::condition_variable s_cvDeleter;
 			static bool s_deleting;
@@ -678,7 +926,7 @@ namespace ezlogspace
 		ThreadStruQueue EZLogOutputThread::s_threadStruQueue;
 		volatile bool EZLogOutputThread::s_threadStruQueue_inited = true;
 
-		ThreadStru EZLogOutputThread::s_globalCache(GLOBAL_SIZE, nullptr);
+		CacheStru EZLogOutputThread::s_globalCache(GLOBAL_SIZE, nullptr);
 		uint64_t EZLogOutputThread::s_printedLogsLength = 0;
 		uint64_t EZLogOutputThread::s_printedLogs = 0;
 		EzLogString EZLogOutputThread::s_global_cache_string;
@@ -694,7 +942,7 @@ namespace ezlogspace
 		bool EZLogOutputThread::s_isQueueEmpty = false;
 		std::thread EZLogOutputThread::s_threadPrinter= CreatePrintThread();
 
-		ThreadStru EZLogOutputThread::s_garbages(EZLOG_GARBAGE_COLLECTION_QUEUE_MAX_SIZE, nullptr);
+		CacheStru EZLogOutputThread::s_garbages(EZLOG_GARBAGE_COLLECTION_QUEUE_MAX_SIZE, nullptr);
 		std::mutex EZLogOutputThread::s_mtxDeleter;
 		std::condition_variable EZLogOutputThread::s_cvDeleter;
 		bool EZLogOutputThread::s_deleting= false;
@@ -718,7 +966,10 @@ namespace ezlogspace
 
 		inline bool EZLogOutputThread::moveLocalCacheToGlobal(ThreadStru &bean)
 		{
-			s_globalCache.vcache.insert(s_globalCache.vcache.end(), bean.vcache.begin(), bean.vcache.end());
+			s_globalCache.vcache.insert(s_globalCache.vcache.end(), bean.vcache.first_sub_queue_begin(),
+										bean.vcache.first_sub_queue_end());
+			s_globalCache.vcache.insert(s_globalCache.vcache.end(), bean.vcache.second_sub_queue_begin(),
+										bean.vcache.second_sub_queue_end());
 			bean.vcache.resize(0);
 			//预留EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE
 			bool isGlobalFull =
@@ -853,14 +1104,25 @@ namespace ezlogspace
 		{
 			bool operator()(const EzLogBean *const lhs, const EzLogBean *const rhs) const
 			{
-#ifdef EZLOG_USE_STD_CHRONO
-				return lhs->cpptime() < rhs->cpptime();
-#else
-                return lhs->ctime < rhs->ctime;
-#endif
+				return lhs->ezLogTime < rhs->ezLogTime;
 			}
 		};
 
+
+		struct EzLogCircularQueueComp
+		{
+			bool operator()(const EzLogBeanVector &lhs, const EzLogBeanVector &rhs) const
+			{
+				return lhs.size() < rhs.size();
+			}
+		};
+
+		void EZLogOutputThread::MergeSortForGlobalQueue()
+		{
+
+		}
+
+		//s_mtxMerge s_mtxPrinter must be owned
 		EzLogString & EZLogOutputThread::getMergedLogString()
 		{
 			using namespace std::chrono;
@@ -914,9 +1176,8 @@ namespace ezlogspace
 		inline void EZLogOutputThread::getMilliTimeStrFromChrono(char *dst, size_t &len, EzLogBean &bean,
 														  SystemTimePoint &cpptime_pre)
 		{
-			DEBUG_ASSERT1(&bean.cpptime() != nullptr, &bean.cpptime());
-			bean.cpptime() = chrono::time_point_cast<chrono::milliseconds>(bean.cpptime());
-			SystemTimePoint &cpptime = bean.cpptime();
+			bean.time() = chrono::time_point_cast<chrono::milliseconds>(bean.time().chronoTime);
+			SystemTimePoint &cpptime = bean.time().chronoTime;
 			time_t t = chrono::system_clock::to_time_t(cpptime);
 			if (cpptime == cpptime_pre)
 			{
@@ -948,7 +1209,7 @@ namespace ezlogspace
 		{
 			time_t t;
 #if defined(EZLOG_USE_CTIME)
-			t=bean.ctime;
+			t=bean.time().ctime;
 #else
 			t = std::chrono::system_clock::to_time_t(
 					std::chrono::time_point_cast<std::chrono::seconds>(bean.cpptime()));
@@ -1284,7 +1545,7 @@ namespace ezlogspace
 			DEBUG_PRINT( EZLOG_LEVEL_INFO, "free mem tid: %s\n", s_pThreadLocalStru->tid );
 			ezfree((char*)s_pThreadLocalStru->tid);
 			s_pThreadLocalStru->tid = NULL;
-			Vector<EzLogBean *> temp;
+			EzLogBeanCircularQueue temp(0);
 			s_pThreadLocalStru->vcache.swap(temp);//free memory
 			{
 				lock_guard<mutex> lgd( s_mtxQueue );

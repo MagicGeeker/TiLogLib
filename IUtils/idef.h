@@ -62,6 +62,18 @@ typedef unsigned long long          uint64_t;
 #define DEBUG_CANARY_UINT64(X)
 #endif
 
+#ifndef NDEBUG
+#define DEBUG_CANARY_BOOL(_val_name)  bool _val_name;
+#else
+#define DEBUG_CANARY_BOOL(X)
+#endif
+
+#ifndef NDEBUG
+#define RUN_ON_DEBUG(...) do{__VA_ARGS__;}while(0)
+#else
+#define RUN_ON_DEBUG(...) do{}while(0)
+#endif
+
 #if !defined NDEBUG && !defined FORCE_DEBUG_PAUSE
 #define DEBUG_PAUSE
 #else
