@@ -69,9 +69,15 @@ typedef unsigned long long          uint64_t;
 #endif
 
 #ifndef NDEBUG
-#define RUN_ON_DEBUG(...) do{__VA_ARGS__;}while(0)
+#define DEBUG_RUN(...) do{__VA_ARGS__;}while(0)
 #else
-#define RUN_ON_DEBUG(...) do{}while(0)
+#define DEBUG_RUN(...) do{}while(0)
+#endif
+
+#ifndef NDEBUG
+#define DEBUG_DECLARE(...) __VA_ARGS__;
+#else
+#define DEBUG_DECLARE(...) 
 #endif
 
 #if !defined NDEBUG && !defined FORCE_DEBUG_PAUSE

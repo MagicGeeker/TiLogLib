@@ -26,6 +26,7 @@
 //#define    EZLOG_USE_CTIME
 #define    EZLOG_USE_STD_CHRONO
 #define    EZLOG_WITH_MILLISECONDS
+#define EZLOG_TIME_IS_STEADY    FALSE     //customize time is steady or not
 
 
 #define EZLOG_POLL_DEFAULT_THREAD_SLEEP_MS  1000   //poll period to move local cache to global cache
@@ -663,75 +664,468 @@ namespace ezlogspace
 			return std::move(lhs += rhs);
 		}
 
-		class EzLogTime
+
+
+
+
+		namespace ezlogtimespace
 		{
-		private:
-			using SystemLock=std::chrono::system_clock;
-			using TimePoint=std::chrono::system_clock::time_point;
-		public:
-#if defined(EZLOG_USE_STD_CHRONO)
-			TimePoint chronoTime;
-
-			inline EzLogTime()
+			enum EzLogTimeEnum
 			{
-				chronoTime = TimePoint::min();
-			}
+				NOW, MIN, MAX
+			};
 
-			inline EzLogTime(int)
-			{
-				chronoTime = now();
-			}
+			using steady_flag_t = uint64_t;
 
-			bool operator<(const EzLogTime &rhs) const
+			struct steady_flag_helper
 			{
-				return chronoTime < rhs.chronoTime;
-			}
+				static inline steady_flag_t now()
+				{
+					return s_steady_t_helper++;
+				}
 
-			inline EzLogTime &operator=(TimePoint tp)
-			{
-				chronoTime = tp;
-				return *this;
-			}
+				static inline steady_flag_t min()
+				{
+					return 0;
+				}
 
-			inline static TimePoint now()
-			{
-				return SystemLock::now();
-			}
+				static inline steady_flag_t max()
+				{
+					return UINT64_MAX;
+				}
 
-#else
-			time_t ctime;
-			inline EzLogTime()
-			{
-				ctime=(time_t)0;
-			}
-			inline EzLogTime(int)
-			{
-				ctime=now();
-			}
 
-			bool operator<(const EzLogTime &rhs) const
-			{
-				return ctime < rhs.ctime;
-			}
+			private:
+				static steady_flag_t s_steady_t_helper;
+			};
 
-			inline EzLogTime& operator=( time_t t )
+#define EZLOG_TIME_T_TEMPLATE_FOR(TYPE)    template<typename T = time_t, typename std::enable_if< std::is_same<T, TYPE>::value, TYPE>::type* = nullptr>
+			struct time_t_helper
 			{
-				ctime = t;
-				return *this;
-			}
+				inline static time_t now()
+				{
+					return time(NULL);
+				}
 
-			inline static time_t now()
+				inline static time_t min()
+				{
+					return (time_t) (0);
+				}
+
+				EZLOG_TIME_T_TEMPLATE_FOR(uint64_t) inline static time_t max()
+				{
+					return (time_t) (UINT64_MAX);
+				}
+
+				EZLOG_TIME_T_TEMPLATE_FOR(int64_t) inline static time_t max()
+				{
+					return (time_t) (INT64_MAX);
+				}
+
+				EZLOG_TIME_T_TEMPLATE_FOR(uint32_t) inline static time_t max()
+				{
+					return (time_t) (UINT32_MAX);
+				}
+
+				EZLOG_TIME_T_TEMPLATE_FOR(int32_t) inline static time_t max()
+				{
+					return (time_t) (INT32_MAX);
+				}
+			};
+
+			//for customize timer，must be similar to EzLogTimeImplBase
+			class EzLogTimeImplBase
 			{
-				return time(NULL);
-			}
-#endif
+				/**
+			public:
+				 using origin_time_type=xxx;
+			public:
+				inline EzLogTimeImplBase() ;
 
+				inline EzLogTimeImplBase(EzLogTimeEnum);
+
+				//operators
+				inline bool operator<(const EzLogTimeImplBase &rhs);
+
+				inline bool operator<=(const EzLogTimeImplBase &rhs);
+
+				inline EzLogTimeImplBase &operator=(const EzLogTimeImplBase &rhs);
+
+				//member functions
+				inline steady_flag_t toSteadyFlag() const;
+
+				inline time_t to_time_t() const;
+
+				inline void cast_to_ms();
+
+				inline origin_time_type get_origin_time() const;
+
+				//static functions
+				inline static EzLogTimeImplBase now();
+
+				inline static EzLogTimeImplBase min();
+
+				inline static EzLogTimeImplBase max();
+				 */
+			};
+
+			class EzLogNoSteadyTimeImplBase : public EzLogTimeImplBase
+			{
+
+			public:
+
+				inline EzLogNoSteadyTimeImplBase()
+				{
+					steadyT = steady_flag_helper::min();
+				}
+
+				inline bool operator<(const EzLogNoSteadyTimeImplBase &rhs) const
+				{
+					return steadyT < rhs.steadyT;
+				}
+
+				inline bool operator<=(const EzLogNoSteadyTimeImplBase &rhs) const
+				{
+					return steadyT <= rhs.steadyT;
+				}
+
+				inline steady_flag_t toSteadyFlag() const
+				{
+					return steadyT;
+				}
+
+			protected:
+				steady_flag_t steadyT;
+
+			};
+
+			class EzLogCTimeBase : EzLogTimeImplBase
+			{
+			public:
+				using origin_time_type=time_t;
+			public:
+				inline time_t to_time_t() const
+				{ return ctime; }
+
+				inline void cast_to_ms()
+				{}
+
+				inline origin_time_type get_origin_time() const
+				{ return ctime; }
+
+			protected:
+				time_t ctime;
+			};
+
+			//to use this class ,make sure time() is steady
+			class EzLogSteadyCTime : public EzLogCTimeBase
+			{
+			public:
+				inline EzLogSteadyCTime()
+				{
+					*this = min();
+				}
+
+				inline EzLogSteadyCTime(time_t t)
+				{
+					ctime = t;
+				}
+
+				inline bool operator<(const EzLogSteadyCTime &rhs) const
+				{
+					return ctime < rhs.ctime;
+				}
+
+				inline bool operator<=(const EzLogSteadyCTime &rhs) const
+				{
+					return ctime <= rhs.ctime;
+				}
+
+				inline EzLogSteadyCTime &operator=(const EzLogSteadyCTime &t)
+				{
+					ctime = t.ctime;
+					return *this;
+				}
+
+				inline steady_flag_t toSteadyFlag() const
+				{
+					return ctime;
+				}
+
+				inline static EzLogSteadyCTime now()
+				{
+					return time_t_helper::now();
+				}
+
+				inline static EzLogSteadyCTime min()
+				{
+					return time_t_helper::min();
+				}
+
+				inline static EzLogSteadyCTime max()
+				{
+					return time_t_helper::max();
+				}
+			};
+
+			class EzLogNOSteadyCTime : public EzLogCTimeBase, public EzLogNoSteadyTimeImplBase
+			{
+
+			public:
+				inline EzLogNOSteadyCTime()
+				{
+					*this = min();
+				}
+
+				inline EzLogNOSteadyCTime(time_t t, steady_flag_t st)
+				{
+					ctime = t;
+					steadyT = st;
+				}
+
+				inline EzLogNOSteadyCTime &operator=(const EzLogNOSteadyCTime &t)
+				{
+					ctime = t.ctime;
+					steadyT = t.steadyT;
+					return *this;
+				}
+
+
+				inline static EzLogNOSteadyCTime now()
+				{
+					return {time_t_helper::now(), steady_flag_helper::now()};
+				}
+
+				inline static EzLogNOSteadyCTime min()
+				{
+					return {time_t_helper::min(), steady_flag_helper::min()};
+				}
+
+				inline static EzLogNOSteadyCTime max()
+				{
+					return {time_t_helper::max(), steady_flag_helper::max()};
+				}
+			};
+
+
+			class EzLogChornoTimeBase : EzLogTimeImplBase
+			{
+			public:
+				using SystemLock=std::chrono::system_clock;
+				using TimePoint=std::chrono::system_clock::time_point;
+				using origin_time_type=TimePoint;
+			public:
+				inline time_t to_time_t() const
+				{
+					return SystemLock::to_time_t(chronoTime);
+				}
+
+				inline void cast_to_ms()
+				{
+					chronoTime = std::chrono::time_point_cast<std::chrono::milliseconds>(chronoTime);
+				}
+
+				inline origin_time_type get_origin_time() const
+				{ return chronoTime; }
+
+			protected:
+				TimePoint chronoTime;
+			};
+
+			//to use this class ,make sure system_lock is steady
+			class EzLogSteadyChornoTime : EzLogChornoTimeBase
+			{
+			public:
+				inline EzLogSteadyChornoTime()
+				{
+					chronoTime = TimePoint::min();
+				}
+
+				inline EzLogSteadyChornoTime(TimePoint t)
+				{
+					chronoTime = t;
+				}
+
+				bool operator<(const EzLogSteadyChornoTime &rhs) const
+				{
+					return chronoTime < rhs.chronoTime;
+				}
+
+				bool operator<=(const EzLogSteadyChornoTime &rhs) const
+				{
+					return chronoTime <= rhs.chronoTime;
+				}
+
+				inline EzLogSteadyChornoTime &operator=(const EzLogSteadyChornoTime &t)
+				{
+					chronoTime = t.chronoTime;
+					return *this;
+				}
+
+				inline steady_flag_t toSteadyFlag() const
+				{
+					return chronoTime.time_since_epoch().count();
+				}
+
+				inline static EzLogSteadyChornoTime now()
+				{
+					return SystemLock::now();
+				}
+
+				inline static EzLogSteadyChornoTime min()
+				{
+					return TimePoint::min();
+				}
+
+				inline static EzLogSteadyChornoTime max()
+				{
+					return TimePoint::max();
+				}
+			};
+
+			class EzLogNoSteadyChornoTime : public EzLogChornoTimeBase, public EzLogNoSteadyTimeImplBase
+			{
+			public:
+				inline EzLogNoSteadyChornoTime()
+				{
+					chronoTime = TimePoint::min();
+				}
+
+				inline EzLogNoSteadyChornoTime(TimePoint t, steady_flag_t st)
+				{
+					steadyT = st;
+					chronoTime = t;
+				}
+
+				inline EzLogNoSteadyChornoTime &operator=(const EzLogNoSteadyChornoTime &t)
+				{
+					steadyT = t.steadyT;
+					chronoTime = t.chronoTime;
+					return *this;
+				}
+
+				inline static EzLogNoSteadyChornoTime now()
+				{
+					return {SystemLock::now(), steady_flag_helper::now()};
+				}
+
+				inline static EzLogNoSteadyChornoTime min()
+				{
+					return {TimePoint::min(), steady_flag_helper::min()};
+				}
+
+				inline static EzLogNoSteadyChornoTime max()
+				{
+					return {TimePoint::max(), steady_flag_helper::max()};
+				}
+			};
+
+
+			template<typename _EzLogTimeImplType>
+			class EzLogTime
+			{
+			public:
+				using EzLogTimeImplType=_EzLogTimeImplType;
+				using origin_time_type=typename EzLogTimeImplType::origin_time_type;
+			public:
+				inline EzLogTime()
+				{
+					impl = EzLogTimeImplType::min();
+				}
+
+				inline EzLogTime(const EzLogTimeImplType &t)
+				{
+					impl = t;
+				}
+
+				inline EzLogTime(EzLogTimeEnum e)
+				{
+					switch (e)
+					{
+						case NOW:
+							impl = EzLogTimeImplType::now();
+							break;
+						case MIN:
+							impl = EzLogTimeImplType::min();
+							break;
+						case MAX:
+							impl = EzLogTimeImplType::max();
+							break;
+						default:
+							assert(false);
+							break;
+					}
+				}
+
+				inline bool operator<(const EzLogTime &rhs) const
+				{
+					return impl < rhs.impl;
+				}
+
+				inline bool operator<=(const EzLogTime &rhs) const
+				{
+					return impl <= rhs.impl;
+				}
+
+				inline EzLogTime &operator=(const EzLogTime &rhs)
+				{
+					impl = rhs.impl;
+					return *this;
+				}
+
+				inline steady_flag_t toSteadyFlag() const
+				{
+					return impl.toSteadyFlag();
+				}
+
+				inline time_t to_time_t() const
+				{
+					return impl.to_time_t();
+				}
+
+				inline void cast_to_ms()
+				{
+					impl.cast_to_ms();
+				};
+
+				inline origin_time_type get_origin_time() const
+				{ return impl.get_origin_time(); }
+
+				inline static EzLogTimeImplType now()
+				{
+					return EzLogTimeImplType::now();
+				}
+
+				inline static EzLogTimeImplType min()
+				{
+					return EzLogTimeImplType::min();
+				}
+
+				inline static EzLogTimeImplType max()
+				{
+					return EzLogTimeImplType::max();
+				}
+
+			private:
+				EzLogTimeImplType impl;
+			};
 		};
+
+
 
 		class EzLogBean : public EzLogObject
 		{
-		private:
+		public:
 			using TimePoint=std::chrono::system_clock::time_point;
+#if defined( EZLOG_USE_CTIME) && !EZLOG_TIME_IS_STEADY
+			using EzLogTime=ezlogspace::internal::ezlogtimespace::EzLogTime<ezlogspace::internal::ezlogtimespace::EzLogNOSteadyCTime>;
+#elif defined( EZLOG_USE_CTIME) && EZLOG_TIME_IS_STEADY
+			using EzLogTime=ezlogspace::internal::ezlogtimespace::EzLogTime<ezlogspace::internal::ezlogtimespace::EzLogSteadyCTime>;
+#elif defined( EZLOG_USE_STD_CHRONO) && !EZLOG_TIME_IS_STEADY
+			using EzLogTime=ezlogspace::internal::ezlogtimespace::EzLogTime<ezlogspace::internal::ezlogtimespace::EzLogNoSteadyChornoTime>;
+#elif defined( EZLOG_USE_STD_CHRONO) && EZLOG_TIME_IS_STEADY
+			using EzLogTime=ezlogspace::internal::ezlogtimespace::EzLogTime<ezlogspace::internal::ezlogtimespace::EzLogSteadyChornoTime>;
+#endif
 
 		public:
 			DEBUG_CANARY_BOOL(flag0)
@@ -771,16 +1165,17 @@ namespace ezlogspace
 			inline static EzLogBean *CreateInstance()
 			{
 				EzLogBean *thiz = (EzLogBean *) EZLOG_MALLOC_FUNCTION(sizeof(EzLogBean));
-				PlacementNew(&thiz->time(), 0);
+				PlacementNew(&thiz->time(), ezlogtimespace::EzLogTimeEnum::NOW );
 				return thiz;
 			}
 
 			inline static void DestroyInstance(EzLogBean *p)
 			{
-				RUN_ON_DEBUG(assert(!(p->flag0 || p->flag1 || p->flag2)););
+				assert( p != nullptr );//in this program,p is not null
+				DEBUG_RUN(assert(!(p->flag0 || p->flag1 || p->flag2)););
 				p->time().~EzLogTime();
 				p->data().~EzLogString();
-				RUN_ON_DEBUG(p->flag0 = p->flag1 = p->flag2 = 1;);
+				DEBUG_RUN(p->flag0 = p->flag1 = p->flag2 = 1;);
 				EZLOG_FREE_FUNCTION(p);
 			}
 		};
