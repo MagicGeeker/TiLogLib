@@ -841,11 +841,11 @@ namespace ezlogspace
 					return ctime <= rhs.ctime;
 				}
 
-				inline EzLogSteadyCTime &operator=(const EzLogSteadyCTime &t)
-				{
-					ctime = t.ctime;
-					return *this;
-				}
+				inline EzLogSteadyCTime &operator=(const EzLogSteadyCTime &t) = default;
+//				{
+//					ctime = t.ctime;
+//					return *this;
+//				}
 
 				inline steady_flag_t toSteadyFlag() const
 				{
@@ -883,12 +883,12 @@ namespace ezlogspace
 					steadyT = st;
 				}
 
-				inline EzLogNOSteadyCTime &operator=(const EzLogNOSteadyCTime &t)
-				{
-					ctime = t.ctime;
-					steadyT = t.steadyT;
-					return *this;
-				}
+				inline EzLogNOSteadyCTime &operator=(const EzLogNOSteadyCTime &t) = default;
+//				{
+//					ctime = t.ctime;
+//					steadyT = t.steadyT;
+//					return *this;
+//				}
 
 
 				inline static EzLogNOSteadyCTime now()
@@ -946,21 +946,21 @@ namespace ezlogspace
 					chronoTime = t;
 				}
 
-				bool operator<(const EzLogSteadyChornoTime &rhs) const
+				inline bool operator<(const EzLogSteadyChornoTime &rhs) const
 				{
 					return chronoTime < rhs.chronoTime;
 				}
 
-				bool operator<=(const EzLogSteadyChornoTime &rhs) const
+				inline bool operator<=(const EzLogSteadyChornoTime &rhs) const
 				{
 					return chronoTime <= rhs.chronoTime;
 				}
 
-				inline EzLogSteadyChornoTime &operator=(const EzLogSteadyChornoTime &t)
-				{
-					chronoTime = t.chronoTime;
-					return *this;
-				}
+				inline EzLogSteadyChornoTime &operator=(const EzLogSteadyChornoTime &t) = default;
+//				{
+//					chronoTime = t.chronoTime;
+//					return *this;
+//				}
 
 				inline steady_flag_t toSteadyFlag() const
 				{
@@ -997,12 +997,12 @@ namespace ezlogspace
 					chronoTime = t;
 				}
 
-				inline EzLogNoSteadyChornoTime &operator=(const EzLogNoSteadyChornoTime &t)
-				{
-					steadyT = t.steadyT;
-					chronoTime = t.chronoTime;
-					return *this;
-				}
+				inline EzLogNoSteadyChornoTime &operator=(const EzLogNoSteadyChornoTime &t) = default;
+//				{
+//					steadyT = t.steadyT;
+//					chronoTime = t.chronoTime;
+//					return *this;
+//				}
 
 				inline static EzLogNoSteadyChornoTime now()
 				{
@@ -1067,11 +1067,11 @@ namespace ezlogspace
 					return impl <= rhs.impl;
 				}
 
-				inline EzLogTime &operator=(const EzLogTime &rhs)
-				{
-					impl = rhs.impl;
-					return *this;
-				}
+				inline EzLogTime &operator=(const EzLogTime &rhs) = default;
+//				{
+//					impl = rhs.impl;
+//					return *this;
+//				}
 
 				inline steady_flag_t toSteadyFlag() const
 				{
@@ -1126,6 +1126,8 @@ namespace ezlogspace
 #elif defined( EZLOG_USE_STD_CHRONO) && EZLOG_TIME_IS_STEADY
 			using EzLogTime=ezlogspace::internal::ezlogtimespace::EzLogTime<ezlogspace::internal::ezlogtimespace::EzLogSteadyChornoTime>;
 #endif
+			static_assert(std::is_trivially_copyable<TimePoint>::value, "");
+			static_assert(std::is_trivially_copyable<EzLogTime>::value, "");
 
 		public:
 			DEBUG_CANARY_BOOL(flag0)
@@ -1173,7 +1175,8 @@ namespace ezlogspace
 			{
 				assert( p != nullptr );//in this program,p is not null
 				DEBUG_RUN(assert(!(p->flag0 || p->flag1 || p->flag2)););
-				p->time().~EzLogTime();
+				static_assert(std::is_trivially_destructible<EzLogTime>::value, "fatal error");
+				//p->time().~EzLogTime();
 				p->data().~EzLogString();
 				DEBUG_RUN(p->flag0 = p->flag1 = p->flag2 = 1;);
 				EZLOG_FREE_FUNCTION(p);
@@ -1255,24 +1258,6 @@ namespace ezlogspace
 
 	};
 
-#ifdef EZLOG_USE_STD_CHRONO
-#define EZLOG_INTERNAL_CREATE_EZLOGBEAN(lv) []()->ezlogspace::internal::EzLogBean *{            \
-    if(ezlogspace::EzLog::getState()!=ezlogspace::OPEN){return nullptr;}\
-    using EzLogBean=ezlogspace::internal::EzLogBean;\
-    EzLogBean * m_pHead = EzLogBean::CreateInstance();\
-    assert(m_pHead);\
-    EzLogBean &bean = *m_pHead;\
-    bean.tid = ezlogspace::internal::s_tid;\
-    bean.file = __FILE__;\
-   	static_assert(__LINE__<=UINT16_MAX,"fatal error,file line too big");\
-	static_assert(sizeof(__FILE__)-1<=UINT16_MAX,"fatal error,file path is too long");\
-	bean.fileLen = (uint16_t)(sizeof(__FILE__)-1);\
-	bean.line = (uint16_t)(__LINE__);\
-    bean.level = ezlogspace::LOG_PREFIX[lv];\
-	bean.toTernimal=lv==EZLOG_LEVEL_COUT;\
-    return m_pHead;\
-}()
-#else
 #define EZLOG_INTERNAL_CREATE_EZLOGBEAN(lv) []()->ezlogspace::internal::EzLogBean *{			\
     if(ezlogspace::EzLog::getState()!=ezlogspace::OPEN){return nullptr;}\
 	using EzLogBean=ezlogspace::internal::EzLogBean;\
@@ -1289,7 +1274,6 @@ namespace ezlogspace
 	bean.toTernimal=lv==EZLOG_LEVEL_COUT;\
 	return m_pHead;\
 }()
-#endif
 
 	class EzLogStream : private ezlogspace::internal::EzLogStringInternal
 	{

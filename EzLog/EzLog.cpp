@@ -329,26 +329,21 @@ namespace ezlogspace
 				DEBUG_ASSERT(normalized());
 			}
 
-			void resize(size_t sz)
+			void clear()
 			{
-				{
-					DEBUG_ASSERT(sz == 0);
-					pEnd = pFirst = pMem;
-					DEBUG_RUN( memset( pMem, 0, mem_size() ) );
-				}
+				pEnd = pFirst = pMem;
+				DEBUG_RUN(memset(pMem, 0, mem_size()));
 			}
 
 			void emplace_back(T t)
 			{
 				DEBUG_ASSERT(!full());
-				*pEnd = t;
-				if (pEnd != pMemEnd - 1)
-				{
-					pEnd++;
-				} else
+				if (pEnd == pMemEnd)
 				{
 					pEnd = pMem;
 				}
+				*pEnd = t;
+				pEnd++;
 			}
 
 			/*
@@ -374,11 +369,7 @@ namespace ezlogspace
 				}
 
 				pFirst = _to;
-				if (pFirst == pMemEnd)
-				{
-					DEBUG_PRINT(EZLOG_LEVEL_DEBUG, " pFirst == pMemEnd\n");
-					pFirst = pMem;
-				}
+				DEBUG_ASSERT (_to != pMem);//use pMemEnd instead of pMem
 			}
 
 		public:
@@ -536,10 +527,7 @@ namespace ezlogspace
 			~ThreadStru()
 			{
 				ezfree((void*)tid);
-#ifndef NDEBUG
-				tid = NULL;
-#endif // NDEBUG
-
+				DEBUG_RUN(tid = NULL);
 			}
 		};
 
@@ -569,7 +557,7 @@ namespace ezlogspace
 		};
 
 
-		struct EzLogBeanComp
+		struct EzLogBeanPtrComp
 		{
 			bool operator()(const EzLogBean *const lhs, const EzLogBean *const rhs) const
 			{
@@ -752,7 +740,6 @@ namespace ezlogspace
 		private:
 			static EzLoggerPrinter *s_printer;
 			static EzLogStateEnum s_state;
-			static std::unique_ptr<EzLogImpl> s_upIns;
 			static bool s_inited;
 		};
 
@@ -886,7 +873,6 @@ namespace ezlogspace
 
 		EzLoggerPrinter *EzLogImpl::s_printer = nullptr;
 		EzLogStateEnum EzLogImpl::s_state = OPEN;
-		unique_ptr<EzLogImpl> EzLogImpl::s_upIns(eznew<EzLogImpl>());
 		bool EzLogImpl::s_inited = init();
 
 
@@ -1036,7 +1022,7 @@ namespace ezlogspace
 										bean.vcache.first_sub_queue_end());
 			s_globalCache.vcache.insert(s_globalCache.vcache.end(), bean.vcache.second_sub_queue_begin(),
 										bean.vcache.second_sub_queue_end());
-			bean.vcache.resize(0);
+			bean.vcache.clear();
 			//预留EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE
 			bool isGlobalFull =
 					s_globalCache.vcache.size() >= EZLOG_GLOBAL_QUEUE_MAX_SIZE - EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE;
@@ -1193,12 +1179,12 @@ namespace ezlogspace
 					DEBUG_ASSERT( it_sub_beg <= it_sub_end );
 					size_t size = it_sub_end - it_sub_beg;
 					if( size == 0 ) { return it_sub_end; }
-					auto it_sub = std::upper_bound( it_sub_beg, it_sub_end, &bean, EzLogBeanComp() );
+					auto it_sub = std::upper_bound(it_sub_beg, it_sub_end, &bean, EzLogBeanPtrComp() );
 					return it_sub;
 				};
 
-				size_t vcachePre = vcache.size();
-				if( vcachePre == 0 ) {
+				size_t vcachePreSize = vcache.size();
+				if(vcachePreSize == 0 ) {
 					continue;
 				}
 				if( bean.time() < ( **vcache.first_sub_queue_begin() ).time() )
@@ -1207,7 +1193,7 @@ namespace ezlogspace
 				}
 
 
-#if 0
+#if 1
 				if( !vcache.normalized() )
 				{
 					if( bean.time() < ( **vcache.second_sub_queue_begin() ).time() )
@@ -1233,28 +1219,31 @@ namespace ezlogspace
 					EzLogBeanCircularQueue::to_vector( v, vcache.first_sub_queue_begin(), it_before_last_merge );
 					vcache.erase_from_begin_to( it_before_last_merge );
 				}
-#endif
-
-				if(1)
+#else
 				{
 					vcache.normalize();
 
 					auto it_before_last_merge = func_to_vector( vcache.first_sub_queue_begin(), vcache.first_sub_queue_end() );
 					EzLogBeanCircularQueue::to_vector( v, vcache.first_sub_queue_begin(), it_before_last_merge );
 					vcache.erase_from_begin_to( it_before_last_merge );
-
-					//std::stable_sort( v.begin(), v.end(), EzLogBeanComp() );
-					auto sorted_judge_func = []() {if (!std::is_sorted(v.begin(), v.end(), EzLogBeanComp()))
-						for (uint32_t index = 0; index != v.size(); index++) {
-							cerr << v[index]->time().toSteadyFlag() << " ";
-							if (index % 6 == 0) { cerr << " "; }
-						}};
-					DEBUG_RUN(sorted_judge_func());
 				}
-				
+#endif
 
+				auto sorted_judge_func = []() {
+					if (!std::is_sorted(v.begin(), v.end(), EzLogBeanPtrComp()))
+					{
+						for (uint32_t index = 0; index != v.size(); index++)
+						{
+							cerr << v[index]->time().toSteadyFlag() << " ";
+							if (index % 6 == 0)
+							{ cerr << " "; }
+						}
+						DEBUG_ASSERT(false);
+					}
+				};
+				DEBUG_RUN(sorted_judge_func());
 				s.emplace( v );//insert for every thread
-				DEBUG_ASSERT2( v.size() <= vcachePre, v.size(), vcachePre );
+				DEBUG_ASSERT2(v.size() <= vcachePreSize, v.size(), vcachePreSize );
 			}
 		}
 
@@ -1267,7 +1256,7 @@ namespace ezlogspace
 			std::multiset<EzLogBeanVector, EzLogCircularQueueComp> s;  //set of ThreadStru cache
 			EzLogBean bean;
 			bean.time()=s_log_last_time;
-			std::stable_sort( s_globalCache.vcache.begin(), s_globalCache.vcache.end(), EzLogBeanComp() );
+			std::stable_sort(s_globalCache.vcache.begin(), s_globalCache.vcache.end(), EzLogBeanPtrComp() );
 			s.emplace( s_globalCache.vcache );//insert global cache first
 			{
 				unique_lock<mutex> lk_queue;
@@ -1280,7 +1269,7 @@ namespace ezlogspace
 				auto it_fst_vec = s.begin();
 				auto it_sec_vec = std::next(s.begin());
 				v.resize( it_fst_vec->size() + it_sec_vec->size() );
-				std::merge( it_fst_vec->begin(), it_fst_vec->end(), it_sec_vec->begin(), it_sec_vec->end(), v.begin(), EzLogBeanComp() );
+				std::merge(it_fst_vec->begin(), it_fst_vec->end(), it_sec_vec->begin(), it_sec_vec->end(), v.begin(), EzLogBeanPtrComp() );
 
 				s.erase( s.begin() );
 				s.erase( s.begin() );
@@ -1302,7 +1291,7 @@ namespace ezlogspace
 			using namespace std::chrono;
 
 			EzLogString &str = s_global_cache_string;
-			//std::stable_sort(s_globalCache.vcache.begin(), s_globalCache.vcache.end(), EzLogBeanComp());
+			//std::stable_sort(s_globalCache.vcache.begin(), s_globalCache.vcache.end(), EzLogBeanPtrComp());
 			MergeSortForGlobalQueue();
 
 			char ctimestr[EZLOG_CTIME_MAX_LEN] = {0};
