@@ -1,19 +1,10 @@
-//
-// Created***REMOVED*** on 2020/9/11.
-//
-
 #ifndef EZLOG_EZLOG_H
 #define EZLOG_EZLOG_H
 
 #include <stdarg.h>
 #include <string.h>
 #include <assert.h>
-#include <sstream>
-#include <fstream>
-#include <memory>
 #include <thread>
-#include <mutex>
-#include <condition_variable>
 #include<type_traits>
 #include <ostream>
 
@@ -36,6 +27,7 @@
 #define EZLOG_GLOBAL_QUEUE_MAX_SIZE  ((size_t)1<<12U)   //global cache queue max length
 #define EZLOG_GARBAGE_COLLECTION_QUEUE_MAX_SIZE  ((size_t)4<<12U)   //garbage collection queue max length
 #define EZLOG_SINGLE_LOG_RESERVE_LEN  50     //reserve for every log except for level,tid ...
+#define EZLOG_MAX_LOG_NUM  SIZE_MAX          //max log numbers
 
 #define EZLOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER    "a:/"
 #define EZLOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE    (8U<<20U)   // log size per file,it is not accurate,especially EZLOG_GLOBAL_BUF_SIZE is bigger
@@ -64,6 +56,12 @@
 
 namespace ezlogspace
 {
+#if defined(_M_X64) || defined(__amd64__)
+#define EZLOG_X64
+#endif
+
+#define EZLOG_ABSTRACT
+#define EZLOG_INTERFACE
 
 #ifndef NDEBUG
 #undef EZLOG_MALLOC_FUNCTION
@@ -141,7 +139,7 @@ namespace ezlogspace
 	};
 
 	constexpr char LOG_PREFIX[] = "EZ  FEWIDV";
-
+	//reserve +1 for '\0'
     constexpr size_t EZLOG_UINT32_MAX_CHAR_LEN= (10+1);
     constexpr size_t EZLOG_INT32_MAX_CHAR_LEN =(11+1);
     constexpr size_t EZLOG_UINT64_MAX_CHAR_LEN= (20+1);
@@ -160,9 +158,9 @@ namespace ezlogspace
 
         //notice! For faster in append and etc function, this is not always end with '\0'
         //if you want to use c-style function on this object, such as strlen(&this->front())
-        //you must call data() function before to ensure end with the '\0'
-		//see ensureZero
-        class EzLogStringInternal
+        //you must call c_str() function before to ensure end with the '\0'
+		//see rr_ensureZero
+        class EzLogStringInternal:public EzLogObject
         {
             friend class ezlogspace::EzLogStream;
 
@@ -171,65 +169,72 @@ namespace ezlogspace
             {
                 DEFAULT = 0
             };
+#ifndef NDEBUG
+			class positive_size_t
+			{
+				size_t sz;
+			public:
+				 positive_size_t(size_t sz):sz(sz){
+				 	assert(sz!=0);
+				 }
+				 operator size_t()
+				 {
+					 return sz;
+				 }
+			};
+#else
+			using positive_size_t=size_t;
+#endif
 
             ~EzLogStringInternal()
-            {
+			{
 				assert(m_front <= m_end);
 				assert(m_end <= m_cap);
-				EZLOG_FREE_FUNCTION(m_front);
+				do_free();
 #ifndef NDEBUG
 				makeThisInvalid();
 #endif
 			}
 
-            inline EzLogStringInternal()
+			explicit inline EzLogStringInternal()
 			{
 				create();
 			}
 
-            //init with capacity n
-            inline EzLogStringInternal(size_t n, EzlogStringEnum)
-            {
-                m_front = (char *) EZLOG_MALLOC_FUNCTION(n);
-                m_end = m_front;
-                m_cap = m_front + n;
-				ensureZero();
-            }
-
-			inline EzLogStringInternal(const char *s)
+			//init with capacity n
+			inline EzLogStringInternal(EzlogStringEnum, positive_size_t n)
 			{
-				size_t length = strlen(s);
-				size_t cap0 = (size_t)(1 +  length);
-				size_t cap = DEFAULT_CAPACITY > cap0 ? DEFAULT_CAPACITY : cap0;
-				m_front = (char *) EZLOG_MALLOC_FUNCTION(cap);
-				memcpy(m_front, s, length);
-				m_end = m_front + length;
-				m_cap = m_front + cap;
-				assert(m_cap >= m_end);
+				do_malloc(0, n);
 				ensureZero();
+			}
+
+			//init with n count of c
+			inline EzLogStringInternal(positive_size_t n,char c)
+			{
+            	do_malloc(n,n);
+            	memset(m_front,c,n);
+            	ensureZero();
 			}
 
             //length without '\0'
             inline EzLogStringInternal(const char *s, size_t length)
             {
-				size_t cap0 = (size_t)(1 +  length);
-				size_t cap = DEFAULT_CAPACITY > cap0 ? DEFAULT_CAPACITY : cap0;
-                m_front = (char *) EZLOG_MALLOC_FUNCTION(cap);
+				do_malloc(length, get_better_cap(length));
                 memcpy(m_front, s, length);
-                m_end = m_front + length;
-                m_cap = m_front + cap;
-                assert(m_cap >= m_end);
+                ensureZero();
             }
 
-			inline EzLogStringInternal(const EzLogStringInternal& x)
+			explicit inline EzLogStringInternal(const char *s) : EzLogString(s, strlen(s))
 			{
-            	create();
-            	*this=x;
+			}
+
+			inline EzLogStringInternal(const EzLogStringInternal& x): EzLogString(x.data(), x.size())
+			{
 			}
 
 			inline EzLogStringInternal(EzLogStringInternal&& x)noexcept
 			{
-				m_front=m_end=m_cap= nullptr;
+				makeThisInvalid();
 				*this=std::move(x);
 			}
 
@@ -247,14 +252,16 @@ namespace ezlogspace
 
 			inline EzLogStringInternal& operator=(EzLogStringInternal &&str)noexcept
 			{
-				this->~EzLogStringInternal();
-				this->m_front = str.m_front;
-				this->m_end = str.m_end;
-				this->m_cap = str.m_cap;
-				ensureZero();
-				//str.create();
-				str.makeThisInvalid();
+				swap(str);
+				str.resize(0);
 				return *this;
+			}
+
+			inline void swap(EzLogStringInternal &str) noexcept
+			{
+				std::swap(this->m_front, str.m_front);
+				std::swap(this->m_end, str.m_end);
+				std::swap(this->m_cap, str.m_cap);
 			}
 
             inline explicit operator std::string() const
@@ -265,16 +272,18 @@ namespace ezlogspace
 		public:
             inline size_t size() const
             {
+				check();
                 return m_end - m_front;
             }
 
 			inline size_t length() const
 			{
-				return m_end - m_front;
+				return size();
 			}
 
             inline size_t capacity() const
             {
+				check();
                 return m_cap - m_front;
             }
 
@@ -301,9 +310,19 @@ namespace ezlogspace
 
             inline const char *data() const
             {
-                *m_end = '\0';
                 return m_front;
             }
+
+			inline const char* c_str() const
+			{
+				if (m_front != nullptr)
+				{
+					check();
+					*m_end = '\0';
+					return m_front;
+				}
+				return "";
+			}
 
             inline EzLogStringInternal &append(char c)
             {
@@ -321,18 +340,19 @@ namespace ezlogspace
             {
             	char* p=(char*)cstr;
             	size_t off=size();
-            	while(*p!='\0')
+				while (*p != '\0')
 				{
-					if(m_end>=m_cap)
+					if (m_end >= m_cap - 1)
 					{
-                        ensureCap(capacity());
+						ensureCap(sizeof(char) + capacity());
 						m_end = m_front + off;
 					}
-					*m_end=*p;
+					*m_end = *p;
 					m_end++;
 					p++;
 					off++;
 				}
+				ensureZero();
 				return *this;
 
 //                size_t length = strlen(cstr);
@@ -397,7 +417,7 @@ namespace ezlogspace
 				return append_unsafe(x);
 			}
 
-            
+
 
 //*********  Warning!!!You must reserve enough capacity ,then append is safe ******************************//
 
@@ -584,50 +604,80 @@ namespace ezlogspace
             inline void ensureCap(size_t ensure_cap)
             {
                 size_t pre_cap = capacity();
-                size_t new_cap = 1 + ((ensure_cap * RESERVE_RATE_DEFAULT) >> RESERVE_RATE_BASE);
-                //reserve 1 for '\0',you must ensure (ensure_cap * RESERVE_RATE_DEFAULT) will not over-flow
-
+                size_t new_cap = ((ensure_cap * RESERVE_RATE_DEFAULT) >> RESERVE_RATE_BASE);
+                //you must ensure (ensure_cap * RESERVE_RATE_DEFAULT) will not over-flow
 				if (pre_cap >= new_cap)
-                {
-                    return;
-                }
-                size_t pre_size = size();
-
-                char *pRealloc = (char *) EZLOG_REALLOC_FUNCTION(m_front, new_cap);
-                assert(pRealloc);
-                m_front = pRealloc;
-                m_end = m_front + pre_size;
-                m_cap = m_front + new_cap;
+				{
+					return;
+				}
+                do_realloc(new_cap);
             }
 
-            inline void create()
+			inline void create(size_t capacity = DEFAULT_CAPACITY)
 			{
-				m_front = (char *) EZLOG_MALLOC_FUNCTION(DEFAULT_CAPACITY);
-				m_end = m_front;
-				m_cap = m_front + DEFAULT_CAPACITY;
+				do_malloc(0, capacity);
 				ensureZero();
 			}
 
 			inline void makeThisInvalid()
 			{
 				m_front = nullptr;
-				m_end = (char *)UINTPTR_MAX;
-				m_cap = (char *)UINTPTR_MAX;
+				m_end = nullptr;
+				m_cap = nullptr;
 			}
 
 			inline void ensureZero()
 			{
 #ifndef NDEBUG
-				*m_end = '\0';
-
+				check();
+				if (m_end != nullptr)
+					*m_end = '\0';
 #endif // !NDEBUG
 			}
 
-        private:
+			inline void check()const
+			{
+				assert(m_end >= m_front);
+				assert(m_cap >= m_end);
+			}
+
+			inline size_t get_better_cap(size_t cap)
+			{
+				return DEFAULT_CAPACITY > cap ? DEFAULT_CAPACITY : cap;
+			}
+
+			inline void do_malloc(size_t size, size_t cap)
+			{
+				m_front = nullptr;
+				m_end = m_front + size;
+				m_cap = m_front + cap;
+				do_realloc(cap);
+			}
+
+			inline  void do_realloc(size_t new_cap)
+			{
+				check();
+				size_t sz = this->size();
+				size_t cap = this->capacity();
+				new_cap += sizeof('\0');
+				char* p = (char*)EZLOG_REALLOC_FUNCTION(this->m_front, new_cap);
+				assert(p != NULL);
+				this->m_front = p;
+				this->m_end = this->m_front + sz;
+				this->m_cap = this->m_front + new_cap;
+				check();
+			}
+			//ptr is m_front
+			inline void do_free()
+			{
+				EZLOG_FREE_FUNCTION(this->m_front);
+			}
+
+		protected:
 			constexpr static size_t DEFAULT_CAPACITY = 32;
 			constexpr static uint32_t RESERVE_RATE_DEFAULT = 16;
 			constexpr static uint32_t RESERVE_RATE_BASE = 3;
-            char *m_front = nullptr; //front of c-style str
+            char *m_front; //front of c-style str
             char *m_end;    // the next of the last char of c-style str,
             char *m_cap;    // the next of buf end,
 
@@ -636,12 +686,12 @@ namespace ezlogspace
 
 		inline std::ostream &operator<<(std::ostream &os, const EzLogStringInternal &internal)
 		{
-			return os << internal.data();
+			return os << internal.c_str();
 		}
 
 		inline std::string operator+(const std::string& lhs,const EzLogString& rhs)
 		{
-			return std::string(lhs+rhs.data());
+			return std::string(lhs+rhs.c_str());
 		}
 
 		template<typename T, typename= typename std::enable_if<std::is_arithmetic<T>::value, void>::type>
@@ -675,8 +725,23 @@ namespace ezlogspace
 				NOW, MIN, MAX
 			};
 
+#if !EZLOG_TIME_IS_STEADY
+			//make sure write from register to memory is atomic
+			//for example write a uint64_t from register to memory is not atomic in 32bit system
+#ifdef EZLOG_X64
+			//suppose 1.0e7 logs per second(limit),1year=365.2422days,
+			//need 58455 years to UINT64_MAX,it is enough
 			using steady_flag_t = uint64_t;
-
+#else
+			using steady_flag_t = uint32_t;
+//#include<atomic>
+//			using steady_flag_t = std::atomic_uint64_t;
+#endif
+			static_assert(EZLOG_MAX_LOG_NUM <= std::numeric_limits<steady_flag_t>::max(),
+				"Fatal error,max++ is equal to min,it will be not steady!");
+#else
+			using steady_flag_t = uint64_t;  //no use
+#endif
 			struct steady_flag_helper
 			{
 				static inline steady_flag_t now()
@@ -684,14 +749,14 @@ namespace ezlogspace
 					return s_steady_t_helper++;
 				}
 
-				static inline steady_flag_t min()
+				static constexpr inline steady_flag_t min()
 				{
-					return 0;
+					return std::numeric_limits<steady_flag_t>::min();
 				}
 
-				static inline steady_flag_t max()
+				static constexpr inline steady_flag_t max()
 				{
-					return UINT64_MAX;
+					return std::numeric_limits<steady_flag_t>::max();
 				}
 
 
@@ -707,34 +772,35 @@ namespace ezlogspace
 					return time(NULL);
 				}
 
-				inline static time_t min()
+				constexpr inline static time_t min()
 				{
 					return (time_t) (0);
 				}
 
-				EZLOG_TIME_T_TEMPLATE_FOR(uint64_t) inline static time_t max()
+				EZLOG_TIME_T_TEMPLATE_FOR(uint64_t)  constexpr inline static time_t max()
 				{
 					return (time_t) (UINT64_MAX);
 				}
 
-				EZLOG_TIME_T_TEMPLATE_FOR(int64_t) inline static time_t max()
+				EZLOG_TIME_T_TEMPLATE_FOR(int64_t)  constexpr inline static time_t max()
 				{
 					return (time_t) (INT64_MAX);
 				}
 
-				EZLOG_TIME_T_TEMPLATE_FOR(uint32_t) inline static time_t max()
+				EZLOG_TIME_T_TEMPLATE_FOR(uint32_t) constexpr  inline static time_t max()
 				{
 					return (time_t) (UINT32_MAX);
 				}
 
-				EZLOG_TIME_T_TEMPLATE_FOR(int32_t) inline static time_t max()
+				EZLOG_TIME_T_TEMPLATE_FOR(int32_t)  constexpr inline static time_t max()
 				{
 					return (time_t) (INT32_MAX);
 				}
 			};
+#undef EZLOG_TIME_T_TEMPLATE_FOR
 
 			//for customize timer，must be similar to EzLogTimeImplBase
-			class EzLogTimeImplBase
+			EZLOG_ABSTRACT class EzLogTimeImplBase
 			{
 				/**
 			public:
@@ -769,8 +835,10 @@ namespace ezlogspace
 				 */
 			};
 
-			class EzLogNoSteadyTimeImplBase : public EzLogTimeImplBase
+			EZLOG_ABSTRACT class EzLogNoSteadyTimeImplBase : public EzLogTimeImplBase
 			{
+			public:
+				using steady_flag_t = ezlogtimespace::steady_flag_t;
 
 			public:
 
@@ -799,7 +867,7 @@ namespace ezlogspace
 
 			};
 
-			class EzLogCTimeBase : EzLogTimeImplBase
+			EZLOG_ABSTRACT class EzLogCTimeBase : EzLogTimeImplBase
 			{
 			public:
 				using origin_time_type=time_t;
@@ -820,6 +888,8 @@ namespace ezlogspace
 			//to use this class ,make sure time() is steady
 			class EzLogSteadyCTime : public EzLogCTimeBase
 			{
+			public:
+				using steady_flag_t = time_t;
 			public:
 				inline EzLogSteadyCTime()
 				{
@@ -908,7 +978,7 @@ namespace ezlogspace
 			};
 
 
-			class EzLogChornoTimeBase : EzLogTimeImplBase
+			EZLOG_ABSTRACT class EzLogChornoTimeBase : EzLogTimeImplBase
 			{
 			public:
 				using SystemLock=std::chrono::system_clock;
@@ -935,6 +1005,8 @@ namespace ezlogspace
 			//to use this class ,make sure system_lock is steady
 			class EzLogSteadyChornoTime : EzLogChornoTimeBase
 			{
+			public:
+				using steady_flag_t = SystemLock::rep;
 			public:
 				inline EzLogSteadyChornoTime()
 				{
@@ -1020,13 +1092,13 @@ namespace ezlogspace
 				}
 			};
 
-
 			template<typename _EzLogTimeImplType>
 			class EzLogTime
 			{
 			public:
-				using EzLogTimeImplType=_EzLogTimeImplType;
-				using origin_time_type=typename EzLogTimeImplType::origin_time_type;
+				using EzLogTimeImplType = _EzLogTimeImplType;
+				using origin_time_type = typename EzLogTimeImplType::origin_time_type;
+				using ezlog_steady_flag_t = typename _EzLogTimeImplType::steady_flag_t;
 			public:
 				inline EzLogTime()
 				{
@@ -1073,7 +1145,7 @@ namespace ezlogspace
 //					return *this;
 //				}
 
-				inline steady_flag_t toSteadyFlag() const
+				inline ezlog_steady_flag_t toSteadyFlag() const
 				{
 					return impl.toSteadyFlag();
 				}
@@ -1127,7 +1199,9 @@ namespace ezlogspace
 			using EzLogTime=ezlogspace::internal::ezlogtimespace::EzLogTime<ezlogspace::internal::ezlogtimespace::EzLogSteadyChornoTime>;
 #endif
 			static_assert(std::is_trivially_copyable<TimePoint>::value, "");
+			static_assert(std::is_trivially_destructible<TimePoint>::value, "");
 			static_assert(std::is_trivially_copyable<EzLogTime>::value, "");
+			static_assert(std::is_trivially_destructible<EzLogTime>::value, "");
 
 		public:
 			DEBUG_CANARY_BOOL(flag0)
@@ -1144,12 +1218,12 @@ namespace ezlogspace
 
 		public:
 
-			EzLogString &data()
+			EzLogString &str()
 			{
 				return dataStr;
 			}
 
-			const EzLogString &data() const
+			const EzLogString &str() const
 			{
 				return dataStr;
 			}
@@ -1177,7 +1251,7 @@ namespace ezlogspace
 				DEBUG_RUN(assert(!(p->flag0 || p->flag1 || p->flag2)););
 				static_assert(std::is_trivially_destructible<EzLogTime>::value, "fatal error");
 				//p->time().~EzLogTime();
-				p->data().~EzLogString();
+				p->str().~EzLogString();
 				DEBUG_RUN(p->flag0 = p->flag1 = p->flag2 = 1;);
 				EZLOG_FREE_FUNCTION(p);
 			}
@@ -1187,7 +1261,7 @@ namespace ezlogspace
 
 	class EzLogStream;
 
-	class EzLoggerPrinter : public EzLogObject
+	EZLOG_ABSTRACT class EzLoggerPrinter : public EzLogObject
 	{
 	public:
 
@@ -1282,7 +1356,7 @@ namespace ezlogspace
 		using EzLogString =ezlogspace::internal::EzLogStringInternal;
 
 		inline EzLogStream(EzLogBean *pLogBean) :
-			EzLogString(EZLOG_SINGLE_LOG_RESERVE_LEN, EzLogString::EzlogStringEnum::DEFAULT),
+			EzLogString(EzLogString::EzlogStringEnum::DEFAULT,EZLOG_SINGLE_LOG_RESERVE_LEN ),
 			m_pBean(pLogBean)
 		{
 		}
@@ -1293,7 +1367,7 @@ namespace ezlogspace
 			if (m_pBean == nullptr)	{ return; }
 #endif
 			//force move this's string to m_pBean
-			EzLogString& str=m_pBean->data();
+			EzLogString& str=m_pBean->str();
 			str.m_front=this->m_front;
 			str.m_end=this->m_end;
 			str.m_cap=this->m_cap;

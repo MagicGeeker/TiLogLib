@@ -1,15 +1,16 @@
-#include <iostream>
 #include <stdlib.h>
 #include <assert.h>
 #include <time.h>
 #include <signal.h>
-#include <unordered_set>
-#include<unordered_map>
-#include<map>
-#include<set>
-#include <chrono>
-#include<algorithm>
 #include <string.h>
+#include <iostream>
+#include <sstream>
+#include <unordered_set>
+#include <unordered_map>
+#include <map>
+#include <set>
+#include <chrono>
+#include <algorithm>
 #include <thread>
 #include <future>
 #include <atomic>
@@ -164,7 +165,7 @@ namespace ezlogspace
 
 	namespace internal
 	{
-		ezlogtimespace::steady_flag_t ezlogtimespace::steady_flag_helper::s_steady_t_helper;
+		ezlogtimespace::steady_flag_t ezlogtimespace::steady_flag_helper::s_steady_t_helper = ezlogtimespace::steady_flag_helper::min();
 
 		const char* GetThreadIDString()
 		{
@@ -179,12 +180,6 @@ namespace ezlogspace
 			return tidstr;
 		}
 		thread_local const char* s_tid = GetThreadIDString();
-
-		class EzLogObject
-		{
-		public:
-			virtual ~EzLogObject() = default;
-		};
 
 #ifdef        __________________________________________________EzLogCircularQueue__________________________________________________
 
@@ -1307,7 +1302,7 @@ namespace ezlogspace
 			{
 				DEBUG_ASSERT(pBean != nullptr);
 				EzLogBean &bean = *pBean;
-				DEBUG_ASSERT1(&bean.data() != nullptr, &bean.data());
+				DEBUG_ASSERT1(&bean.str() != nullptr, &bean.str());
 				DEBUG_ASSERT1(bean.file != nullptr, bean.file);
 
 #if defined(EZLOG_USE_STD_CHRONO) && defined(EZLOG_WITH_MILLISECONDS)
@@ -1398,7 +1393,7 @@ namespace ezlogspace
 														  const EzLogBean &bean)
 		{
 //has reserve EZLOG_SINGLE_LOG_STRING_FULL_RESERVE_LEN
-			logs.reserve(bean.data().size() + EZLOG_PREFIX_RESERVE_LEN + EZLOG_CTIME_MAX_LEN + bean.fileLen);
+			logs.reserve(bean.str().size() + EZLOG_PREFIX_RESERVE_LEN + EZLOG_CTIME_MAX_LEN + bean.fileLen);
 
 			logs.resize(0);
 			logs.append_unsafe('\n');                                                                    //1
@@ -1413,9 +1408,9 @@ namespace ezlogspace
 			logs.append_unsafe(':');                                                                    //1
 			logs.append_unsafe(bean.line);                                                                //20
 			logs.append_unsafe("] ", EZLOG_STRING_LEN_OF_CHAR_ARRAY("] "));                        //2
-			logs.append_unsafe(bean.data());                                                //----bean.data->size()
+			logs.append_unsafe(bean.str());                                                //----bean.str->size()
 //static len1=56+ EZLOG_CTIME_MAX_LEN
-//total =len1 +bean.fileLen+bean.data->size()
+//total =len1 +bean.fileLen+bean.str->size()
 		}
 
 		inline void EZLogOutputThread::getMergePermission(std::unique_lock<std::mutex> &lk)

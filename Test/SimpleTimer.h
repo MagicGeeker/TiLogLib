@@ -1,6 +1,4 @@
-//
-// Created by 91410 on 2020/2/26.
-//
+#include<string>
 #include "inc.h"
 
 #ifndef ANDROIDLANGUAGEPROCESS_TIMEINTERVAL_H
