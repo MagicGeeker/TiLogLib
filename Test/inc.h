@@ -1,7 +1,3 @@
-//
-// Created***REMOVED*** on 2020/9/16.
-//
-
 #ifndef EZLOG_INC_H
 #define EZLOG_INC_H
 

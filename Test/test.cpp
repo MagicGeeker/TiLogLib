@@ -17,11 +17,12 @@ using namespace ezlogspace;
 //#define file_time_many_thread_log_test_with_sleep_____________________
 //#define file_time_multi_thread_simulation__log_test_____________________
 //#define file_single_thread_benchmark_test_____________________
-#define file_multi_thread_benchmark_test_____________________
+//#define file_multi_thread_benchmark_test_____________________
 //#define file_multi_thread_close_print_benchmark_test_____________________
 //#define file_single_thread_operator_test_____________________
 //#define terminal_multi_thread_poll__log_test_____________________
 //#define file_multi_thread_memory_leak_stress_test_____________________
+#define ezlog_string_test_____________________
 
 uint64_t complexCalFunc(uint64_t x)
 {
@@ -570,6 +571,45 @@ TEST_CASE("file_multi_thread_memory_leak_stress_test_____________________")
 #endif
 
 
+#ifdef ezlog_string_test_____________________
+
+TEST_CASE("ezlog_string_test_____________________")
+{
+	EZLOGI << "ezlog_string_test_____________________";
+	using EzLogString =ezlogspace::internal::EzLogString;
+	EzLogString str;
+	str.reserve(100);
+	str.resize(200);
+	for(uint32_t i=0;i<str.size();i++)
+	{
+		str[i]='A'+i%26;
+	}
+	std::cout<<str<<endl;
+
+	EzLogString str2=std::move(str);
+	str2.resize(10);
+
+	EzLogString str3 ("asyindfafa");
+	str3 += str2;
+
+	EzLogString str4(EzLogString::EzlogStringEnum::DEFAULT,100);
+	str4 = "dascvda";
+
+	str3 = str4;
+
+	EzLogString str5;
+	EzLogString str6=str4;
+	str6.append(" nhmyootrnpkbf");
+
+	std::cout 
+		<< str2 << std::endl
+		<< str3 << std::endl 
+		<< str4 << std::endl 
+		<< str5 << std::endl 
+		<< str6 << std::endl;
+}
+
+#endif
 
 
 #endif
