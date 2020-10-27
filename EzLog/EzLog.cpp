@@ -165,7 +165,8 @@ namespace ezlogspace
 
 	namespace internal
 	{
-		ezlogtimespace::steady_flag_t ezlogtimespace::steady_flag_helper::s_steady_t_helper = ezlogtimespace::steady_flag_helper::min();
+		std::atomic<ezlogtimespace::steady_flag_t> ezlogtimespace::steady_flag_helper::s_steady_t_helper(
+				ezlogtimespace::steady_flag_helper::min());
 
 		const char* GetThreadIDString()
 		{
@@ -1231,7 +1232,7 @@ namespace ezlogspace
 						{
 							cerr << v[index]->time().toSteadyFlag() << " ";
 							if (index % 6 == 0)
-							{ cerr << " "; }
+							{ cerr << "\n"; }
 						}
 						DEBUG_ASSERT(false);
 					}
@@ -1302,7 +1303,6 @@ namespace ezlogspace
 			{
 				DEBUG_ASSERT(pBean != nullptr);
 				EzLogBean &bean = *pBean;
-				DEBUG_ASSERT1(&bean.str() != nullptr, &bean.str());
 				DEBUG_ASSERT1(bean.file != nullptr, bean.file);
 
 #if defined(EZLOG_USE_STD_CHRONO) && defined(EZLOG_WITH_MILLISECONDS)

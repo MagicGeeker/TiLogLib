@@ -4,6 +4,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <assert.h>
+#include<atomic>
 #include <thread>
 #include<type_traits>
 #include <ostream>
@@ -734,8 +735,6 @@ namespace ezlogspace
 			using steady_flag_t = uint64_t;
 #else
 			using steady_flag_t = uint32_t;
-//#include<atomic>
-//			using steady_flag_t = std::atomic_uint64_t;
 #endif
 			static_assert(EZLOG_MAX_LOG_NUM <= std::numeric_limits<steady_flag_t>::max(),
 				"Fatal error,max++ is equal to min,it will be not steady!");
@@ -761,7 +760,7 @@ namespace ezlogspace
 
 
 			private:
-				static steady_flag_t s_steady_t_helper;
+				static std::atomic<steady_flag_t> s_steady_t_helper;
 			};
 
 #define EZLOG_TIME_T_TEMPLATE_FOR(TYPE)    template<typename T = time_t, typename std::enable_if< std::is_same<T, TYPE>::value, TYPE>::type* = nullptr>
