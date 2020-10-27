@@ -13,14 +13,14 @@
 #include <shared_mutex>
 #define _EZLOG_STD_HAS_SHARED_LOCK
 #else
-#include "../outlibs/yamc/include/yamc_shared_lock.hpp"
+#include "../depend_libs/yamc/include/yamc_shared_lock.hpp"
 #define shared_lock yamc::shared_lock
 #endif
 
 #if __cplusplus>=201703L
 #define _EZLOG_STD_HAS_SHARED_MUTEX
 #else
-#include "../outlibs/yamc/include/alternate_shared_mutex.hpp"
+#include "../depend_libs/yamc/include/alternate_shared_mutex.hpp"
 #define shared_mutex yamc::alternate::shared_mutex
 #endif
 

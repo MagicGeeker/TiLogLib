@@ -8,10 +8,10 @@
 #include<type_traits>
 #include <ostream>
 
-#include "../IUtils/idef.h"
-#include "../outlibs/sse/sse2.h"
-#include "../outlibs/miloyip/dtoa_milo.h"
-#include "../outlibs/ftoa-fast/ftoa.h"
+#include "../depend_libs/IUtils/idef.h"
+#include "../depend_libs/sse/sse2.h"
+#include "../depend_libs/miloyip/dtoa_milo.h"
+#include "../depend_libs/ftoa-fast/ftoa.h"
 
 /**************************************************MACRO FOR USER**************************************************/
 //#define    EZLOG_USE_CTIME

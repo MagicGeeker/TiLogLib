@@ -9,8 +9,7 @@ if(MSVC)
     add_compile_options(/std:c++11)
 endif()
 
-add_subdirectory(outlibs)
-add_subdirectory(IUtils)
+add_subdirectory(depend_libs)
 add_subdirectory(EzLog)
 add_subdirectory(Test)
 

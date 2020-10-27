@@ -5,7 +5,7 @@ using namespace std;
 using namespace ezlogspace;
 #if USE_CATCH_TEST == TRUE
 
-#include "../outlibs/catch/catch.hpp"
+#include "../depend_libs/catch/catch.hpp"
 
 
 //#define single_thread_log_test_____________________

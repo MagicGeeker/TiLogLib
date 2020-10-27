@@ -70,6 +70,6 @@ int main()
 #if USE_CATCH_TEST == TRUE
 
 #define CATCH_CONFIG_MAIN  // This tells Catch to provide a main() - only do this in one cpp file
-#include "../outlibs/catch/catch.hpp"
+#include "../depend_libs/catch/catch.hpp"
 
 #endif
