@@ -829,8 +829,11 @@ namespace ezlogspace
 			{
 			}
 
-			inline EzLogStringExtend(const EzLogStringExtend &x) : EzLogStringExtend(x.data(), x.size())
+			inline EzLogStringExtend(const EzLogStringExtend &x)
 			{
+				do_malloc(x.pCore->size, get_better_cap(x.pCore->size));
+				memcpy(this->pCore, x.pCore, size_head()+x.pCore->size);
+				ensureZero();
 			}
 
 			inline EzLogStringExtend(EzLogStringExtend &&x)
@@ -891,6 +894,11 @@ namespace ezlogspace
 			{
 				assert(pCore->size <= pCore->capacity);
 				return pCore->capacity;
+			}
+
+			inline size_t memsize()const
+			{
+				return capacity() + sizeof('\0') + size_head();
 			}
 
 			inline const char &front() const
@@ -1287,12 +1295,11 @@ namespace ezlogspace
 				return DEFAULT_CAPACITY > cap ? DEFAULT_CAPACITY : cap;
 			}
 
-			inline void do_malloc(size_t size, size_t cap)
+			inline void do_malloc(const size_t size, const size_t cap)
 			{
 				assert(size <= cap);
-				cap += sizeof('\0');
-				cap += size_head();
-				Core *p = (Core *) EZLOG_MALLOC_FUNCTION(cap);
+				size_t mem_size = cap + sizeof('\0') + size_head();
+				Core *p = (Core *) EZLOG_MALLOC_FUNCTION(mem_size);
 				assert(p != nullptr);
 				pCore = p;
 				this->pCore->size = size;
@@ -1300,14 +1307,13 @@ namespace ezlogspace
 				check();
 			}
 
-			inline void do_realloc(size_t new_cap)
+			inline void do_realloc(const size_t new_cap)
 			{
 				check();
 				size_t sz = this->size();
 				size_t cap = this->capacity();
-				new_cap += sizeof('\0');
-				new_cap += size_head();
-				Core *p = (Core *) EZLOG_REALLOC_FUNCTION(this->pCore, new_cap);
+				size_t mem_size = new_cap + sizeof('\0') + size_head();
+				Core *p = (Core *) EZLOG_REALLOC_FUNCTION(this->pCore, mem_size);
 				assert(p != nullptr);
 				pCore = p;
 				this->pCore->size = sz;
@@ -1858,19 +1864,19 @@ namespace ezlogspace
 			static_assert(std::is_trivially_destructible<EzLogTime>::value, "");
 
 		public:
-			DEBUG_CANARY_BOOL(flag0)
+			DEBUG_CANARY_UINT32(flag1)
 #ifdef EZLOG_USE_STRING
 			EzLogString dataStr;
 #endif // EZLOG_USE_STRING
 			const char *tid;
 			const char *file;
-			DEBUG_CANARY_BOOL(flag1)
+			DEBUG_CANARY_UINT32(flag2)
 			EzLogTime ezLogTime;
 			uint16_t line;
 			uint16_t fileLen;
 			char level;
 			bool toTernimal;
-			DEBUG_CANARY_BOOL(flag2)
+			DEBUG_CANARY_UINT32(flag3)
 
 		public:
 
@@ -1929,14 +1935,15 @@ namespace ezlogspace
 			inline static void DestroyInstance(EzLogBean *p)
 			{
 				check(p);
-				DEBUG_RUN(p->flag0 = p->flag1 = p->flag2 = 1;);
+				DEBUG_RUN(p->flag3=3, p->flag2=2, p->flag1 = 1;);
 				EZLOG_FREE_FUNCTION(p);
 			}
 #endif
 			inline static void check(EzLogBean *p)
 			{
 				assert(p != nullptr);//in this program,p is not null
-				DEBUG_RUN(assert(!(p->flag0 || p->flag1 || p->flag2)););
+				DEBUG_RUN(assert(!(p->flag3==3 || p->flag2==2 || p->flag1==1)););
+				DEBUG_RUN(assert(!(p->line==0 || p->fileLen==0)););
 			}
 		};
 
@@ -2079,10 +2086,12 @@ namespace ezlogspace
 #if EZLOG_SUPPORT_CLOSE_LOG == TRUE
 			if( m_pBean == nullptr ) { return; }
 #endif
-#ifndef NDEBUG
-#endif
-			EzLog::pushLog(this->ext());
-			pCore = nullptr;
+			if (pCore != nullptr)
+			{
+				DEBUG_RUN(EzLogBean::check(this->ext()));
+				EzLog::pushLog(this->ext());
+				pCore = nullptr;//prevent delete
+			}
 		}
 
 		using EzLogStringExtend::ext;
