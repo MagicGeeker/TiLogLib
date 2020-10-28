@@ -1393,7 +1393,7 @@ namespace ezlogspace
 														  const EzLogBean &bean)
 		{
 //has reserve EZLOG_SINGLE_LOG_STRING_FULL_RESERVE_LEN
-			logs.reserve(bean.str().size() + EZLOG_PREFIX_RESERVE_LEN + EZLOG_CTIME_MAX_LEN + bean.fileLen);
+			logs.reserve(bean.str_view().size() + EZLOG_PREFIX_RESERVE_LEN + EZLOG_CTIME_MAX_LEN + bean.fileLen);
 
 			logs.resize(0);
 			logs.append_unsafe('\n');                                                                    //1
@@ -1408,9 +1408,9 @@ namespace ezlogspace
 			logs.append_unsafe(':');                                                                    //1
 			logs.append_unsafe(bean.line);                                                                //20
 			logs.append_unsafe("] ", EZLOG_STRING_LEN_OF_CHAR_ARRAY("] "));                        //2
-			logs.append_unsafe(bean.str());                                                //----bean.str->size()
+			logs.append_unsafe(bean.str_view().data(),bean.str_view().size());                                                //----bean.str_view()->size()
 //static len1=56+ EZLOG_CTIME_MAX_LEN
-//total =len1 +bean.fileLen+bean.str->size()
+//total =len1 +bean.fileLen+bean.str_view()->size()
 		}
 
 		inline void EZLogOutputThread::getMergePermission(std::unique_lock<std::mutex> &lk)

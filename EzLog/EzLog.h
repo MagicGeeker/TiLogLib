@@ -20,6 +20,8 @@
 #define    EZLOG_WITH_MILLISECONDS
 #define EZLOG_TIME_IS_STEADY    FALSE     //customize time is steady or not
 
+//#define EZLOG_USE_STRING
+#define EZLOG_USE_STRING_EXTEND
 
 #define EZLOG_POLL_DEFAULT_THREAD_SLEEP_MS  1000   //poll period to move local cache to global cache
 #define EZLOG_GLOBAL_BUF_FULL_SLEEP_US  10   //work thread sleep for period when global buf is full and logging
@@ -152,42 +154,75 @@ namespace ezlogspace
 	namespace internal
 	{
 		class EzLogBean;
-		class EzLogStringInternal;
-		using EzLogString=EzLogStringInternal;
+		class EzLogString;
 
 		extern thread_local const char *s_tid;
 
-        //notice! For faster in append and etc function, this is not always end with '\0'
-        //if you want to use c-style function on this object, such as strlen(&this->front())
-        //you must call c_str() function before to ensure end with the '\0'
-		//see rr_ensureZero
-        class EzLogStringInternal:public EzLogObject
-        {
-            friend class ezlogspace::EzLogStream;
 
-        public:
-            enum class EzlogStringEnum
-            {
-                DEFAULT = 0
-            };
 #ifndef NDEBUG
-			class positive_size_t
+		class positive_size_t
 			{
 				size_t sz;
 			public:
 				 positive_size_t(size_t sz):sz(sz){
-				 	assert(sz!=0);
+					 assert(sz!=0);
 				 }
-				 operator size_t()
+				 operator size_t()const
 				 {
 					 return sz;
 				 }
 			};
 #else
-			using positive_size_t=size_t;
+		using positive_size_t=size_t;
 #endif
 
-            ~EzLogStringInternal()
+		enum class EzLogStringEnum
+		{
+			DEFAULT = 0
+		};
+
+		class EzLogStringView
+		{
+			const char *m_front;
+			const char *m_end;
+		public:
+			EzLogStringView(const char *front, const char *ed)
+			{
+				assert(front != nullptr);
+				assert(ed >= front);
+				m_front = front;
+				m_end = ed;
+			}
+
+			EzLogStringView(const char *front, size_t sz)
+			{
+				assert(front != nullptr);
+				m_front = front;
+				m_end = front + sz;
+			}
+			const char *data() const
+			{
+				return m_front;
+			}
+
+			size_t size() const
+			{
+				return m_end - m_front;
+			}
+		};
+
+        //notice! For faster in append and etc function, this is not always end with '\0'
+        //if you want to use c-style function on this object, such as strlen(&this->front())
+        //you must call c_str() function before to ensure end with the '\0'
+		//see ensureZero
+		class EzLogString : public EzLogObject
+		{
+			friend class ezlogspace::EzLogStream;
+
+		public:
+
+
+			~EzLogString()
 			{
 				assert(m_front <= m_end);
 				assert(m_end <= m_cap);
@@ -197,124 +232,124 @@ namespace ezlogspace
 #endif
 			}
 
-			explicit inline EzLogStringInternal()
+			explicit inline EzLogString()
 			{
 				create();
 			}
 
 			//init with capacity n
-			inline EzLogStringInternal(EzlogStringEnum, positive_size_t n)
+			inline EzLogString(EzLogStringEnum, positive_size_t n)
 			{
 				do_malloc(0, n);
 				ensureZero();
 			}
 
 			//init with n count of c
-			inline EzLogStringInternal(positive_size_t n,char c)
+			inline EzLogString(positive_size_t n, char c)
 			{
-            	do_malloc(n,n);
-            	memset(m_front,c,n);
-            	ensureZero();
+				do_malloc(n, n);
+				memset(m_front, c, n);
+				ensureZero();
 			}
 
-            //length without '\0'
-            inline EzLogStringInternal(const char *s, size_t length)
-            {
+			//length without '\0'
+			inline EzLogString(const char *s, size_t length)
+			{
 				do_malloc(length, get_better_cap(length));
-                memcpy(m_front, s, length);
-                ensureZero();
-            }
+				memcpy(m_front, s, length);
+				ensureZero();
+			}
 
-			explicit inline EzLogStringInternal(const char *s) : EzLogString(s, strlen(s))
+			explicit inline EzLogString(const char *s) : EzLogString(s, strlen(s))
 			{
 			}
 
-			inline EzLogStringInternal(const EzLogStringInternal& x): EzLogString(x.data(), x.size())
+			inline EzLogString(const EzLogString &x) : EzLogString(x.data(), x.size())
 			{
 			}
 
-			inline EzLogStringInternal(EzLogStringInternal&& x)noexcept
+			inline EzLogString(EzLogString &&x) noexcept
 			{
 				makeThisInvalid();
-				*this=std::move(x);
+				*this = std::move(x);
 			}
 
-			inline EzLogStringInternal& operator=(const std::string &str)
+			inline EzLogString &operator=(const std::string &str)
 			{
 				resize(0);
 				return append(str.data(), str.size());
 			}
 
-			inline EzLogStringInternal& operator=(const EzLogStringInternal &str)
+			inline EzLogString &operator=(const EzLogString &str)
 			{
 				resize(0);
 				return append(str.data(), str.size());
 			}
 
-			inline EzLogStringInternal& operator=(EzLogStringInternal &&str)noexcept
+			inline EzLogString &operator=(EzLogString &&str) noexcept
 			{
 				swap(str);
 				str.resize(0);
 				return *this;
 			}
 
-			inline void swap(EzLogStringInternal &str) noexcept
+			inline void swap(EzLogString &str) noexcept
 			{
 				std::swap(this->m_front, str.m_front);
 				std::swap(this->m_end, str.m_end);
 				std::swap(this->m_cap, str.m_cap);
 			}
 
-            inline explicit operator std::string() const
-            {
-                return std::string(m_front, size());
-            }
+			inline explicit operator std::string() const
+			{
+				return std::string(m_front, size());
+			}
 
 		public:
-            inline size_t size() const
-            {
+			inline size_t size() const
+			{
 				check();
-                return m_end - m_front;
-            }
+				return m_end - m_front;
+			}
 
 			inline size_t length() const
 			{
 				return size();
 			}
 
-            inline size_t capacity() const
-            {
+			inline size_t capacity() const
+			{
 				check();
-                return m_cap - m_front;
-            }
+				return m_cap - m_front;
+			}
 
-            inline const char &front() const
-            {
-                return *m_front;
-            }
+			inline const char &front() const
+			{
+				return *m_front;
+			}
 
-            inline char &front()
-            {
-                return *m_front;
-            }
+			inline char &front()
+			{
+				return *m_front;
+			}
 
-            inline const char &operator[](size_t index) const
-            {
-                return m_front[index];
-            }
+			inline const char &operator[](size_t index) const
+			{
+				return m_front[index];
+			}
 
-            inline char &operator[](size_t index)
-            {
-                return m_front[index];
-            }
+			inline char &operator[](size_t index)
+			{
+				return m_front[index];
+			}
 
 
-            inline const char *data() const
-            {
-                return m_front;
-            }
+			inline const char *data() const
+			{
+				return m_front;
+			}
 
-			inline const char* c_str() const
+			inline const char *c_str() const
 			{
 				if (m_front != nullptr)
 				{
@@ -325,22 +360,22 @@ namespace ezlogspace
 				return "";
 			}
 
-            inline EzLogStringInternal &append(char c)
-            {
-                ensureCap(size_with_zero() + sizeof(char));
+			inline EzLogString &append(char c)
+			{
+				ensureCap(size_with_zero() + sizeof(char));
 				return append_unsafe(c);
-            }
+			}
 
-            inline EzLogStringInternal &append(unsigned char c)
-            {
-                ensureCap(size_with_zero() + sizeof(char));
+			inline EzLogString &append(unsigned char c)
+			{
+				ensureCap(size_with_zero() + sizeof(char));
 				return append_unsafe(c);
-            }
+			}
 
-            inline EzLogStringInternal &append(const char *cstr)
-            {
-            	char* p=(char*)cstr;
-            	size_t off=size();
+			inline EzLogString &append(const char *cstr)
+			{
+				char *p = (char *) cstr;
+				size_t off = size();
 				while (*p != '\0')
 				{
 					if (m_end >= m_cap - 1)
@@ -358,23 +393,23 @@ namespace ezlogspace
 
 //                size_t length = strlen(cstr);
 //                return append(cstr, length);
-            }
+			}
 
 			//length without '\0'
-			inline EzLogStringInternal &append(const char *cstr, size_t length)
-            {
-                ensureCap(size_with_zero() + length);
-				return append_unsafe(cstr,length);
-            }
+			inline EzLogString &append(const char *cstr, size_t length)
+			{
+				ensureCap(size_with_zero() + length);
+				return append_unsafe(cstr, length);
+			}
 
-            inline EzLogStringInternal &append(const std::string &str)
-            {
-                size_t length = str.length();
-                ensureCap(size_with_zero() + length);
+			inline EzLogString &append(const std::string &str)
+			{
+				size_t length = str.length();
+				ensureCap(size_with_zero() + length);
 				return append_unsafe(str);
-            }
+			}
 
-			inline EzLogStringInternal &append(const EzLogStringInternal&str)
+			inline EzLogString &append(const EzLogString &str)
 			{
 				size_t length = str.length();
 				ensureCap(size_with_zero() + length);
@@ -382,37 +417,37 @@ namespace ezlogspace
 			}
 
 
-			inline EzLogStringInternal &append(uint64_t x)
+			inline EzLogString &append(uint64_t x)
 			{
 				ensureCap(size() + EZLOG_UINT64_MAX_CHAR_LEN);
 				return append_unsafe(x);
 			}
 
-			inline EzLogStringInternal &append(int64_t x)
+			inline EzLogString &append(int64_t x)
 			{
 				ensureCap(size() + EZLOG_INT64_MAX_CHAR_LEN);
 				return append_unsafe(x);
 			}
 
-			inline EzLogStringInternal &append(uint32_t x)
+			inline EzLogString &append(uint32_t x)
 			{
 				ensureCap(size() + EZLOG_UINT32_MAX_CHAR_LEN);
 				return append_unsafe(x);
 			}
 
-			inline EzLogStringInternal &append(int32_t x)
+			inline EzLogString &append(int32_t x)
 			{
 				ensureCap(size() + EZLOG_INT32_MAX_CHAR_LEN);
 				return append_unsafe(x);
 			}
 
-			inline EzLogStringInternal &append(double x)
+			inline EzLogString &append(double x)
 			{
 				ensureCap(size() + EZLOG_DOUBLE_MAX_CHAR_LEN);
 				return append_unsafe(x);
 			}
 
-			inline EzLogStringInternal &append(float x)
+			inline EzLogString &append(float x)
 			{
 				ensureCap(size() + EZLOG_FLOAT_MAX_CHAR_LEN);
 				return append_unsafe(x);
@@ -422,28 +457,28 @@ namespace ezlogspace
 
 //*********  Warning!!!You must reserve enough capacity ,then append is safe ******************************//
 
-			__inline EzLogStringInternal &append_unsafe(char c)
+			__inline EzLogString &append_unsafe(char c)
 			{
 				*m_end++ = c;
 				ensureZero();
 				return *this;
 			}
 
-			inline EzLogStringInternal &append_unsafe(unsigned char c)
+			inline EzLogString &append_unsafe(unsigned char c)
 			{
 				*m_end++ = c;
 				ensureZero();
 				return *this;
 			}
 
-			inline EzLogStringInternal &append_unsafe(const char *cstr)
+			inline EzLogString &append_unsafe(const char *cstr)
 			{
 				size_t length = strlen(cstr);
 				return append_unsafe(cstr, length);
 			}
 
 			//length without '\0'
-			inline EzLogStringInternal &append_unsafe(const char *cstr, size_t length)
+			inline EzLogString &append_unsafe(const char *cstr, size_t length)
 			{
 				memcpy(m_end, cstr, length);
 				m_end += length;
@@ -451,7 +486,7 @@ namespace ezlogspace
 				return *this;
 			}
 
-			inline EzLogStringInternal &append_unsafe(const std::string &str)
+			inline EzLogString &append_unsafe(const std::string &str)
 			{
 				size_t length = str.length();
 				memcpy(m_end, str.data(), length);
@@ -460,7 +495,7 @@ namespace ezlogspace
 				return *this;
 			}
 
-			inline EzLogStringInternal &append_unsafe(const EzLogStringInternal&str)
+			inline EzLogString &append_unsafe(const EzLogString &str)
 			{
 				size_t length = str.length();
 				memcpy(m_end, str.data(), length);
@@ -470,15 +505,15 @@ namespace ezlogspace
 			}
 
 
-			inline EzLogStringInternal &append_unsafe(uint64_t x)
+			inline EzLogString &append_unsafe(uint64_t x)
 			{
-				size_t off =u64toa_sse2(x, m_end);
+				size_t off = u64toa_sse2(x, m_end);
 				m_end += off;
 				ensureZero();
 				return *this;
 			}
 
-			inline EzLogStringInternal &append_unsafe(int64_t x)
+			inline EzLogString &append_unsafe(int64_t x)
 			{
 				size_t off = i64toa_sse2(x, m_end);
 				m_end += off;
@@ -486,7 +521,7 @@ namespace ezlogspace
 				return *this;
 			}
 
-			inline EzLogStringInternal &append_unsafe(uint32_t x)
+			inline EzLogString &append_unsafe(uint32_t x)
 			{
 				size_t off = u32toa_sse2(x, m_end);
 				m_end += off;
@@ -494,15 +529,15 @@ namespace ezlogspace
 				return *this;
 			}
 
-			inline EzLogStringInternal &append_unsafe(int32_t x)
+			inline EzLogString &append_unsafe(int32_t x)
 			{
-				uint32_t off=i32toa_sse2(x, m_end);
+				uint32_t off = i32toa_sse2(x, m_end);
 				m_end += off;
 				ensureZero();
 				return *this;
 			}
 
-			inline EzLogStringInternal &append_unsafe(double x)
+			inline EzLogString &append_unsafe(double x)
 			{
 				dtoa_milo(x, m_end);
 				size_t off = strlen(m_end);
@@ -511,7 +546,7 @@ namespace ezlogspace
 				return *this;
 			}
 
-			inline EzLogStringInternal &append_unsafe(float x)
+			inline EzLogString &append_unsafe(float x)
 			{
 				size_t off = ftoa(m_end, x, NULL);
 				m_end += off;
@@ -520,99 +555,96 @@ namespace ezlogspace
 			}
 
 
-
-
-
-            inline void reserve(size_t size)
-            {
-                ensureCap(size);
+			inline void reserve(size_t size)
+			{
+				ensureCap(size);
 				ensureZero();
-            }
+			}
 
-            inline void resize(size_t size)
-            {
-                ensureCap(size);
-                m_end = m_front + size;
+			inline void resize(size_t size)
+			{
+				ensureCap(size);
+				m_end = m_front + size;
 				ensureZero();
-            }
+			}
 
 
-        public:
+		public:
 
-			inline EzLogStringInternal &operator+=(char c)
+			inline EzLogString &operator+=(char c)
 			{
 				return append(c);
 			}
 
-			inline EzLogStringInternal &operator+=(unsigned char c)
+			inline EzLogString &operator+=(unsigned char c)
 			{
 				return append(c);
 			}
 
-			inline EzLogStringInternal &operator+=(const char *cstr)
+			inline EzLogString &operator+=(const char *cstr)
 			{
 				return append(cstr);
 			}
 
-			inline EzLogStringInternal &operator+=(const std::string &str)
+			inline EzLogString &operator+=(const std::string &str)
 			{
 				return append(str);
 			}
 
-			inline EzLogStringInternal &operator+=(const EzLogStringInternal &str)
+			inline EzLogString &operator+=(const EzLogString &str)
 			{
 				return append(str);
 			}
 
-            inline EzLogStringInternal &operator+=(uint64_t x)
-            {
+			inline EzLogString &operator+=(uint64_t x)
+			{
 				return append(x);
-            }
+			}
 
-            inline EzLogStringInternal &operator+=(int64_t x)
-            {
+			inline EzLogString &operator+=(int64_t x)
+			{
 				return append(x);
-            }
+			}
 
-            inline EzLogStringInternal &operator+=(uint32_t x)
-            {
+			inline EzLogString &operator+=(uint32_t x)
+			{
 				return append(x);
-            }
+			}
 
-            inline EzLogStringInternal &operator+=(int32_t x)
-            {
+			inline EzLogString &operator+=(int32_t x)
+			{
 				return append(x);
-            }
+			}
 
-            inline EzLogStringInternal &operator+=(double x)
-            {
+			inline EzLogString &operator+=(double x)
+			{
 				return append(x);
-            }
+			}
 
-            inline EzLogStringInternal &operator+=(float x)
-            {
+			inline EzLogString &operator+=(float x)
+			{
 				return append(x);
-            }
+			}
 
-			friend std::ostream &operator<<(std::ostream &os, const EzLogStringInternal &internal);
+			friend std::ostream &operator<<(std::ostream &os, const EzLogString &internal);
 
 		protected:
-            inline size_t size_with_zero()
-            {
-                return size() + sizeof(char);
-            }
+			inline size_t size_with_zero()
+			{
+				return size() + sizeof(char);
+			}
 
-            inline void ensureCap(size_t ensure_cap)
-            {
-                size_t pre_cap = capacity();
-                size_t new_cap = ((ensure_cap * RESERVE_RATE_DEFAULT) >> RESERVE_RATE_BASE);
-                //you must ensure (ensure_cap * RESERVE_RATE_DEFAULT) will not over-flow
+			inline void ensureCap(size_t ensure_cap)
+			{
+				size_t pre_cap = capacity();
+				size_t new_cap = ((ensure_cap * RESERVE_RATE_DEFAULT) >> RESERVE_RATE_BASE);
+				//you must ensure (ensure_cap * RESERVE_RATE_DEFAULT) will not over-flow
 				if (pre_cap >= new_cap)
 				{
 					return;
 				}
-                do_realloc(new_cap);
-            }
+				do_realloc(new_cap);
+			}
 
 			inline void create(size_t capacity = DEFAULT_CAPACITY)
 			{
@@ -636,7 +668,7 @@ namespace ezlogspace
 #endif // !NDEBUG
 			}
 
-			inline void check()const
+			inline void check() const
 			{
 				assert(m_end >= m_front);
 				assert(m_cap >= m_end);
@@ -655,19 +687,20 @@ namespace ezlogspace
 				do_realloc(cap);
 			}
 
-			inline  void do_realloc(size_t new_cap)
+			inline void do_realloc(size_t new_cap)
 			{
 				check();
 				size_t sz = this->size();
 				size_t cap = this->capacity();
 				new_cap += sizeof('\0');
-				char* p = (char*)EZLOG_REALLOC_FUNCTION(this->m_front, new_cap);
+				char *p = (char *) EZLOG_REALLOC_FUNCTION(this->m_front, new_cap);
 				assert(p != NULL);
 				this->m_front = p;
 				this->m_end = this->m_front + sz;
 				this->m_cap = this->m_front + new_cap;
 				check();
 			}
+
 			//ptr is m_front
 			inline void do_free()
 			{
@@ -678,43 +711,665 @@ namespace ezlogspace
 			constexpr static size_t DEFAULT_CAPACITY = 32;
 			constexpr static uint32_t RESERVE_RATE_DEFAULT = 16;
 			constexpr static uint32_t RESERVE_RATE_BASE = 3;
-            char *m_front; //front of c-style str
-            char *m_end;    // the next of the last char of c-style str,
-            char *m_cap;    // the next of buf end,
+			char *m_front; //front of c-style str
+			char *m_end;    // the next of the last char of c-style str,
+			char *m_cap;    // the next of buf end,
 
-            static_assert((RESERVE_RATE_DEFAULT>>RESERVE_RATE_BASE) >= 1, "fatal error, see constructor capacity must bigger than length");
-        };
+			static_assert((RESERVE_RATE_DEFAULT >> RESERVE_RATE_BASE) >= 1,
+						  "fatal error, see constructor capacity must bigger than length");
+		};
 
-		inline std::ostream &operator<<(std::ostream &os, const EzLogStringInternal &internal)
+		inline std::ostream &operator<<(std::ostream &os, const EzLogString &internal)
 		{
 			return os << internal.c_str();
 		}
 
-		inline std::string operator+(const std::string& lhs,const EzLogString& rhs)
+		inline std::string operator+(const std::string &lhs, const EzLogString &rhs)
 		{
-			return std::string(lhs+rhs.c_str());
+			return std::string(lhs + rhs.c_str());
 		}
 
 		template<typename T, typename= typename std::enable_if<std::is_arithmetic<T>::value, void>::type>
-		inline EzLogStringInternal operator+(EzLogStringInternal &&lhs, T rhs)
+		inline EzLogString operator+(EzLogString &&lhs, T rhs)
 		{
 			return std::move(lhs += rhs);
 		}
 
-		inline EzLogStringInternal operator+(EzLogStringInternal &&lhs, EzLogStringInternal & rhs)
-		{
-			return std::move(lhs += rhs);
-		}
-		inline EzLogStringInternal operator+(EzLogStringInternal &&lhs, EzLogStringInternal && rhs)
+		inline EzLogString operator+(EzLogString &&lhs, EzLogString &rhs)
 		{
 			return std::move(lhs += rhs);
 		}
 
-		inline EzLogStringInternal operator+(EzLogStringInternal &&lhs, const char* rhs)
+		inline EzLogString operator+(EzLogString &&lhs, EzLogString &&rhs)
 		{
 			return std::move(lhs += rhs);
 		}
 
+		inline EzLogString operator+(EzLogString &&lhs, const char *rhs)
+		{
+			return std::move(lhs += rhs);
+		}
+
+
+		//notice! For faster in append and etc function, this is not always end with '\0'
+		//if you want to use c-style function on this object, such as strlen(&this->front())
+		//you must call c_str() function before to ensure end with the '\0'
+		//see ensureZero
+		//EzLogStringExtend is a string which include a extend head before front()
+		template<typename ExtType>
+		class EzLogStringExtend : public EzLogObject
+		{
+			static_assert(std::is_trivially_copy_assignable<ExtType>::value, "fatal error");
+
+			friend class ezlogspace::EzLogStream;
+
+		protected:
+			constexpr static size_t SIZE_OF_EXTEND = sizeof(ExtType);
+		public:
+			using class_type = EzLogStringExtend<ExtType>;
+			using this_type = EzLogStringExtend<ExtType> *;
+			using const_this_type = const this_type;
+		public:
+			struct Core
+			{
+				char ex[SIZE_OF_EXTEND];
+				size_t size;
+				size_t capacity;
+				char buf[];
+			};
+			using core_class_type = Core;
+			static_assert(offsetof(core_class_type, ex) == 0, "fatal error");
+		protected:
+			Core *pCore;
+		public:
+
+			~EzLogStringExtend()
+			{
+				if (pCore == nullptr)
+				{
+					return;
+				}
+
+				check();
+				do_free();
+#ifndef NDEBUG
+				makeThisInvalid();
+#endif
+			}
+
+			explicit inline EzLogStringExtend()
+			{
+				create();
+			}
+
+			//init with capacity n
+			inline EzLogStringExtend(EzLogStringEnum, positive_size_t n)
+			{
+				do_malloc(0, n);
+				ensureZero();
+			}
+
+			//init with n count of c
+			inline EzLogStringExtend(positive_size_t n, char c)
+			{
+				do_malloc(n, n);
+				memset(pFront(), c, n);
+				ensureZero();
+			}
+
+			//length without '\0'
+			inline EzLogStringExtend(const char *s, size_t length)
+			{
+				do_malloc(length, get_better_cap(length));
+				memcpy(pFront(), s, length);
+				ensureZero();
+			}
+
+			explicit inline EzLogStringExtend(const char *s) : EzLogStringExtend(s, strlen(s))
+			{
+			}
+
+			inline EzLogStringExtend(const EzLogStringExtend &x) : EzLogStringExtend(x.data(), x.size())
+			{
+			}
+
+			inline EzLogStringExtend(EzLogStringExtend &&x)
+			{
+				//create();
+				this->pCore = nullptr;
+				swap(x);
+				//x.resize(0);
+			}
+
+			inline EzLogStringExtend &operator=(const std::string &str)
+			{
+				resize(0);
+				return append(str.data(), str.size());
+			}
+
+			inline EzLogStringExtend &operator=(const EzLogStringExtend &str)
+			{
+				resize(0);
+				return append(str.data(), str.size());
+			}
+
+			inline EzLogStringExtend &operator=(EzLogStringExtend &&str) noexcept
+			{
+				swap(str);
+				str.resize(0);
+				return *this;
+			}
+
+			inline void swap(EzLogStringExtend &rhs) noexcept
+			{
+				std::swap(this->pCore, rhs.pCore);
+			}
+
+			inline explicit operator std::string() const
+			{
+				return std::string(pFront(), size());
+			}
+
+		public:
+			inline bool empty() const
+			{
+				return size() == 0;
+			}
+
+			inline size_t size() const
+			{
+				assert(pCore->size <= pCore->capacity);
+				return pCore->size;
+			}
+
+			inline size_t length() const
+			{
+				return size();
+			}
+
+			inline size_t capacity() const
+			{
+				assert(pCore->size <= pCore->capacity);
+				return pCore->capacity;
+			}
+
+			inline const char &front() const
+			{
+				return *pFront();
+			}
+
+			inline char &front()
+			{
+				return *pFront();
+			}
+
+			inline const char &operator[](size_t index) const
+			{
+				return pFront()[index];
+			}
+
+			inline char &operator[](size_t index)
+			{
+				return pFront()[index];
+			}
+
+
+			inline const char *data() const
+			{
+				return pFront();
+			}
+
+			inline const char *c_str() const
+			{
+				if (pFront() != nullptr)
+				{
+					check();
+					*const_cast<char *>(pEnd()) = '\0';
+					return pFront();
+				}
+				return "";
+			}
+
+			inline const ExtType *ext() const
+			{
+				assert((void *) pCore == (void *) pCore->ex);
+				return reinterpret_cast<const ExtType *>(pCore->ex);
+			}
+
+			inline ExtType *ext()
+			{
+				assert((void *) pCore == (void *) pCore->ex);
+				return reinterpret_cast<ExtType *>(pCore->ex);
+			}
+
+			inline constexpr size_t ext_size() const
+			{
+				return SIZE_OF_EXTEND;
+			}
+
+		private:
+			inline constexpr static size_t ext_str_offset()
+			{
+				return offsetof(core_class_type, buf);
+			}
+
+			inline constexpr static size_t sz_offset()
+			{
+				return offsetof(core_class_type, size);
+			}
+
+		public:
+			inline static EzLogStringView get_str_view_from_ext(const ExtType *ext)
+			{
+				const char *p_front = (const char *) ext + ext_str_offset();
+				size_t sz = *(size_t *) ((const char *) ext + sz_offset());
+				return EzLogStringView(p_front, sz);
+			}
+
+			inline EzLogStringExtend &append(char c)
+			{
+				ensureCap(size_with_zero() + sizeof(char));
+				return append_unsafe(c);
+			}
+
+			inline EzLogStringExtend &append(unsigned char c)
+			{
+				ensureCap(size_with_zero() + sizeof(char));
+				return append_unsafe(c);
+			}
+
+			inline EzLogStringExtend &append(const char *cstr)
+			{
+				char *p = (char *) cstr;
+				size_t off = size();
+				while (*p != '\0')
+				{
+					if (pEnd() >= pCapacity() - 1)
+					{
+						ensureCap(sizeof(char) + capacity());
+					}
+					*pEnd() = *p;
+					increase_size(1);
+					p++;
+					off++;
+				}
+				ensureZero();
+				return *this;
+
+//                size_t length = strlen(cstr);
+//                return append(cstr, length);
+			}
+
+			//length without '\0'
+			inline EzLogStringExtend &append(const char *cstr, size_t length)
+			{
+				ensureCap(size_with_zero() + length);
+				return append_unsafe(cstr, length);
+			}
+
+			inline EzLogStringExtend &append(const std::string &str)
+			{
+				size_t length = str.length();
+				ensureCap(size_with_zero() + length);
+				return append_unsafe(str);
+			}
+
+			inline EzLogStringExtend &append(const EzLogStringExtend &str)
+			{
+				size_t length = str.length();
+				ensureCap(size_with_zero() + length);
+				return append_unsafe(str);
+			}
+
+
+			inline EzLogStringExtend &append(uint64_t x)
+			{
+				ensureCap(size() + EZLOG_UINT64_MAX_CHAR_LEN);
+				return append_unsafe(x);
+			}
+
+			inline EzLogStringExtend &append(int64_t x)
+			{
+				ensureCap(size() + EZLOG_INT64_MAX_CHAR_LEN);
+				return append_unsafe(x);
+			}
+
+			inline EzLogStringExtend &append(uint32_t x)
+			{
+				ensureCap(size() + EZLOG_UINT32_MAX_CHAR_LEN);
+				return append_unsafe(x);
+			}
+
+			inline EzLogStringExtend &append(int32_t x)
+			{
+				ensureCap(size() + EZLOG_INT32_MAX_CHAR_LEN);
+				return append_unsafe(x);
+			}
+
+			inline EzLogStringExtend &append(double x)
+			{
+				ensureCap(size() + EZLOG_DOUBLE_MAX_CHAR_LEN);
+				return append_unsafe(x);
+			}
+
+			inline EzLogStringExtend &append(float x)
+			{
+				ensureCap(size() + EZLOG_FLOAT_MAX_CHAR_LEN);
+				return append_unsafe(x);
+			}
+
+
+
+//*********  Warning!!!You must reserve enough capacity ,then append is safe ******************************//
+
+			inline EzLogStringExtend &append_unsafe(char c)
+			{
+				*pEnd() = c;
+				increase_size(1);
+				ensureZero();
+				return *this;
+			}
+
+			inline EzLogStringExtend &append_unsafe(unsigned char c)
+			{
+				*pEnd() = c;
+				increase_size(1);
+				ensureZero();
+				return *this;
+			}
+
+			inline EzLogStringExtend &append_unsafe(const char *cstr)
+			{
+				size_t length = strlen(cstr);
+				return append_unsafe(cstr, length);
+			}
+
+			//length without '\0'
+			inline EzLogStringExtend &append_unsafe(const char *cstr, size_t length)
+			{
+				memcpy(pEnd(), cstr, length);
+				increase_size(length);
+				ensureZero();
+				return *this;
+			}
+
+			inline EzLogStringExtend &append_unsafe(const std::string &str)
+			{
+				size_t length = str.length();
+				memcpy(pEnd(), str.data(), length);
+				increase_size(length);
+				ensureZero();
+				return *this;
+			}
+
+			inline EzLogStringExtend &append_unsafe(const EzLogStringExtend &str)
+			{
+				size_t length = str.length();
+				memcpy(pEnd(), str.data(), length);
+				increase_size(length);
+				ensureZero();
+				return *this;
+			}
+
+
+			inline EzLogStringExtend &append_unsafe(uint64_t x)
+			{
+				size_t off = u64toa_sse2(x, pEnd());
+				increase_size(off);
+				ensureZero();
+				return *this;
+			}
+
+			inline EzLogStringExtend &append_unsafe(int64_t x)
+			{
+				size_t off = i64toa_sse2(x, pEnd());
+				increase_size(off);
+				ensureZero();
+				return *this;
+			}
+
+			inline EzLogStringExtend &append_unsafe(uint32_t x)
+			{
+				size_t off = u32toa_sse2(x, pEnd());
+				increase_size(off);
+				ensureZero();
+				return *this;
+			}
+
+			inline EzLogStringExtend &append_unsafe(int32_t x)
+			{
+				uint32_t off = i32toa_sse2(x, pEnd());
+				increase_size(off);
+				ensureZero();
+				return *this;
+			}
+
+			inline EzLogStringExtend &append_unsafe(double x)
+			{
+				dtoa_milo(x, pEnd());
+				size_t off = strlen(pEnd());
+				increase_size(off);
+				ensureZero();
+				return *this;
+			}
+
+			inline EzLogStringExtend &append_unsafe(float x)
+			{
+				size_t off = ftoa(pEnd(), x, NULL);
+				increase_size(off);
+				ensureZero();
+				return *this;
+			}
+
+
+			inline void reserve(size_t capacity)
+			{
+				ensureCap(capacity);
+				ensureZero();
+			}
+
+			inline void resize(size_t size)
+			{
+				ensureCap(size);
+				pCore->size = size;
+				ensureZero();
+			}
+
+
+		public:
+
+			inline EzLogStringExtend &operator+=(char c)
+			{
+				return append(c);
+			}
+
+			inline EzLogStringExtend &operator+=(unsigned char c)
+			{
+				return append(c);
+			}
+
+			inline EzLogStringExtend &operator+=(const char *cstr)
+			{
+				return append(cstr);
+			}
+
+			inline EzLogStringExtend &operator+=(const std::string &str)
+			{
+				return append(str);
+			}
+
+			inline EzLogStringExtend &operator+=(const EzLogStringExtend &str)
+			{
+				return append(str);
+			}
+
+			inline EzLogStringExtend &operator+=(uint64_t x)
+			{
+				return append(x);
+			}
+
+			inline EzLogStringExtend &operator+=(int64_t x)
+			{
+				return append(x);
+			}
+
+			inline EzLogStringExtend &operator+=(uint32_t x)
+			{
+				return append(x);
+			}
+
+			inline EzLogStringExtend &operator+=(int32_t x)
+			{
+				return append(x);
+			}
+
+			inline EzLogStringExtend &operator+=(double x)
+			{
+				return append(x);
+			}
+
+			inline EzLogStringExtend &operator+=(float x)
+			{
+				return append(x);
+			}
+
+			friend std::ostream &operator<<(std::ostream &os, const EzLogStringExtend<ExtType> &s)
+			{
+				return os << std::string(s.c_str(), s.size());
+			}
+
+		protected:
+			inline size_t size_with_zero()
+			{
+				return size() + sizeof('\0');
+			}
+
+			inline void ensureCap(size_t ensure_cap)
+			{
+				size_t pre_cap = capacity();
+				size_t new_cap = ((ensure_cap * RESERVE_RATE_DEFAULT) >> RESERVE_RATE_BASE);
+				//you must ensure (ensure_cap * RESERVE_RATE_DEFAULT) will not over-flow
+				if (pre_cap >= new_cap)
+				{
+					return;
+				}
+				do_realloc(new_cap);
+			}
+
+			inline void create(size_t capacity = DEFAULT_CAPACITY)
+			{
+				do_malloc(0, capacity);
+				ensureZero();
+			}
+
+			inline void makeThisInvalid()
+			{
+				pCore->size = 0;
+				pCore->capacity = 0;
+			}
+
+			inline void ensureZero()
+			{
+#ifndef NDEBUG
+				check();
+				if (pEnd() != nullptr)
+					*pEnd() = '\0';
+#endif // !NDEBUG
+			}
+
+			inline void check() const
+			{
+				assert(size() <= capacity());
+			}
+
+			inline size_t get_better_cap(size_t cap)
+			{
+				return DEFAULT_CAPACITY > cap ? DEFAULT_CAPACITY : cap;
+			}
+
+			inline void do_malloc(size_t size, size_t cap)
+			{
+				assert(size <= cap);
+				cap += sizeof('\0');
+				cap += size_head();
+				Core *p = (Core *) EZLOG_MALLOC_FUNCTION(cap);
+				assert(p != nullptr);
+				pCore = p;
+				this->pCore->size = size;
+				this->pCore->capacity = cap;
+				check();
+			}
+
+			inline void do_realloc(size_t new_cap)
+			{
+				check();
+				size_t sz = this->size();
+				size_t cap = this->capacity();
+				new_cap += sizeof('\0');
+				new_cap += size_head();
+				Core *p = (Core *) EZLOG_REALLOC_FUNCTION(this->pCore, new_cap);
+				assert(p != nullptr);
+				pCore = p;
+				this->pCore->size = sz;
+				this->pCore->capacity = new_cap;
+				check();
+			}
+
+			inline void do_free()
+			{
+				EZLOG_FREE_FUNCTION(this->pCore);
+			}
+
+			constexpr static inline size_t size_head()
+			{
+				return sizeof(Core);
+			}
+
+			inline char *pFront()
+			{
+				return pCore->buf;
+			}
+
+			inline const char *pFront() const
+			{
+				return pCore->buf;
+			}
+
+			inline const char *pEnd() const
+			{
+				return pCore->buf + pCore->size;
+			}
+			inline char *pEnd()
+			{
+				return pCore->buf + pCore->size;
+			}
+
+			inline void increase_size(size_t sz)
+			{
+				pCore->size += sz;
+			}
+
+			inline const char *pCapacity()const
+			{
+				return pCore->buf + pCore->capacity;
+			}
+			inline char *pCapacity()
+			{
+				return pCore->buf + pCore->capacity;
+			}
+
+			inline void increase_capacity(size_t cap)
+			{
+				pCore->capacity += cap;
+			}
+
+		protected:
+			constexpr static size_t DEFAULT_CAPACITY = 32;
+			constexpr static uint32_t RESERVE_RATE_DEFAULT = 16;
+			constexpr static uint32_t RESERVE_RATE_BASE = 3;
+			static_assert((RESERVE_RATE_DEFAULT >> RESERVE_RATE_BASE) >= 1,
+						  "fatal error, see constructor capacity must bigger than length");
+		};
 
 
 
@@ -1204,7 +1859,9 @@ namespace ezlogspace
 
 		public:
 			DEBUG_CANARY_BOOL(flag0)
+#ifdef EZLOG_USE_STRING
 			EzLogString dataStr;
+#endif // EZLOG_USE_STRING
 			const char *tid;
 			const char *file;
 			DEBUG_CANARY_BOOL(flag1)
@@ -1217,6 +1874,18 @@ namespace ezlogspace
 
 		public:
 
+			const EzLogTime& time() const
+			{
+				return ezLogTime;
+			}
+
+			EzLogTime& time()
+			{
+				return ezLogTime;
+			}
+
+
+#ifdef EZLOG_USE_STRING
 			EzLogString &str()
 			{
 				return dataStr;
@@ -1227,32 +1896,47 @@ namespace ezlogspace
 				return dataStr;
 			}
 
-			const EzLogTime &time() const
+			EzLogStringView str_view()const
 			{
-				return ezLogTime;
+				return EzLogStringView(dataStr.c_str(),dataStr.c_str()+dataStr.size());
 			}
 
-			EzLogTime &time()
+			inline static EzLogBean* CreateInstance()
 			{
-				return ezLogTime;
-			}
-
-			inline static EzLogBean *CreateInstance()
-			{
-				EzLogBean *thiz = (EzLogBean *) EZLOG_MALLOC_FUNCTION(sizeof(EzLogBean));
-				PlacementNew(&thiz->time(), ezlogtimespace::EzLogTimeEnum::NOW );
+				EzLogBean* thiz = (EzLogBean*)EZLOG_MALLOC_FUNCTION( sizeof( EzLogBean ) );
+				assert( thiz != nullptr );
+				PlacementNew( &thiz->time(), ezlogtimespace::EzLogTimeEnum::NOW );
 				return thiz;
 			}
 
 			inline static void DestroyInstance(EzLogBean *p)
 			{
-				assert( p != nullptr );//in this program,p is not null
-				DEBUG_RUN(assert(!(p->flag0 || p->flag1 || p->flag2)););
+				check(p);
 				static_assert(std::is_trivially_destructible<EzLogTime>::value, "fatal error");
 				//p->time().~EzLogTime();
 				p->str().~EzLogString();
 				DEBUG_RUN(p->flag0 = p->flag1 = p->flag2 = 1;);
 				EZLOG_FREE_FUNCTION(p);
+			}
+
+#else
+
+			EzLogStringView str_view() const
+			{
+				return EzLogStringExtend<EzLogBean>::get_str_view_from_ext(this);
+			}
+
+			inline static void DestroyInstance(EzLogBean *p)
+			{
+				check(p);
+				DEBUG_RUN(p->flag0 = p->flag1 = p->flag2 = 1;);
+				EZLOG_FREE_FUNCTION(p);
+			}
+#endif
+			inline static void check(EzLogBean *p)
+			{
+				assert(p != nullptr);//in this program,p is not null
+				DEBUG_RUN(assert(!(p->flag0 || p->flag1 || p->flag2)););
 			}
 		};
 
@@ -1331,32 +2015,81 @@ namespace ezlogspace
 
 	};
 
-#define EZLOG_INTERNAL_CREATE_EZLOGBEAN(lv) []()->ezlogspace::internal::EzLogBean *{			\
-    if(ezlogspace::EzLog::getState()!=ezlogspace::OPEN){return nullptr;}\
-	using EzLogBean=ezlogspace::internal::EzLogBean;\
-	EzLogBean * m_pHead = EzLogBean::CreateInstance();\
-	assert(m_pHead);\
-	EzLogBean &bean = *m_pHead;\
-	bean.tid = ezlogspace::internal::s_tid;\
-	bean.file = __FILE__;\
-	static_assert(__LINE__<=UINT16_MAX,"fatal error,file line too big");\
-	static_assert(sizeof(__FILE__)-1<=UINT16_MAX,"fatal error,file path is too long");\
-	bean.fileLen = (uint16_t)(sizeof(__FILE__)-1);\
-	bean.line = (uint16_t)(__LINE__);\
-	bean.level = ezlogspace::LOG_PREFIX[lv];\
-	bean.toTernimal=lv==EZLOG_LEVEL_COUT;\
-	return m_pHead;\
+#define EZLOG_INTERNAL_CREATE_EZLOGBEAN(lv) []()->ezlogspace::internal::EzLogBean *{		          	        \
+	static_assert(__LINE__<=UINT16_MAX,"fatal error,file line too big");                                          \
+	static_assert(sizeof(__FILE__)-1<=UINT16_MAX,"fatal error,file path is too long");                            \
+	using EzLogBean=ezlogspace::internal::EzLogBean;                                                              \
+    if(ezlogspace::EzLog::getState()!=ezlogspace::OPEN){return nullptr;}                                         \
+	EzLogBean &bean = *EzLogBean::CreateInstance();                                                                \
+	bean.tid = ezlogspace::internal::s_tid;                                                                       \
+	bean.file = __FILE__;                                                                                           \
+	bean.fileLen = (uint16_t)(sizeof(__FILE__)-1);                                                                  \
+	bean.line = (uint16_t)(__LINE__);                                                                               \
+	bean.level = ezlogspace::LOG_PREFIX[lv];                                                                       \
+	bean.toTernimal=lv==EZLOG_LEVEL_COUT;                                                                          \
+	return &bean;                                                                                                    \
 }()
 
-	class EzLogStream : private ezlogspace::internal::EzLogStringInternal
+
+#define EZLOG_INTERNAL_CREATE_EZLOG_STREAM(lv)                                                                                                            \
+	ezlogspace::EzLog::getState()!=ezlogspace::OPEN?                                                                                                       \
+	ezlogspace::EzLogStream():                                                                                                                               \
+	ezlogspace::EzLogStream(lv,                                                                                                                              \
+	[]()->const char*{return __FILE__;}(),                                                                                                                   \
+	[]()->uint16_t{static_assert( sizeof( __FILE__ ) - 1 <= UINT16_MAX, "fatal error,file path is too long" ); return (uint16_t)(sizeof(__FILE__)-1);}(),  \
+	[]()->uint16_t{static_assert(__LINE__<=UINT16_MAX,"fatal error,file line too big"); return  (uint16_t)(__LINE__);}())
+
+
+
+#ifdef EZLOG_USE_STRING_EXTEND
+	class EzLogStream : private ezlogspace::internal::EzLogStringExtend<ezlogspace::internal::EzLogBean>
+#else
+	class EzLogStream : private ezlogspace::internal::EzLogString
+#endif // EZLOG_USE_STRING_EXTEND
 	{
 	public:
 		using EzLogBean = ezlogspace::internal::EzLogBean;
-		using EzLogString =ezlogspace::internal::EzLogStringInternal;
+		using EzLogString =ezlogspace::internal::EzLogString;
+		using EzLogStringExtend =ezlogspace::internal::EzLogStringExtend<ezlogspace::internal::EzLogBean>;
+		using EzLogStringEnum =ezlogspace::internal::EzLogStringEnum;
 
-		inline EzLogStream(EzLogBean *pLogBean) :
-			EzLogString(EzLogString::EzlogStringEnum::DEFAULT,EZLOG_SINGLE_LOG_RESERVE_LEN ),
-			m_pBean(pLogBean)
+#ifdef EZLOG_USE_STRING_EXTEND
+
+		inline EzLogStream( uint32_t lv, const char* file, uint16_t fileLen, uint16_t line ) :
+			EzLogStringExtend( EzLogStringEnum::DEFAULT, EZLOG_SINGLE_LOG_RESERVE_LEN )
+		{
+			EzLogBean& bean = *ext();
+			PlacementNew( &bean.ezLogTime, ezlogspace::internal::ezlogtimespace::EzLogTimeEnum::NOW );
+			bean.tid = ezlogspace::internal::s_tid;
+			bean.file = file;
+			bean.fileLen = fileLen;
+			bean.line = line;
+			bean.level = ezlogspace::LOG_PREFIX[lv];
+			bean.toTernimal = lv == EZLOG_LEVEL_COUT;
+		}
+
+		inline  EzLogStream() :
+			EzLogStringExtend( EzLogStringEnum::DEFAULT, EZLOG_SINGLE_LOG_RESERVE_LEN )
+		{
+			//PlacementNew(this->ext(),)
+		}
+
+		inline  ~EzLogStream()
+		{
+#if EZLOG_SUPPORT_CLOSE_LOG == TRUE
+			if( m_pBean == nullptr ) { return; }
+#endif
+#ifndef NDEBUG
+#endif
+			EzLog::pushLog(this->ext());
+			pCore = nullptr;
+		}
+
+		using EzLogStringExtend::ext;
+#else
+		inline EzLogStream( EzLogBean* pLogBean ) :
+			EzLogString( EzLogStringEnum::DEFAULT, EZLOG_SINGLE_LOG_RESERVE_LEN ),
+			m_pBean( pLogBean )
 		{
 		}
 
@@ -1377,7 +2110,9 @@ namespace ezlogspace
 #endif
 			EzLog::pushLog(m_pBean);
 		}
-		inline EzLogStream&operator()(EzLogString::EzlogStringEnum ,const char* s,size_t length)
+
+#endif
+		inline EzLogStream&operator()(EzLogStringEnum ,const char* s,size_t length)
 		{
 			this->append(s,length);
 			return *this;
@@ -1473,24 +2208,26 @@ namespace ezlogspace
 		}
 
 	public:
+#ifdef EZLOG_USE_STRING
 		EzLogBean* m_pBean;
+#endif // EZLOG_USE_STRING
 	};
 
-	class EzNoLogStream
+	class EzLogNoneStream
 	{
 	public:
-		inline EzNoLogStream() = default;
+		inline EzLogNoneStream() = default;
 
-		inline ~EzNoLogStream() = default;
+		inline ~EzLogNoneStream() = default;
 
 		template<typename T>
-		inline EzNoLogStream &operator<<(const T &s)
+		inline EzLogNoneStream &operator<<(const T &s)
 		{
 			return *this;
 		}
 
 		template<typename T>
-		inline EzNoLogStream &operator<<(T &&s)
+		inline EzLogNoneStream &operator<<(T &&s)
 		{
 			return *this;
 		}
@@ -1502,64 +2239,127 @@ namespace ezlogspace
 #error "only one stratrgy can be and must be selected"
 #endif
 
+#if (defined(EZLOG_USE_STRING) && defined(EZLOG_USE_STRING_EXTEND)) || (!defined(EZLOG_USE_STRING) && !defined(EZLOG_USE_STRING_EXTEND))
+#error "only one stratrgy can be and must be selected"
+#endif
+
 static_assert(EZLOG_GLOBAL_QUEUE_MAX_SIZE > 0, "fatal err!");
 static_assert(EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE > 0, "fatal err!");
 static_assert(EZLOG_GLOBAL_QUEUE_MAX_SIZE >= 2 * EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE,
 			  "fatal err!");   //see func moveLocalCacheToGlobal
 
 
+#define EZLOG_CSTR(str)   [](){ static_assert(!std::is_pointer<decltype(str)>::value,"must be a c-style array");return ezlogspace::internal::EzLogStringInternal::EzlogStringEnum::DEFAULT; }(),str,sizeof(str)-1
+
+
 //if not support dynamic log level
 #if EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL == FALSE
+
+#ifdef EZLOG_USE_STRING_EXTEND
+
+
+#if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_COUT
+#define EZCOUT   (EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_COUT)  )
+#else
+#define EZCOUT   ( ezlogspace::EzLogNoneStream()  )
+#endif
+
+#if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_ALWAYS
+#define EZLOGA    (EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_ALWAYS) )
+#else
+#define EZLOGA   ( ezlogspace::EzLogNoneStream()  )
+#endif
+
+#if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_FATAL
+#define EZLOGF    (EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_FATAL) )
+#else
+#define EZLOGF   ( ezlogspace::EzLogNoneStream()  )
+#endif
+
+#if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_ERROR
+#define EZLOGE    (EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_ERROR) )
+#else
+#define EZLOGE   (   ezlogspace::EzLogNoneStream()  )
+#endif
+
+#if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_WARN
+#define EZLOGW    (EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_WARN) )
+#else
+#define EZLOGW   (   ezlogspace::EzLogNoneStream()  )
+#endif
+
+#if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_INFO
+#define EZLOGI    (EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_INFO) )
+#else
+#define EZLOGI   (   ezlogspace::EzLogNoneStream()  )
+#endif
+
+#if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_DEBUG
+#define EZLOGD    (EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_DEBUG) )
+#else
+#define EZLOGD    (   ezlogspace::EzLogNoneStream()  )
+#endif
+
+#if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_VERBOSE
+#define EZLOGV    (EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_VERBOSE) )
+#else
+#define EZLOGV    (   ezlogspace::EzLogNoneStream()  )
+#endif
+
+
+
+#elif defined(EZLOG_USE_STRING)
 
 #if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_COUT
 #define EZCOUT   ( ezlogspace::EzLogStream(EZLOG_INTERNAL_CREATE_EZLOGBEAN(EZLOG_LEVEL_COUT) ) )
 #else
-#define EZCOUT   ( ezlogspace::EzNoLogStream()  )
+#define EZCOUT   ( ezlogspace::EzLogNoneStream()  )
 #endif
 
 #if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_ALWAYS
 #define EZLOGA   ( ezlogspace::EzLogStream(EZLOG_INTERNAL_CREATE_EZLOGBEAN(EZLOG_LEVEL_ALWAYS) ) )
 #else
-#define EZLOGA   ( ezlogspace::EzNoLogStream()  )
+#define EZLOGA   ( ezlogspace::EzLogNoneStream()  )
 #endif
 
 #if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_FATAL
 #define EZLOGF   ( ezlogspace::EzLogStream(EZLOG_INTERNAL_CREATE_EZLOGBEAN(EZLOG_LEVEL_FATAL) ) )
 #else
-#define EZLOGF   ( ezlogspace::EzNoLogStream()  )
+#define EZLOGF   ( ezlogspace::EzLogNoneStream()  )
 #endif
 
 #if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_ERROR
 #define EZLOGE   ( ezlogspace::EzLogStream(EZLOG_INTERNAL_CREATE_EZLOGBEAN(EZLOG_LEVEL_ERROR) ) )
 #else
-#define EZLOGE   (   ezlogspace::EzNoLogStream()  )
+#define EZLOGE   (   ezlogspace::EzLogNoneStream()  )
 #endif
 
 #if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_WARN
 #define EZLOGW   ( ezlogspace::EzLogStream(EZLOG_INTERNAL_CREATE_EZLOGBEAN(EZLOG_LEVEL_WARN) ) )
 #else
-#define EZLOGW   (   ezlogspace::EzNoLogStream()  )
+#define EZLOGW   (   ezlogspace::EzLogNoneStream()  )
 #endif
 
 #if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_INFO
 #define EZLOGI   ( ezlogspace::EzLogStream(EZLOG_INTERNAL_CREATE_EZLOGBEAN(EZLOG_LEVEL_INFO) ) )
 #else
-#define EZLOGI   (   ezlogspace::EzNoLogStream()  )
+#define EZLOGI   (   ezlogspace::EzLogNoneStream()  )
 #endif
 
 #if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_DEBUG
 #define EZLOGD    ( ezlogspace::EzLogStream(EZLOG_INTERNAL_CREATE_EZLOGBEAN(EZLOG_LEVEL_DEBUG) ) )
 #else
-#define EZLOGD    (   ezlogspace::EzNoLogStream()  )
+#define EZLOGD    (   ezlogspace::EzLogNoneStream()  )
 #endif
 
 #if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_VERBOSE
 #define EZLOGV    ( ezlogspace::EzLogStream(EZLOG_INTERNAL_CREATE_EZLOGBEAN(EZLOG_LEVEL_VERBOSE) ) )
 #else
-#define EZLOGV    (   ezlogspace::EzNoLogStream()  )
+#define EZLOGV    (   ezlogspace::EzLogNoneStream()  )
 #endif
 
-#define EZLOG_CSTR(str)   [](){ static_assert(!std::is_pointer<decltype(str)>::value,"must be a c-style array");return ezlogspace::internal::EzLogStringInternal::EzlogStringEnum::DEFAULT; }(),str,sizeof(str)-1
+#endif
+
 
 //if support dynamic log level
 #else
