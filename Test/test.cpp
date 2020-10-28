@@ -22,7 +22,8 @@ using namespace ezlogspace;
 //#define file_single_thread_operator_test_____________________
 //#define terminal_multi_thread_poll__log_test_____________________
 //#define file_multi_thread_memory_leak_stress_test_____________________
-#define ezlog_string_test_____________________
+//#define ezlog_string_test_____________________
+#define ezlog_string_extend_test_____________________
 
 uint64_t complexCalFunc(uint64_t x)
 {
@@ -592,7 +593,7 @@ TEST_CASE("ezlog_string_test_____________________")
 	EzLogString str3 ("asyindfafa");
 	str3 += str2;
 
-	EzLogString str4(EzLogString::EzlogStringEnum::DEFAULT,100);
+	EzLogString str4( ezlogspace::internal::EzLogStringEnum::DEFAULT, 100 );
 	str4 = "dascvda";
 
 	str3 = str4;
@@ -606,6 +607,57 @@ TEST_CASE("ezlog_string_test_____________________")
 		<< str3 << std::endl 
 		<< str4 << std::endl 
 		<< str5 << std::endl 
+		<< str6 << std::endl;
+}
+
+#endif
+
+
+#ifdef ezlog_string_extend_test_____________________
+
+TEST_CASE( "ezlog_string_extend_test_____________________" )
+{
+	EZLOGI << "ezlog_string_extend_test_____________________";
+	struct ext_t
+	{
+		char s[50];
+	};
+	using String = ezlogspace::internal::EzLogStringExtend< ext_t >;
+	String str;
+	str.reserve( 100 );
+	str.resize( 200 );
+	for( uint32_t i = 0; i < str.size(); i++ )
+	{
+		str[i] = 'A' + i % 26;
+	}
+	std::cout << str << endl;
+
+	String str2 = std::move( str );
+	str2.resize( 10 );
+
+	String str3( "asyindfafa" );
+	str3 += str2;
+
+	String str4( ezlogspace::internal::EzLogStringEnum::DEFAULT, 100 );
+	str4 = "dascvda";
+
+	str3 = str4;
+
+	String str5;
+	String str6 = str4;
+	str6.append( " nhmyootrnpkbf" );
+
+
+	String str7 ("dadacxxayyy");
+	ext_t* p=str7.ext();
+	strcpy( p->s, "vvvvbbbbnnnnn");
+	std::cout << "str7: " << str7 << " ext addr: " << str7.ext()<<" ext: "<< str7.ext()->s << endl;
+
+	std::cout<<"str2-str6\n"
+		<< str2 << std::endl
+		<< str3 << std::endl
+		<< str4 << std::endl
+		<< str5 << std::endl
 		<< str6 << std::endl;
 }
 
