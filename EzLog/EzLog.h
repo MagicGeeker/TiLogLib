@@ -790,11 +790,10 @@ namespace ezlogspace
 					return;
 				}
 
+				assert((uintptr_t) pCore != (uintptr_t) UINTPTR_MAX);
 				check();
 				do_free();
-#ifndef NDEBUG
-				makeThisInvalid();
-#endif
+				DEBUG_RUN(pCore = (Core *) UINTPTR_MAX);
 			}
 
 			explicit inline EzLogStringExtend()
@@ -955,7 +954,7 @@ namespace ezlogspace
 				return SIZE_OF_EXTEND;
 			}
 
-		private:
+		protected:
 			inline constexpr static size_t ext_str_offset()
 			{
 				return offsetof(core_class_type, buf);
@@ -1270,11 +1269,6 @@ namespace ezlogspace
 				ensureZero();
 			}
 
-			inline void makeThisInvalid()
-			{
-				pCore->size = 0;
-				pCore->capacity = 0;
-			}
 
 			inline void ensureZero()
 			{
@@ -1310,13 +1304,13 @@ namespace ezlogspace
 			inline void do_realloc(const size_t new_cap)
 			{
 				check();
-				size_t sz = this->size();
+				//size_t sz = this->size();
 				size_t cap = this->capacity();
 				size_t mem_size = new_cap + sizeof('\0') + size_head();
 				Core *p = (Core *) EZLOG_REALLOC_FUNCTION(this->pCore, mem_size);
 				assert(p != nullptr);
 				pCore = p;
-				this->pCore->size = sz;
+				//this->pCore->size = sz;
 				this->pCore->capacity = new_cap;
 				check();
 			}
@@ -2049,9 +2043,9 @@ namespace ezlogspace
 
 
 #ifdef EZLOG_USE_STRING_EXTEND
-	class EzLogStream : private ezlogspace::internal::EzLogStringExtend<ezlogspace::internal::EzLogBean>
+	class EzLogStream : public ezlogspace::internal::EzLogStringExtend<ezlogspace::internal::EzLogBean>
 #else
-	class EzLogStream : private ezlogspace::internal::EzLogString
+	class EzLogStream : public ezlogspace::internal::EzLogString
 #endif // EZLOG_USE_STRING_EXTEND
 	{
 	public:
@@ -2078,13 +2072,13 @@ namespace ezlogspace
 		inline  EzLogStream() :
 			EzLogStringExtend( EzLogStringEnum::DEFAULT, EZLOG_SINGLE_LOG_RESERVE_LEN )
 		{
-			//PlacementNew(this->ext(),)
+			ext()->level = '~';
 		}
 
 		inline  ~EzLogStream()
 		{
 #if EZLOG_SUPPORT_CLOSE_LOG == TRUE
-			if( m_pBean == nullptr ) { return; }
+			if(ext()->level == '~') { return; }
 #endif
 			if (pCore != nullptr)
 			{
@@ -2094,7 +2088,6 @@ namespace ezlogspace
 			}
 		}
 
-		using EzLogStringExtend::ext;
 #else
 		inline EzLogStream( EzLogBean* pLogBean ) :
 			EzLogString( EzLogStringEnum::DEFAULT, EZLOG_SINGLE_LOG_RESERVE_LEN ),

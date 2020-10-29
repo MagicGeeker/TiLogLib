@@ -23,7 +23,8 @@ using namespace ezlogspace;
 //#define terminal_multi_thread_poll__log_test_____________________
 //#define file_multi_thread_memory_leak_stress_test_____________________
 //#define ezlog_string_test_____________________
-#define ezlog_string_extend_test_____________________
+//#define ezlog_string_extend_test_____________________
+#define terminal_single_thread_long_string_log_test_____________________
 
 uint64_t complexCalFunc(uint64_t x)
 {
@@ -577,8 +578,8 @@ TEST_CASE("file_multi_thread_memory_leak_stress_test_____________________")
 TEST_CASE("ezlog_string_test_____________________")
 {
 	EZLOGI << "ezlog_string_test_____________________";
-	using EzLogString =ezlogspace::internal::EzLogString;
-	EzLogString str;
+	using String =ezlogspace::internal::EzLogString;
+	String str;
 	str.reserve(100);
 	str.resize(200);
 	for(uint32_t i=0;i<str.size();i++)
@@ -587,19 +588,19 @@ TEST_CASE("ezlog_string_test_____________________")
 	}
 	std::cout<<str<<endl;
 
-	EzLogString str2=std::move(str);
+	String str2=std::move(str);
 	str2.resize(10);
 
-	EzLogString str3 ("asyindfafa");
+	String str3 ("asyindfafa");
 	str3 += str2;
 
-	EzLogString str4( ezlogspace::internal::EzLogStringEnum::DEFAULT, 100 );
+	String str4(ezlogspace::internal::EzLogStringEnum::DEFAULT, 100 );
 	str4 = "dascvda";
 
 	str3 = str4;
 
-	EzLogString str5;
-	EzLogString str6=str4;
+	String str5;
+	String str6=str4;
 	str6.append(" nhmyootrnpkbf");
 
 	std::cout 
@@ -608,6 +609,13 @@ TEST_CASE("ezlog_string_test_____________________")
 		<< str4 << std::endl 
 		<< str5 << std::endl 
 		<< str6 << std::endl;
+
+	String longStr("long string ");
+	for( uint32_t i = 0; i < 10000; i++ )
+	{
+		longStr.append(char('a' + i % 26));
+	}
+	std::cout<<"\n longStr:\n"<<longStr<<std::endl;
 }
 
 #endif
@@ -659,9 +667,51 @@ TEST_CASE( "ezlog_string_extend_test_____________________" )
 		<< str4 << std::endl
 		<< str5 << std::endl
 		<< str6 << std::endl;
+
+	String longStr("long string ");
+	for( uint32_t i = 0; i < 10000; i++ )
+	{
+		longStr.append(char('a' + i % 26));
+	}
+	std::cout<<"\n longStr:\n"<<longStr<<std::endl;
+
+	ezlogspace::internal::EzLogStringExtend<int> longStr2("long string 2  ");
+	for( uint32_t i = 0; i < 10000; i++ )
+	{
+		longStr2.append(char('R' + i % 11));
+	}
+	std::cout<<"\n longStr2:\n"<<longStr2<<std::endl;
 }
 
 #endif
 
+#ifdef terminal_single_thread_long_string_log_test_____________________
+TEST_CASE("terminal_single_thread_long_string_log_test_____________________")
+{
+	EzLog::init(EzLog::getDefaultTerminalLoggerPrinter());
+	EZLOGI << "terminal_single_thread_long_string_log_test_____________________";
+	constexpr uint64_t loops = (1 << 8);
+	EZLOGI << "1k loops test";
+	SimpleTimer s1m;
+	for (uint64_t i = 0; i < loops; i++)
+	{
+		auto x=EZLOGD;
+		for( uint32_t j = 0; j < 1000; j++ )
+		{
+			x<<(char('R' + j % 11));
+		}
+		x << "\n";
+	}
+	{
+		auto s = EZLOGI<<"dsad";
+		auto s2 = std::move(s);
+	}
+
+
+	uint64_t ms = s1m.GetMillisecondsUpToNOW();
+	EZLOGI << "end terminal_single_thread_long_string_log_test_____________________";
+
+}
+#endif
 
 #endif
