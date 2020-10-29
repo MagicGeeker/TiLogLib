@@ -30,6 +30,7 @@
 #define EZLOG_GLOBAL_QUEUE_MAX_SIZE  ((size_t)1<<12U)   //global cache queue max length
 #define EZLOG_GARBAGE_COLLECTION_QUEUE_MAX_SIZE  ((size_t)4<<12U)   //garbage collection queue max length
 #define EZLOG_SINGLE_LOG_RESERVE_LEN  50     //reserve for every log except for level,tid ...
+//#define EZLOG_THREAD_ID_MAX_LEN  20    //define tid max len,no define means no limit,in popular system limit is EZLOG_UINT64_MAX_CHAR_LEN
 #define EZLOG_MAX_LOG_NUM  SIZE_MAX          //max log numbers
 
 #define EZLOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER    "a:/"
@@ -97,7 +98,7 @@ namespace ezlogspace
 		static void Delete(T *p)
 		{
 			p->~T();
-			EZLOG_FREE_FUNCTION(p);
+			EZLOG_FREE_FUNCTION((void*)p);
 		}
 
 		template<typename T>
@@ -130,7 +131,7 @@ namespace ezlogspace
 			{
 				p->~T();
 			}
-			EZLOG_FREE_FUNCTION(pOri);
+			EZLOG_FREE_FUNCTION((void*)pOri);
 		}
 	};
 
@@ -143,6 +144,8 @@ namespace ezlogspace
 
 	constexpr char LOG_PREFIX[] = "EZ  FEWIDV";
 	//reserve +1 for '\0'
+    constexpr size_t EZLOG_UINT16_MAX_CHAR_LEN= (5+1);
+    constexpr size_t EZLOG_INT16_MAX_CHAR_LEN= (6+1);
     constexpr size_t EZLOG_UINT32_MAX_CHAR_LEN= (10+1);
     constexpr size_t EZLOG_INT32_MAX_CHAR_LEN =(11+1);
     constexpr size_t EZLOG_UINT64_MAX_CHAR_LEN= (20+1);
@@ -156,7 +159,7 @@ namespace ezlogspace
 		class EzLogBean;
 		class EzLogString;
 
-		extern thread_local const char *s_tid;
+		extern thread_local const std::string *s_tid;
 
 
 #ifndef NDEBUG
@@ -1868,7 +1871,7 @@ namespace ezlogspace
 #ifdef EZLOG_USE_STRING
 			EzLogString dataStr;
 #endif // EZLOG_USE_STRING
-			const char *tid;
+			const std::string *tid;
 			const char *file;
 			DEBUG_CANARY_UINT32(flag2)
 			EzLogTime ezLogTime;

@@ -71,9 +71,7 @@ do{ if(!(what)){std::cerr<<"\n ERROR:\n"<< __FILE__ <<":"<< __LINE__ <<"\n"<<(#w
 #define EZLOG_STRING_LEN_OF_CHAR_ARRAY(char_str) ((sizeof(char_str)-1)/sizeof(char_str[0]))
 
 #define EZLOG_CTIME_MAX_LEN 30
-#define EZLOG_PREFIX_RESERVE_LEN  56      //reserve for " tid: " and other prefix c-strings;
-//#define EZLOG_SINGLE_LOG_STRING_FULL_RESERVER_LEN  (EZLOG_PREFIX_RESERVE_LEN+EZLOG_SINGLE_LOG_RESERVE_LEN+EZLOG_CTIME_MAX_LEN)
-#define EZLOG_THREAD_ID_MAX_LEN  (20+1)    //len(UINT64_MAX 64bit)+1
+#define EZLOG_PREFIX_RESERVE_LEN  21      //reserve for prefix static c-strings;
 
 using SystemTimePoint=std::chrono::system_clock::time_point;
 using SystemClock=std::chrono::system_clock;
@@ -168,19 +166,20 @@ namespace ezlogspace
 		std::atomic<ezlogtimespace::steady_flag_t> ezlogtimespace::steady_flag_helper::s_steady_t_helper(
 				ezlogtimespace::steady_flag_helper::min());
 
-		const char* GetThreadIDString()
+		const std::string* GetThreadIDString()
 		{
 			stringstream os;
 			os << ( std::this_thread::get_id() );
 			string id = os.str();
-			char* tidstr = (char*)ezmalloc(
-				EZLOG_THREAD_ID_MAX_LEN * sizeof( char ) );
-			DEBUG_ASSERT( tidstr != NULL );
-			strncpy( tidstr, id.c_str(), EZLOG_THREAD_ID_MAX_LEN );
-			tidstr[EZLOG_THREAD_ID_MAX_LEN - 1] = '\0';
-			return tidstr;
+#ifdef EZLOG_THREAD_ID_MAX_LEN
+			if (id.size() > EZLOG_THREAD_ID_MAX_LEN)
+			{
+				id.resize(EZLOG_THREAD_ID_MAX_LEN);
+			}
+#endif
+			return eznew<std::string>(std::move(id));
 		}
-		thread_local const char* s_tid = GetThreadIDString();
+		thread_local const std::string* s_tid = GetThreadIDString();
 
 #ifdef        __________________________________________________EzLogCircularQueue__________________________________________________
 
@@ -506,7 +505,7 @@ namespace ezlogspace
 			EzLogBeanCircularQueue vcache;
 			ThreadLocalSpinLock spinLock;//protect cache
 
-			const char *tid;
+			const std::string *tid;
 			std::mutex thrdExistMtx;
 			std::condition_variable thrdExistCV;
 
@@ -515,14 +514,9 @@ namespace ezlogspace
 			{
 			};
 
-			explicit ThreadStru(size_t cacheSize, const char *_tid) : vcache(cacheSize), spinLock(), tid(_tid),
-																	  thrdExistMtx(), thrdExistCV()
-			{
-			};
-
 			~ThreadStru()
 			{
-				ezfree((void*)tid);
+				ezdelete(tid);
 				DEBUG_RUN(tid = NULL);
 			}
 		};
@@ -530,17 +524,10 @@ namespace ezlogspace
 		struct CacheStru
 		{
 			EzLogBeanVector vcache;
-
 			explicit CacheStru(size_t cacheSize)
 			{
 				vcache.reserve(cacheSize);
 			};
-
-			explicit CacheStru(size_t cacheSize, const char *_tid)
-			{
-				vcache.reserve(cacheSize);
-			};
-
 			~CacheStru() = default;
 		};
 
@@ -587,7 +574,7 @@ namespace ezlogspace
 			static inline void getTimeStrFromCTime(char *dst, size_t &len, const EzLogBean &bean, time_t &tPre);
 #endif
 
-			static inline void getMergedSingleLog(EzLogString &logs, const char *ctimestr, size_t len,
+			static inline void getMergedSingleLog(EzLogString &logs, const char *ctimestr, size_t ctimestr_len,
 												  const EzLogBean &bean);
 
 			static EzLogString &getMergedLogString();
@@ -969,7 +956,7 @@ namespace ezlogspace
 		ThreadStruQueue EZLogOutputThread::s_threadStruQueue;
 		volatile bool EZLogOutputThread::s_threadStruQueue_inited = true;
 
-		CacheStru EZLogOutputThread::s_globalCache(GLOBAL_SIZE, nullptr);
+		CacheStru EZLogOutputThread::s_globalCache(GLOBAL_SIZE);
 		uint64_t EZLogOutputThread::s_printedLogsLength = 0;
 		uint64_t EZLogOutputThread::s_printedLogs = 0;
 		EzLogString EZLogOutputThread::s_global_cache_string;
@@ -990,7 +977,7 @@ namespace ezlogspace
 		bool EZLogOutputThread::s_isQueueEmpty = false;
 		std::thread EZLogOutputThread::s_threadPrinter= CreatePrintThread();
 
-		CacheStru EZLogOutputThread::s_garbages(EZLOG_GARBAGE_COLLECTION_QUEUE_MAX_SIZE, nullptr);
+		CacheStru EZLogOutputThread::s_garbages(EZLOG_GARBAGE_COLLECTION_QUEUE_MAX_SIZE);
 		std::mutex EZLogOutputThread::s_mtxDeleter;
 		std::condition_variable EZLogOutputThread::s_cvDeleter;
 		bool EZLogOutputThread::s_deleting= false;
@@ -1067,9 +1054,9 @@ namespace ezlogspace
 			if ((volatile std::mutex *) EZLogOutputThread::s_pMtxQueue == nullptr ||
 				EZLogOutputThread::s_threadStruQueue_inited != true)  //s_threadStruQueue is not inited
 			{
-				DEBUG_PRINT(EZLOG_LEVEL_WARN, "s_threadStruQueue not inited tid= %s\n", s_tid);
+				DEBUG_PRINT(EZLOG_LEVEL_WARN, "s_threadStruQueue not inited tid= %s\n", s_tid->c_str());
 				fflush(stdout);
-				ezfree((void *) s_tid);
+				ezdelete(s_tid);
 				s_pThreadLocalStru = nullptr;
 				s_tid = nullptr;
 				return s_pThreadLocalStru;
@@ -1088,7 +1075,7 @@ namespace ezlogspace
 			DEBUG_ASSERT(s_pThreadLocalStru != nullptr);
 			{
 				lock_guard<mutex> lgd(s_mtxQueue);
-				DEBUG_PRINT(EZLOG_LEVEL_VERBOSE, "availQueue insert thrd tid= %s\n", s_tid);
+				DEBUG_PRINT(EZLOG_LEVEL_VERBOSE, "availQueue insert thrd tid= %s\n", s_tid->c_str());
 				s_threadStruQueue.availQueue.emplace_back(s_pThreadLocalStru);
 			}
 			unique_lock<mutex> lk(s_pThreadLocalStru->thrdExistMtx);
@@ -1389,28 +1376,29 @@ namespace ezlogspace
 		}
 #endif
 
-		inline void EZLogOutputThread::getMergedSingleLog(EzLogString &logs, const char *ctimestr, size_t len,
+		inline void EZLogOutputThread::getMergedSingleLog(EzLogString &logs, const char *ctimestr, size_t ctimestr_len,
 														  const EzLogBean &bean)
 		{
-//has reserve EZLOG_SINGLE_LOG_STRING_FULL_RESERVE_LEN
-			logs.reserve(bean.str_view().size() + EZLOG_PREFIX_RESERVE_LEN + EZLOG_CTIME_MAX_LEN + bean.fileLen);
+			logs.reserve(bean.tid->size() + ctimestr_len + bean.fileLen + bean.str_view().size()
+					+ EZLOG_PREFIX_RESERVE_LEN);
 
 			logs.resize(0);
-			logs.append_unsafe('\n');                                                                    //1
-			logs.append_unsafe(bean.level);                                                            //1
-			logs.append_unsafe(" tid: ", EZLOG_STRING_LEN_OF_CHAR_ARRAY(" tid: "));                //6
-			logs.append_unsafe(bean.tid);                                                                //20
-			logs.append_unsafe(" [", EZLOG_STRING_LEN_OF_CHAR_ARRAY(" ["));                        //2
-			logs.append_unsafe(ctimestr, len);                                                                    //----EZLOG_CTIME_MAX_LEN 30
-			logs.append_unsafe("] [", EZLOG_STRING_LEN_OF_CHAR_ARRAY("] ["));                        //3
+			logs.append_unsafe('\n');                                                        //1
+			logs.append_unsafe(bean.level);                                                  //1
+			logs.append_unsafe(" tid: ", EZLOG_STRING_LEN_OF_CHAR_ARRAY(" tid: "));          //6
+			logs.append_unsafe(bean.tid->c_str(),bean.tid->size());                          //----bean.tid->size()
+			logs.append_unsafe(" [", EZLOG_STRING_LEN_OF_CHAR_ARRAY(" ["));                  //2
+			logs.append_unsafe(ctimestr, ctimestr_len);                                      //----ctimestr_len
+			logs.append_unsafe("] [", EZLOG_STRING_LEN_OF_CHAR_ARRAY("] ["));                //3
 
-			logs.append_unsafe(bean.file, bean.fileLen);                                                //----bean.fileLen
-			logs.append_unsafe(':');                                                                    //1
-			logs.append_unsafe(bean.line);                                                                //20
-			logs.append_unsafe("] ", EZLOG_STRING_LEN_OF_CHAR_ARRAY("] "));                        //2
-			logs.append_unsafe(bean.str_view().data(),bean.str_view().size());                                                //----bean.str_view()->size()
-//static len1=56+ EZLOG_CTIME_MAX_LEN
-//total =len1 +bean.fileLen+bean.str_view()->size()
+			logs.append_unsafe(bean.file, bean.fileLen);                                     //----bean.fileLen
+			logs.append_unsafe(':');                                                         //1
+			logs.append_unsafe(bean.line);                                                   //5 see EZLOG_UINT16_MAX_CHAR_LEN
+			logs.append_unsafe("] ", EZLOG_STRING_LEN_OF_CHAR_ARRAY("] "));                  //2
+			logs.append_unsafe(bean.str_view().data(),bean.str_view().size());               //----bean.str_view()->size()
+			//static L1=1+1+6+2+3+1+5+2=21
+			//dynamic L2= bean.tid->size() + ctimestr_len + bean.fileLen+ bean.str_view().size()
+			//reserve L1+L2 bytes
 		}
 
 		inline void EZLogOutputThread::getMergePermission(std::unique_lock<std::mutex> &lk)
@@ -1657,7 +1645,7 @@ namespace ezlogspace
 					if (mtx.try_lock())
 					{
 						mtx.unlock();
-						DEBUG_PRINT( EZLOG_LEVEL_VERBOSE, "thrd %s exit.move to toPrintQueue\n", threadStru.tid );
+						DEBUG_PRINT( EZLOG_LEVEL_VERBOSE, "thrd %s exit.move to toPrintQueue\n", threadStru.tid->c_str() );
 						s_threadStruQueue.toPrintQueue.emplace_back(*it);
 						it = s_threadStruQueue.availQueue.erase(it);
 					} else
@@ -1687,8 +1675,8 @@ namespace ezlogspace
 		void EZLogOutputThread::freeInternalThreadMemory()
 		{
 			if( s_pThreadLocalStru == nullptr ) { return; }
-			DEBUG_PRINT( EZLOG_LEVEL_INFO, "free mem tid: %s\n", s_pThreadLocalStru->tid );
-			ezfree((char*)s_pThreadLocalStru->tid);
+			DEBUG_PRINT( EZLOG_LEVEL_INFO, "free mem tid: %s\n", s_pThreadLocalStru->tid->c_str() );
+			ezdelete(s_pThreadLocalStru->tid);
 			s_pThreadLocalStru->tid = NULL;
 			EzLogBeanCircularQueue temp(0);
 			s_pThreadLocalStru->vcache.swap(temp);//free memory
