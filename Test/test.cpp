@@ -24,7 +24,8 @@ using namespace ezlogspace;
 //#define file_multi_thread_memory_leak_stress_test_____________________
 //#define ezlog_string_test_____________________
 //#define ezlog_string_extend_test_____________________
-#define terminal_single_thread_long_string_log_test_____________________
+//#define terminal_single_thread_long_string_log_test_____________________
+#define file_multi_thread_print_level_test_____________________
 
 uint64_t complexCalFunc(uint64_t x)
 {
@@ -408,11 +409,11 @@ TEST_CASE("file_multi_thread_close_print_benchmark_test_____________________")
 				EZLOGD << "index= " << index << " j= " << j ;
 				if(j==loops/4)
 				{
-					EzLog::setState(ezlogspace::CLOSED);
+					EzLog::setLogLevel(ezlogspace::CLOSED);
 				}
 				if(j==loops*3/4)
 				{
-					EzLog::setState(ezlogspace::OPEN);
+					EzLog::setLogLevel(ezlogspace::OPEN);
 				}
 			}
 		}, i));
@@ -712,6 +713,61 @@ TEST_CASE("terminal_single_thread_long_string_log_test_____________________")
 	EZLOGI << "end terminal_single_thread_long_string_log_test_____________________";
 
 }
+#endif
+
+#ifdef file_multi_thread_print_level_test_____________________
+
+TEST_CASE("file_multi_thread_print_level_test_____________________")
+{
+	EZLOGI << "file_multi_thread_print_level_test_____________________";
+#ifdef NDEBUG
+	constexpr uint64_t loops = 10000 + 2 * (1 << 20);
+#else
+	EZLOGI << "10 threads 128*1k loops test";
+		constexpr uint64_t loops = 10000 + 128*(1 << 10);
+#endif
+
+	SimpleTimer s1m;
+
+	static bool begin = false;
+	static condition_variable_any cva;
+	static shared_mutex smtx;
+
+	std::vector<std::thread> vec;
+
+	for (int i = EzLogLeveLEnum::ALWAYS; i <= EzLogLeveLEnum::VERBOSE; i++)
+	{
+		vec.emplace_back(thread([&](int index) -> void {
+			shared_lock<shared_mutex> slck(smtx);
+			cva.wait(slck, []() -> bool { return begin; });
+
+			for (uint64_t j = 1; j <= loops; j++)
+			{
+				EZLOG(index) << "index= " << index << " j= " << j;
+				if (index == EzLogLeveLEnum::ALWAYS && (j * 8) % loops == 0)
+				{
+					uint32_t v = j * 8 / loops;  //1-8
+					EzLog::setLogLevel((ezlogspace::EzLogLeveLEnum) (9 - v));
+				}
+			}
+		}, i));
+	}
+
+	unique_lock<shared_mutex> ulk(smtx);
+	begin = true;
+	ulk.unlock();
+	cva.notify_all();
+	for (auto &th : vec)
+	{
+		th.join();
+	}
+	uint64_t us = s1m.GetMicrosecondsUpToNOW();
+	EzLog::setLogLevel(ezlogspace::EzLogLeveLEnum::VERBOSE);
+	EZCOUT << (1000.0f * EzLog::getPrintedLogs() / us) << " logs per millisecond\n";
+	EZCOUT << 1.0 * us / (EzLog::getPrintedLogs()) << " us per log\n";
+	EZLOG(ezlogspace::EzLogLeveLEnum::VERBOSE) << "Complete!\n";
+}
+
 #endif
 
 #endif

@@ -41,10 +41,10 @@
 #define EZLOG_REALLOC_FUNCTION(ptr, new_size)         realloc(ptr,new_size)
 #define EZLOG_FREE_FUNCTION(ptr)                      free(ptr)
 
-#define EZLOG_SUPPORT_CLOSE_LOG           FALSE
 #define EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL   FALSE
-#define EZLOG_LOG_LEVEL    9
+#define EZLOG_STATIC_LOG__LEVEL    9          //set the static log level,dynamic log level will always <= static log level
 
+#define       EZLOG_LEVEL_CLOSE     1
 #define       EZLOG_LEVEL_COUT     2
 #define       EZLOG_LEVEL_ALWAYS    3
 #define       EZLOG_LEVEL_FATAL    4
@@ -54,7 +54,6 @@
 #define       EZLOG_LEVEL_DEBUG    8
 #define       EZLOG_LEVEL_VERBOSE    9
 
-#define      EZLOG_TIME_T_IS_64BIT  TRUE
 /**************************************************MACRO FOR USER**************************************************/
 
 
@@ -1918,7 +1917,7 @@ namespace ezlogspace
 				static_assert(std::is_trivially_destructible<EzLogTime>::value, "fatal error");
 				//p->time().~EzLogTime();
 				p->str().~EzLogString();
-				DEBUG_RUN(p->flag0 = p->flag1 = p->flag2 = 1;);
+				DEBUG_RUN( p->flag3 = 3, p->flag2 = 2, p->flag1 = 1;);
 				EZLOG_FREE_FUNCTION(p);
 			}
 
@@ -1970,11 +1969,14 @@ namespace ezlogspace
 		size_t singleFilePrintedLogSize = 0;
 	};
 
-	enum EzLogStateEnum
+	enum EzLogLeveLEnum
 	{
-		CLOSED,
-		PERMANENT_CLOSED,
-		OPEN,
+		CLOSED = 1,
+		COUT, ALWAYS, FATAL, ERROR, WARN, INFO, DEBUG, VERBOSE,
+		OPEN = VERBOSE,
+		STATIC_LOG_LEVEL = EZLOG_STATIC_LOG__LEVEL,
+		MIN = COUT,
+		MAX= VERBOSE
 	};
 
 	class EzLog
@@ -1998,18 +2000,18 @@ namespace ezlogspace
 
 		static uint64_t getPrintedLogsLength();
 
-#if EZLOG_SUPPORT_CLOSE_LOG==TRUE
+#if EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL==TRUE
 
-		static void setState(EzLogStateEnum state);
+		static void setLogLevel(EzLogLeveLEnum level);
 
-		static EzLogStateEnum getState();
+		static EzLogLeveLEnum getDynamicLogLevel();
 #else
 
-		static void setState(EzLogStateEnum state)
+		static void setLogLevel(EzLogLeveLEnum level)
 		{}
 
-		static constexpr EzLogStateEnum getState()
-		{ return OPEN; }
+		static constexpr EzLogLeveLEnum getDynamicLogLevel()
+		{ return EzLogLeveLEnum::STATIC_LOG_LEVEL; }
 #endif
 
 	private:
@@ -2019,49 +2021,38 @@ namespace ezlogspace
 
 	};
 
-#define EZLOG_INTERNAL_CREATE_EZLOGBEAN(lv) []()->ezlogspace::internal::EzLogBean *{		          	        \
-	static_assert(__LINE__<=UINT16_MAX,"fatal error,file line too big");                                          \
-	static_assert(sizeof(__FILE__)-1<=UINT16_MAX,"fatal error,file path is too long");                            \
-	using EzLogBean=ezlogspace::internal::EzLogBean;                                                              \
-    if(ezlogspace::EzLog::getState()!=ezlogspace::OPEN){return nullptr;}                                         \
-	EzLogBean &bean = *EzLogBean::CreateInstance();                                                                \
-	bean.tid = ezlogspace::internal::s_tid;                                                                       \
-	bean.file = __FILE__;                                                                                           \
-	bean.fileLen = (uint16_t)(sizeof(__FILE__)-1);                                                                  \
-	bean.line = (uint16_t)(__LINE__);                                                                               \
-	bean.level = ezlogspace::LOG_PREFIX[lv];                                                                       \
-	bean.toTernimal=lv==EZLOG_LEVEL_COUT;                                                                          \
-	return &bean;                                                                                                    \
-}()
-
+#if (defined(EZLOG_USE_STRING) && defined(EZLOG_USE_STRING_EXTEND)) || (!defined(EZLOG_USE_STRING) && !defined(EZLOG_USE_STRING_EXTEND))
+#error "only one stratrgy can be and must be selected"
+#endif
 
 #define EZLOG_INTERNAL_CREATE_EZLOG_STREAM(lv)                                                                                                            \
-	ezlogspace::EzLog::getState()!=ezlogspace::OPEN?                                                                                                       \
+	(lv)>ezlogspace::EzLog::getDynamicLogLevel()?                                                                                                       \
 	ezlogspace::EzLogStream():                                                                                                                               \
-	ezlogspace::EzLogStream(lv,                                                                                                                              \
-	[]()->const char*{return __FILE__;}(),                                                                                                                   \
+	ezlogspace::EzLogStream((lv),                                                                                                                              \
+	[&]()->const char*{ assert((lv)>=ezlogspace::EzLogLeveLEnum::MIN);assert((lv)<=ezlogspace::EzLogLeveLEnum::MAX); return __FILE__;}(),                     \
 	[]()->uint16_t{static_assert( sizeof( __FILE__ ) - 1 <= UINT16_MAX, "fatal error,file path is too long" ); return (uint16_t)(sizeof(__FILE__)-1);}(),  \
 	[]()->uint16_t{static_assert(__LINE__<=UINT16_MAX,"fatal error,file line too big"); return  (uint16_t)(__LINE__);}())
 
 
-
 #ifdef EZLOG_USE_STRING_EXTEND
 	class EzLogStream : public ezlogspace::internal::EzLogStringExtend<ezlogspace::internal::EzLogBean>
+	{
+		using EzLogStringExtend =ezlogspace::internal::EzLogStringExtend<ezlogspace::internal::EzLogBean>;
+		using StringType =EzLogStringExtend;
 #else
 	class EzLogStream : public ezlogspace::internal::EzLogString
-#endif // EZLOG_USE_STRING_EXTEND
 	{
-	public:
-		using EzLogBean = ezlogspace::internal::EzLogBean;
 		using EzLogString =ezlogspace::internal::EzLogString;
-		using EzLogStringExtend =ezlogspace::internal::EzLogStringExtend<ezlogspace::internal::EzLogBean>;
+		using StringType =EzLogString;
+#endif
+		using EzLogBean = ezlogspace::internal::EzLogBean;
 		using EzLogStringEnum =ezlogspace::internal::EzLogStringEnum;
 
-#ifdef EZLOG_USE_STRING_EXTEND
-
-		inline EzLogStream( uint32_t lv, const char* file, uint16_t fileLen, uint16_t line ) :
-			EzLogStringExtend( EzLogStringEnum::DEFAULT, EZLOG_SINGLE_LOG_RESERVE_LEN )
+	public:
+		inline EzLogStream(uint32_t lv, const char *file, uint16_t fileLen, uint16_t line) : StringType(
+				EzLogStringEnum::DEFAULT, EZLOG_SINGLE_LOG_RESERVE_LEN)
 		{
+			init_bean();
 			EzLogBean& bean = *ext();
 			PlacementNew( &bean.ezLogTime, ezlogspace::internal::ezlogtimespace::EzLogTimeEnum::NOW );
 			bean.tid = ezlogspace::internal::s_tid;
@@ -2072,51 +2063,55 @@ namespace ezlogspace
 			bean.toTernimal = lv == EZLOG_LEVEL_COUT;
 		}
 
-		inline  EzLogStream() :
-			EzLogStringExtend( EzLogStringEnum::DEFAULT, EZLOG_SINGLE_LOG_RESERVE_LEN )
+		inline EzLogStream() : StringType(EzLogStringEnum::DEFAULT, EZLOG_SINGLE_LOG_RESERVE_LEN)
 		{
+			init_bean();
 			ext()->level = '~';
 		}
 
+#ifdef EZLOG_USE_STRING_EXTEND
 		inline  ~EzLogStream()
 		{
-#if EZLOG_SUPPORT_CLOSE_LOG == TRUE
-			if(ext()->level == '~') { return; }
-#endif
-			if (pCore != nullptr)
+			if( ext()->level == '~' ) { return; }
+			if( pCore != nullptr )
 			{
-				DEBUG_RUN(EzLogBean::check(this->ext()));
-				EzLog::pushLog(this->ext());
+				DEBUG_RUN( EzLogBean::check( this->ext() ) );
+				EzLog::pushLog( this->ext() );
 				pCore = nullptr;//prevent delete
 			}
 		}
 
+		inline void init_bean() {}
 #else
-		inline EzLogStream( EzLogBean* pLogBean ) :
-			EzLogString( EzLogStringEnum::DEFAULT, EZLOG_SINGLE_LOG_RESERVE_LEN ),
-			m_pBean( pLogBean )
-		{
-		}
 
 		inline  ~EzLogStream()
 		{
-#if EZLOG_SUPPORT_CLOSE_LOG == TRUE
-			if (m_pBean == nullptr)	{ return; }
-#endif
-			//force move this's string to m_pBean
-			EzLogString& str=m_pBean->str();
-			str.m_front=this->m_front;
-			str.m_end=this->m_end;
-			str.m_cap=this->m_cap;
-			this->m_front= nullptr;
-#ifndef NDEBUG
-			this->m_end= nullptr;
-			this->m_cap= nullptr;
-#endif
-			EzLog::pushLog(m_pBean);
+			if (ext()->level == '~') { return; }
+			if (m_front != nullptr)
+			{
+				m_pBean->str().m_front = nullptr;//prevent delete
+				swap(m_pBean->str());//force move this's string to m_pBean
+				EzLog::pushLog(m_pBean);
+			}
 		}
 
+		//overwrite
+		inline const EzLogBean *ext() const
+		{
+			return m_pBean;
+		}
+
+		inline EzLogBean *ext()
+		{
+			return m_pBean;
+		}
+
+		inline void init_bean()
+		{
+			m_pBean = EzLogBean::CreateInstance();
+		}
 #endif
+
 		inline EzLogStream&operator()(EzLogStringEnum ,const char* s,size_t length)
 		{
 			this->append(s,length);
@@ -2152,17 +2147,17 @@ namespace ezlogspace
 			return *this;
 		}
 
-        inline EzLogStream &operator<<(char c)
-        {
+		inline EzLogStream &operator<<(char c)
+		{
 			*this += c;
-            return *this;
-        }
+			return *this;
+		}
 
-        inline EzLogStream &operator<<(unsigned char c)
-        {
+		inline EzLogStream &operator<<(unsigned char c)
+		{
 			*this += c;
-            return *this;
-        }
+			return *this;
+		}
 
 		inline EzLogStream &operator<<(const std::string &s)
 		{
@@ -2191,28 +2186,28 @@ namespace ezlogspace
 		inline EzLogStream &operator<<(uint64_t s)
 		{
 			*this += s;
-            return *this;
-        }
+			return *this;
+		}
 
 		inline EzLogStream &operator<<(int64_t s)
 		{
 			*this += s;
-            return *this;
+			return *this;
 		}
 
 		inline EzLogStream &operator<<(int32_t s)
 		{
 			*this += s;
-            return *this;
+			return *this;
 		}
 
 		inline EzLogStream &operator<<(uint32_t s)
 		{
-            *this += s;
-            return *this;
+			*this += s;
+			return *this;
 		}
 
-	public:
+	private:
 #ifdef EZLOG_USE_STRING
 		EzLogBean* m_pBean;
 #endif // EZLOG_USE_STRING
@@ -2244,9 +2239,6 @@ namespace ezlogspace
 #error "only one stratrgy can be and must be selected"
 #endif
 
-#if (defined(EZLOG_USE_STRING) && defined(EZLOG_USE_STRING_EXTEND)) || (!defined(EZLOG_USE_STRING) && !defined(EZLOG_USE_STRING_EXTEND))
-#error "only one stratrgy can be and must be selected"
-#endif
 
 static_assert(EZLOG_GLOBAL_QUEUE_MAX_SIZE > 0, "fatal err!");
 static_assert(EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE > 0, "fatal err!");
@@ -2254,121 +2246,60 @@ static_assert(EZLOG_GLOBAL_QUEUE_MAX_SIZE >= 2 * EZLOG_SINGLE_THREAD_QUEUE_MAX_S
 			  "fatal err!");   //see func moveLocalCacheToGlobal
 
 
+//------------------------------------------define micro for user------------------------------------------//
 #define EZLOG_CSTR(str)   [](){ static_assert(!std::is_pointer<decltype(str)>::value,"must be a c-style array");return ezlogspace::internal::EzLogStringInternal::EzlogStringEnum::DEFAULT; }(),str,sizeof(str)-1
 
-
-//if not support dynamic log level
-#if EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL == FALSE
-
-#ifdef EZLOG_USE_STRING_EXTEND
-
-
-#if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_COUT
+#if EZLOG_STATIC_LOG__LEVEL >= EZLOG_LEVEL_COUT
 #define EZCOUT   (EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_COUT)  )
 #else
 #define EZCOUT   ( ezlogspace::EzLogNoneStream()  )
 #endif
 
-#if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_ALWAYS
+#if EZLOG_STATIC_LOG__LEVEL >= EZLOG_LEVEL_ALWAYS
 #define EZLOGA    (EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_ALWAYS) )
 #else
 #define EZLOGA   ( ezlogspace::EzLogNoneStream()  )
 #endif
 
-#if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_FATAL
+#if EZLOG_STATIC_LOG__LEVEL >= EZLOG_LEVEL_FATAL
 #define EZLOGF    (EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_FATAL) )
 #else
 #define EZLOGF   ( ezlogspace::EzLogNoneStream()  )
 #endif
 
-#if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_ERROR
+#if EZLOG_STATIC_LOG__LEVEL >= EZLOG_LEVEL_ERROR
 #define EZLOGE    (EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_ERROR) )
 #else
 #define EZLOGE   (   ezlogspace::EzLogNoneStream()  )
 #endif
 
-#if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_WARN
+#if EZLOG_STATIC_LOG__LEVEL >= EZLOG_LEVEL_WARN
 #define EZLOGW    (EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_WARN) )
 #else
 #define EZLOGW   (   ezlogspace::EzLogNoneStream()  )
 #endif
 
-#if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_INFO
+#if EZLOG_STATIC_LOG__LEVEL >= EZLOG_LEVEL_INFO
 #define EZLOGI    (EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_INFO) )
 #else
 #define EZLOGI   (   ezlogspace::EzLogNoneStream()  )
 #endif
 
-#if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_DEBUG
+#if EZLOG_STATIC_LOG__LEVEL >= EZLOG_LEVEL_DEBUG
 #define EZLOGD    (EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_DEBUG) )
 #else
 #define EZLOGD    (   ezlogspace::EzLogNoneStream()  )
 #endif
 
-#if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_VERBOSE
+#if EZLOG_STATIC_LOG__LEVEL >= EZLOG_LEVEL_VERBOSE
 #define EZLOGV    (EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_VERBOSE) )
 #else
 #define EZLOGV    (   ezlogspace::EzLogNoneStream()  )
 #endif
 
+//not recommend,use EZCOUT to EZLOGV for better performance
+#define EZLOG(lv)    (EZLOG_INTERNAL_CREATE_EZLOG_STREAM(lv) )
+//------------------------------------------end define micro for user------------------------------------------//
 
-
-#elif defined(EZLOG_USE_STRING)
-
-#if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_COUT
-#define EZCOUT   ( ezlogspace::EzLogStream(EZLOG_INTERNAL_CREATE_EZLOGBEAN(EZLOG_LEVEL_COUT) ) )
-#else
-#define EZCOUT   ( ezlogspace::EzLogNoneStream()  )
-#endif
-
-#if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_ALWAYS
-#define EZLOGA   ( ezlogspace::EzLogStream(EZLOG_INTERNAL_CREATE_EZLOGBEAN(EZLOG_LEVEL_ALWAYS) ) )
-#else
-#define EZLOGA   ( ezlogspace::EzLogNoneStream()  )
-#endif
-
-#if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_FATAL
-#define EZLOGF   ( ezlogspace::EzLogStream(EZLOG_INTERNAL_CREATE_EZLOGBEAN(EZLOG_LEVEL_FATAL) ) )
-#else
-#define EZLOGF   ( ezlogspace::EzLogNoneStream()  )
-#endif
-
-#if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_ERROR
-#define EZLOGE   ( ezlogspace::EzLogStream(EZLOG_INTERNAL_CREATE_EZLOGBEAN(EZLOG_LEVEL_ERROR) ) )
-#else
-#define EZLOGE   (   ezlogspace::EzLogNoneStream()  )
-#endif
-
-#if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_WARN
-#define EZLOGW   ( ezlogspace::EzLogStream(EZLOG_INTERNAL_CREATE_EZLOGBEAN(EZLOG_LEVEL_WARN) ) )
-#else
-#define EZLOGW   (   ezlogspace::EzLogNoneStream()  )
-#endif
-
-#if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_INFO
-#define EZLOGI   ( ezlogspace::EzLogStream(EZLOG_INTERNAL_CREATE_EZLOGBEAN(EZLOG_LEVEL_INFO) ) )
-#else
-#define EZLOGI   (   ezlogspace::EzLogNoneStream()  )
-#endif
-
-#if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_DEBUG
-#define EZLOGD    ( ezlogspace::EzLogStream(EZLOG_INTERNAL_CREATE_EZLOGBEAN(EZLOG_LEVEL_DEBUG) ) )
-#else
-#define EZLOGD    (   ezlogspace::EzLogNoneStream()  )
-#endif
-
-#if EZLOG_LOG_LEVEL >= EZLOG_LEVEL_VERBOSE
-#define EZLOGV    ( ezlogspace::EzLogStream(EZLOG_INTERNAL_CREATE_EZLOGBEAN(EZLOG_LEVEL_VERBOSE) ) )
-#else
-#define EZLOGV    (   ezlogspace::EzLogNoneStream()  )
-#endif
-
-#endif
-
-
-//if support dynamic log level
-#else
-
-#endif
 
 #endif //EZLOG_EZLOG_H

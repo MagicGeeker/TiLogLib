@@ -35,7 +35,7 @@
 #if defined(NDEBUG) && !defined(EZLOG_ENABLE_PRINT_ON_RELEASE)
 #define DEBUG_PRINT(lv,fmt, ... )
 #else
-#define DEBUG_PRINT(lv, ...)  do{ if_constexpr(lv<=EZLOG_LOG_LEVEL)  printf(__VA_ARGS__); }while(0)
+#define DEBUG_PRINT(lv, ...)  do{ if_constexpr(lv<=EZLOG_STATIC_LOG__LEVEL)  printf(__VA_ARGS__); }while(0)
 #endif
 
 #if !defined(NDEBUG) || defined(EZLOG_ENABLE_ASSERT_ON_RELEASE)
@@ -714,15 +714,15 @@ namespace ezlogspace
 
 		public:
 			//these functions are not thread safe
-			static void setState(EzLogStateEnum state);
+			static void setLogLevel(EzLogLeveLEnum level);
 
-			static EzLogStateEnum getState();
+			static EzLogLeveLEnum getDynamicLogLevel();
 
 			static EzLoggerPrinter *getCurrentPrinter();
 
 		private:
 			static EzLoggerPrinter *s_printer;
-			static EzLogStateEnum s_state;
+			static EzLogLeveLEnum s_level;
 			static bool s_inited;
 		};
 
@@ -855,7 +855,7 @@ namespace ezlogspace
 
 
 		EzLoggerPrinter *EzLogImpl::s_printer = nullptr;
-		EzLogStateEnum EzLogImpl::s_state = OPEN;
+		EzLogLeveLEnum EzLogImpl::s_level = OPEN;
 		bool EzLogImpl::s_inited = init();
 
 
@@ -929,14 +929,14 @@ namespace ezlogspace
 			return EzLoggerFilePrinter::getInstance();
 		}
 
-		void EzLogImpl::setState(EzLogStateEnum state)
+		void EzLogImpl::setLogLevel(EzLogLeveLEnum level)
 		{
-			s_state=state;
+			s_level = level;
 		}
 
-		EzLogStateEnum EzLogImpl::getState()
+		EzLogLeveLEnum EzLogImpl::getDynamicLogLevel()
 		{
-			return s_state;
+			return s_level;
 		}
 
 		EzLoggerPrinter *EzLogImpl::getCurrentPrinter()
@@ -1478,14 +1478,6 @@ namespace ezlogspace
 			freeInternalThreadMemory();//this thread is no need log
 			while (true)
 			{
-				if (EzLog::getState() == PERMANENT_CLOSED)//TODO
-				{
-					s_existThreads--;
-					s_to_exit = true;
-					AtExit();
-					return;
-				}
-
 				std::unique_lock<std::mutex> lk_merge(s_mtxMerge);
 				s_cvMerge.wait(lk_merge, []() -> bool {
 					return (s_merging && s_inited);
@@ -1747,15 +1739,15 @@ namespace ezlogspace
 		return EzLogImpl::getPrintedLogsLength();
 	}
 
-#if EZLOG_SUPPORT_CLOSE_LOG==TRUE
-	void EzLog::setState(EzLogStateEnum state)
+#if EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL==TRUE
+	void EzLog::setLogLevel(EzLogLeveLEnum level)
 	{
-		EzLogImpl::setState(state);
+		EzLogImpl::setLogLevel(level);
 	}
 
-	EzLogStateEnum EzLog::getState()
+	EzLogLeveLEnum EzLog::getDynamicLogLevel()
 	{
-		return EzLogImpl::getState();
+		return EzLogImpl::getDynamicLogLevel();
 	}
 #endif
 
