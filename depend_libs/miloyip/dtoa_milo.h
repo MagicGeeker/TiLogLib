@@ -385,9 +385,25 @@ inline void Prettify(char* buffer, int length, int k) {
 }
 
 inline void dtoa_milo(double value, char* buffer) {
+    if (isnan(value))
+    {
+        buffer[0] = 'n';
+        buffer[1] = 'a';
+        buffer[2] = 'n';
+        buffer[3] = '\0';
+        return;
+    }
+    else if (isinf(value))
+    {
+        buffer[0] = 'i';
+        buffer[1] = 'n';
+        buffer[2] = 'f';
+        buffer[3] = '\0';
+        return;
+    }
     // Not handling NaN and inf
-    assert(!isnan(value));
-    assert(!isinf(value));
+    //assert(!isnan(value));
+    //assert(!isinf(value));
 
     if (value == 0) {
         buffer[0] = '0';
