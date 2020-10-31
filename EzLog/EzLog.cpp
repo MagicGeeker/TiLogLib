@@ -35,7 +35,7 @@
 #if defined(NDEBUG) && !defined(EZLOG_ENABLE_PRINT_ON_RELEASE)
 #define DEBUG_PRINT(lv,fmt, ... )
 #else
-#define DEBUG_PRINT(lv, ...)  do{ if_constexpr(lv<=EZLOG_STATIC_LOG__LEVEL)  printf(__VA_ARGS__); }while(0)
+#define DEBUG_PRINT(lv, ...)  do{ if_constexpr(lv<=EZLOG_STATIC_LOG__LEVEL) { printf(" %u ",s_internalLogFlag++ );printf(__VA_ARGS__);} }while(0)
 #endif
 
 #if !defined(NDEBUG) || defined(EZLOG_ENABLE_ASSERT_ON_RELEASE)
@@ -99,6 +99,7 @@ using namespace ezlogspace;
 
 namespace ezloghelperspace
 {
+	static atomic_uint32_t s_internalLogFlag(0);
 	static uint32_t FastRand()
 	{
 		static const uint32_t M = 2147483647L;  // 2^31-1
@@ -533,9 +534,8 @@ namespace ezlogspace
 
 		struct ThreadStruQueue
 		{
-			//if S=global print string
 			List<ThreadStru*> availQueue;   //thread is live
-			List<ThreadStru*> toPrintQueue; //thread is dead, but some logs have not merge to S,or S have not be printed
+			List<ThreadStru*> waitMergeQueue; //thread is dead, but some logs have not merge to global print string
 			List<ThreadStru*> toDelQueue;//thread is dead and no logs exist,need to delete by gc thread
 		};
 
@@ -722,7 +722,7 @@ namespace ezlogspace
 
 		private:
 			static EzLoggerPrinter *s_printer;
-			static EzLogLeveLEnum s_level;
+			static volatile EzLogLeveLEnum s_level;
 			static bool s_inited;
 		};
 
@@ -855,7 +855,7 @@ namespace ezlogspace
 
 
 		EzLoggerPrinter *EzLogImpl::s_printer = nullptr;
-		EzLogLeveLEnum EzLogImpl::s_level = OPEN;
+		volatile EzLogLeveLEnum EzLogImpl::s_level = OPEN;
 		bool EzLogImpl::s_inited = init();
 
 
@@ -1167,6 +1167,8 @@ namespace ezlogspace
 				};
 
 				size_t vcachePreSize = vcache.size();
+				DEBUG_PRINT(EZLOG_LEVEL_DEBUG, "MergeSortForGlobalQueue ptid %p , tid %s , vcachePreSize= %u\n", 
+					threadStru.tid, (threadStru.tid==nullptr?"": threadStru.tid->c_str()),(unsigned)vcachePreSize);
 				if(vcachePreSize == 0 ) {
 					continue;
 				}
@@ -1239,12 +1241,15 @@ namespace ezlogspace
 			std::multiset<EzLogBeanVector, EzLogCircularQueueComp> s;  //set of ThreadStru cache
 			EzLogBean bean;
 			bean.time()=s_log_last_time;
+			DEBUG_PRINT(EZLOG_LEVEL_INFO, "Begin of MergeSortForGlobalQueue s_globalCache.vcache size= %u\n", (unsigned)s_globalCache.vcache.size());
 			std::stable_sort(s_globalCache.vcache.begin(), s_globalCache.vcache.end(), EzLogBeanPtrComp() );
 			s.emplace( s_globalCache.vcache );//insert global cache first
 			{
-				unique_lock<mutex> lk_queue;
+				lock_guard<mutex> lgd(s_mtxQueue);
+				DEBUG_PRINT(EZLOG_LEVEL_INFO, "InsertEveryThreadCachedLogToSet availQueue.size()= %u\n", (unsigned)s_threadStruQueue.availQueue.size());
 				InsertEveryThreadCachedLogToSet(s_threadStruQueue.availQueue, s, bean);
-				InsertEveryThreadCachedLogToSet(s_threadStruQueue.toPrintQueue, s, bean);
+				DEBUG_PRINT(EZLOG_LEVEL_INFO, "InsertEveryThreadCachedLogToSet waitMergeQueue.size()= %u\n", (unsigned)s_threadStruQueue.waitMergeQueue.size());
+				InsertEveryThreadCachedLogToSet(s_threadStruQueue.waitMergeQueue, s, bean);
 			}
 
 			while(s.size()>=2 )//merge sort and finally get one sorted vector
@@ -1264,7 +1269,7 @@ namespace ezlogspace
 				s_globalCache.vcache = *s.begin();
 				v.clear();
 			}
-			
+			DEBUG_PRINT(EZLOG_LEVEL_INFO, "End of MergeSortForGlobalQueue s_globalCache.vcache size= %u\n", (unsigned)s_globalCache.vcache.size());
 			s_log_last_time = EzLogTime::now();
 		}
 
@@ -1286,6 +1291,7 @@ namespace ezlogspace
 			size_t len = 0;
 			EzLogString logs;
 
+			DEBUG_PRINT(EZLOG_LEVEL_INFO, "getMergedLogString,prepare to merge s_globalCache to s_global_cache_string\n");
 			for (EzLogBean *pBean:s_globalCache.vcache)
 			{
 				DEBUG_ASSERT(pBean != nullptr);
@@ -1311,6 +1317,7 @@ namespace ezlogspace
 				s_printedLogs++;
 			}
 
+			DEBUG_PRINT(EZLOG_LEVEL_INFO, "End of getMergedLogString,s_global_cache_string size= %u\n", (unsigned)str.size());
 			return str;
 		}
 
@@ -1465,6 +1472,8 @@ namespace ezlogspace
 		{
 			unique_lock<mutex> ulk;
 			getMoveGarbagePermission(ulk);
+			DEBUG_PRINT(EZLOG_LEVEL_INFO, "clearGlobalCacheQueueAndNotifyGC s_garbages.vcache.size() %u,s_globalCache.vcache.size() %u\n", 
+				(unsigned)s_garbages.vcache.size(), (unsigned)s_globalCache.vcache.size());
 			s_garbages.vcache.insert(s_garbages.vcache.end(), s_globalCache.vcache.begin(), s_globalCache.vcache.end());
 			s_globalCache.vcache.resize(0);
 
@@ -1514,6 +1523,7 @@ namespace ezlogspace
 			s_printedLogsLength += mergedLogString.length();
 
 			EzLoggerPrinter *printer = EzLogImpl::getCurrentPrinter();
+			DEBUG_PRINT(EZLOG_LEVEL_INFO, "prepare to print %u bytes\n", (unsigned)mergedLogString.size());
 			printer->onAcceptLogs(mergedLogString.data(), mergedLogString.size());
 			if (bufSize >= EZLOG_GLOBAL_BUF_SIZE)
 			{
@@ -1541,8 +1551,20 @@ namespace ezlogspace
 				std::unique_lock<std::mutex> lk_queue(s_mtxQueue,std::try_to_lock);
 				if(lk_queue.owns_lock())
 				{
-					s_threadStruQueue.toDelQueue.splice(s_threadStruQueue.toDelQueue.begin(),
-														s_threadStruQueue.toPrintQueue);
+					for (auto it = s_threadStruQueue.waitMergeQueue.begin(); it != s_threadStruQueue.waitMergeQueue.end();)
+					{
+						ThreadStru &threadStru = *(*it);
+						//to need to lock threadStru.spinLock here
+						if (threadStru.vcache.empty())
+						{
+							DEBUG_PRINT(EZLOG_LEVEL_VERBOSE, "thrd %s exit and has been merged.move to toDelQueue\n", threadStru.tid->c_str());
+							s_threadStruQueue.toDelQueue.emplace_back(*it);
+							it = s_threadStruQueue.waitMergeQueue.erase(it);
+						} else
+						{
+							++it;
+						}
+					}
 					lk_queue.unlock();
 				}
 
@@ -1610,6 +1632,7 @@ namespace ezlogspace
 			{
 				if (s_to_exit)
 				{
+					DEBUG_PRINT(EZLOG_LEVEL_INFO, "poll thrd prepare to exit\n");
 					return false;
 				}
 				this_thread::sleep_for(chrono::microseconds(s_pollPeriodus));
@@ -1637,8 +1660,8 @@ namespace ezlogspace
 					if (mtx.try_lock())
 					{
 						mtx.unlock();
-						DEBUG_PRINT( EZLOG_LEVEL_VERBOSE, "thrd %s exit.move to toPrintQueue\n", threadStru.tid->c_str() );
-						s_threadStruQueue.toPrintQueue.emplace_back(*it);
+						DEBUG_PRINT(EZLOG_LEVEL_VERBOSE, "thrd %s exit.move to waitMergeQueue\n", threadStru.tid->c_str());
+						s_threadStruQueue.waitMergeQueue.emplace_back(*it);
 						it = s_threadStruQueue.availQueue.erase(it);
 					} else
 					{
