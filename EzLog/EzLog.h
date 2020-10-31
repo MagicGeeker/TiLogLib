@@ -2035,16 +2035,15 @@ namespace ezlogspace
 
 
 #ifdef EZLOG_USE_STRING_EXTEND
-	class EzLogStream : public ezlogspace::internal::EzLogStringExtend<ezlogspace::internal::EzLogBean>
-	{
-		using EzLogStringExtend =ezlogspace::internal::EzLogStringExtend<ezlogspace::internal::EzLogBean>;
-		using StringType =EzLogStringExtend;
+#define EZLOG_INTERNAL_STRING_TYPE ezlogspace::internal::EzLogStringExtend<ezlogspace::internal::EzLogBean>
 #else
-	class EzLogStream : public ezlogspace::internal::EzLogString
-	{
-		using EzLogString =ezlogspace::internal::EzLogString;
-		using StringType =EzLogString;
+#define EZLOG_INTERNAL_STRING_TYPE ezlogspace::internal::EzLogString
 #endif
+	class EzLogStream : public EZLOG_INTERNAL_STRING_TYPE
+	{
+		using StringType =EZLOG_INTERNAL_STRING_TYPE;
+		using EzLogStringExtend =ezlogspace::internal::EzLogStringExtend<ezlogspace::internal::EzLogBean>;
+		using EzLogString =ezlogspace::internal::EzLogString;
 		using EzLogBean = ezlogspace::internal::EzLogBean;
 		using EzLogStringEnum =ezlogspace::internal::EzLogStringEnum;
 
@@ -2212,6 +2211,7 @@ namespace ezlogspace
 		EzLogBean* m_pBean;
 #endif // EZLOG_USE_STRING
 	};
+#undef EZLOG_INTERNAL_STRING_TYPE
 
 	class EzLogNoneStream
 	{

@@ -32,10 +32,20 @@
 //#define EZLOG_ENABLE_ASSERT_ON_RELEASE
 //#define EZLOG_ENABLE_PRINT_ON_RELEASE
 
+#define EZLOG_INTERNAL_LOG_MAX_LEN  200
+#define EZLOG_INTERNAL_LOG_FILE_PATH  "ezlogs.txt"
+
 #if defined(NDEBUG) && !defined(EZLOG_ENABLE_PRINT_ON_RELEASE)
 #define DEBUG_PRINT(lv,fmt, ... )
 #else
-#define DEBUG_PRINT(lv, ...)  do{ if_constexpr(lv<=EZLOG_STATIC_LOG__LEVEL) { printf(" %u ",s_internalLogFlag++ );printf(__VA_ARGS__);} }while(0)
+#define DEBUG_PRINT(lv, ...)  do{ if_constexpr(lv<=EZLOG_STATIC_LOG__LEVEL)                                        \
+      { char _s_log_[EZLOG_INTERNAL_LOG_MAX_LEN];                                                                       \
+      int _s_len = sprintf(_s_log_," %u ",s_internalLogFlag++);                                                         \
+      int _limit_len_with_zero = EZLOG_INTERNAL_LOG_MAX_LEN - _s_len;                                              \
+      int _suppose_len= snprintf(_s_log_+ _s_len,_limit_len_with_zero,__VA_ARGS__);                                     \
+      FILE* _pFile = getInternalFilePtr(); if (_pFile != NULL) {                                                       \
+		fwrite(_s_log_, sizeof(char), (size_t)_s_len + std::min(_suppose_len, _limit_len_with_zero - 1), _pFile); }      \
+      }                           }while (0)
 #endif
 
 #if !defined(NDEBUG) || defined(EZLOG_ENABLE_ASSERT_ON_RELEASE)
@@ -114,6 +124,20 @@ namespace ezloghelperspace
 		return _seed;
 	}
 
+	static FILE* getInternalFilePtr()
+	{
+		static FILE *s_pInternalFile = []() -> FILE * {
+			constexpr size_t len_folder = EZLOG_STRING_LEN_OF_CHAR_ARRAY(EZLOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER);
+			constexpr size_t len_file = EZLOG_STRING_LEN_OF_CHAR_ARRAY(EZLOG_INTERNAL_LOG_FILE_PATH);
+			constexpr size_t len_s = len_folder + len_file;
+			char s[1 + len_s] = EZLOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER;
+			memcpy(s + len_folder, EZLOG_INTERNAL_LOG_FILE_PATH, len_file);
+			s[len_s] = '\0';
+			return fopen(s, "w");
+		}();
+		return s_pInternalFile;
+	}
+
 	static void transformTimeStrToFileName(char *filename, const char *timeStr, size_t size)
 	{
 		for (size_t i = 0;; filename++, timeStr++, i++)
@@ -151,6 +175,44 @@ namespace ezloghelperspace
 			lk1.unlock();
 		}
 		return false;
+	}
+
+	static size_t ChronoToTimeCStr(char *dst, const SystemTimePoint &nowTime)
+	{
+		time_t t = std::chrono::system_clock::to_time_t(nowTime);
+		struct tm *tmd = localtime(&t);
+		size_t len = strftime(dst, EZLOG_CTIME_MAX_LEN, "%Y-%m-%d %H:%M:%S", tmd);
+		//len without zero '\0'
+		if (len == 0)
+		{
+			dst[0] = '\0';
+			return 0;
+		}
+#ifdef EZLOG_WITH_MILLISECONDS
+		auto since_epoch = nowTime.time_since_epoch();
+		std::chrono::seconds s = std::chrono::duration_cast<std::chrono::seconds>(since_epoch);
+		since_epoch -= s;
+		std::chrono::milliseconds milli = std::chrono::duration_cast<std::chrono::milliseconds>(since_epoch);
+		int n_with_zero = EZLOG_CTIME_MAX_LEN - len;
+		int len2 = snprintf(dst + len, n_with_zero, ".%03u", (unsigned) milli.count());//len2 without zero
+		DEBUG_ASSERT(len2 > 0);
+		len += std::min(len2, n_with_zero - 1);
+#endif
+		return len;
+	}
+
+	static size_t CTimeToCStr(char *timecstr, time_t t)
+	{
+		struct tm *tmd = localtime(&t);
+		if (tmd != nullptr)
+		{
+			return strftime(timecstr, EZLOG_CTIME_MAX_LEN, "%Y-%m-%d %H:%M:%S", tmd);
+		}
+		else
+		{
+			timecstr[0] = '\0';
+			return 0;
+		}
 	}
 
 }
@@ -1330,30 +1392,13 @@ namespace ezlogspace
 		{
 			bean.time().cast_to_ms();
 			SystemTimePoint &&cpptime = bean.time().get_origin_time();
-			time_t t = chrono::system_clock::to_time_t(cpptime);
 			if (cpptime == cpptime_pre)
 			{
 				//time is equal to pre,no need to update
 			} else
 			{
-				cpptime_pre = cpptime;
-				struct tm *tmd = localtime(&t);
-				len = strftime(dst, EZLOG_CTIME_MAX_LEN, "%Y-%m-%d %H:%M:%S", tmd);//len without zero
-				if (len == 0)
-				{
-					//this tmd is invalid
-					cpptime_pre = SystemTimePoint::min();
-				} else
-				{
-					auto since_epoch = cpptime.time_since_epoch();
-					chrono::seconds _s = chrono::duration_cast<chrono::seconds>(since_epoch);
-					since_epoch -= _s;
-					chrono::milliseconds milli = chrono::duration_cast<chrono::milliseconds>(
-							since_epoch);
-					size_t n_with_zero = EZLOG_CTIME_MAX_LEN - len;
-					size_t len2 = snprintf(dst + len, n_with_zero, ".%03u", (uint32_t) milli.count());//len2 without zero
-					len += std::min(len2, n_with_zero - 1);
-				}
+				len = ChronoToTimeCStr(dst, cpptime);
+				cpptime_pre = len == 0 ? SystemTimePoint::min() : cpptime;
 			}
 		}
 #else
@@ -1365,20 +1410,8 @@ namespace ezlogspace
 				//time is equal to pre,no need to update
 			} else
 			{
-				tPre = t;
-				struct tm *tmd = localtime(&t);
-				if (tmd == nullptr)
-				{
-					len = 0;
-				} else
-				{
-					len = strftime(dst, EZLOG_CTIME_MAX_LEN, "%Y-%m-%d %H:%M:%S", tmd);//len without zero
-				}
-				if (len == 0)
-				{
-					//this tmd is invalid
-					tPre = (time_t) 0;
-				}
+				len = CTimeToCStr(dst, t);
+				tPre = len == 0 ? ezlogtimespace::time_t_helper::min() : t;
 			}
 		}
 #endif
