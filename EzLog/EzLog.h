@@ -30,7 +30,7 @@
 //#define EZLOG_USE_STRING
 #define EZLOG_USE_STRING_EXTEND
 
-#define EZLOG_POLL_DEFAULT_THREAD_SLEEP_MS  1000   //poll period to move local cache to global cache
+#define EZLOG_POLL_DEFAULT_THREAD_SLEEP_MS  1000   //poll period to ensure print every logs for every thread
 #define EZLOG_GLOBAL_BUF_FULL_SLEEP_US  10   //work thread sleep for period when global buf is full and logging
 #define EZLOG_GLOBAL_BUF_SIZE  ((size_t)1<<20U)    //global cache string reserve length
 #define EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE  ((size_t)1<<8U)   //single thread cache queue max length
@@ -74,6 +74,8 @@ namespace ezlogspace
 	template<typename K, typename Comp=std::less<K>> using MultiSet= std::multiset<K, Comp, Allocator<K>>;
 	template<typename K, typename V, typename Comp=std::less<K>> using Map= std::map<K, V, Comp, Allocator<std::pair<const K, V> >>;
 	template<typename K, typename V, typename Comp=std::less<K>> using MultiMap= std::multimap<K, V, Comp, Allocator<std::pair<const K, V> >>;
+	template<typename K, typename V> using UnorderedMap= std::unordered_map<K, V, std::hash<K>, std::equal_to<K>, Allocator<std::pair<const K, V> >>;
+	template<typename K> using UnorderedSet= std::unordered_set<K, std::hash<K>, std::equal_to<K>, Allocator<K>>;
 }
 
 namespace ezlogspace
@@ -177,8 +179,7 @@ namespace ezlogspace
 		class EzLogBean;
 		class EzLogString;
 
-		extern thread_local const String *s_tid;
-
+		const String *GetThreadIDString();
 
 #ifndef NDEBUG
 		class positive_size_t
@@ -1421,6 +1422,7 @@ namespace ezlogspace
 			{
 				static inline steady_flag_t now()
 				{
+					static std::atomic<steady_flag_t> s_steady_t_helper(min());
 					return s_steady_t_helper++;
 				}
 
@@ -1436,7 +1438,7 @@ namespace ezlogspace
 
 
 			private:
-				static std::atomic<steady_flag_t> s_steady_t_helper;
+
 			};
 
 #define EZLOG_TIME_T_TEMPLATE_FOR(TYPE)    template<typename T = time_t, typename std::enable_if< std::is_same<T, TYPE>::value, TYPE>::type* = nullptr>
@@ -1976,7 +1978,7 @@ namespace ezlogspace
 
 		virtual bool isThreadSafe() = 0;
 
-		//if it is static,it will not be deleted by EzLog init() function
+		//if it is static,it will not be deleted
 		virtual bool isStatic()
 		{
 			return true;
@@ -2002,9 +2004,10 @@ namespace ezlogspace
 	{
 
 	public:
-		static void init();
-
-		static void init(EzLoggerPrinter *p_ezLoggerPrinter);
+		//p_ezLog_managed_Printer will be managed and deleted by EzLog,no need to free by user
+		//or p_ezLog_managed_Printer is static and will not be deleted
+		//it will not be effective immediately
+		static void setPrinter(EzLoggerPrinter *p_ezLog_managed_Printer);
 
 		static EzLoggerPrinter *getDefaultTerminalLoggerPrinter();
 
@@ -2073,7 +2076,7 @@ namespace ezlogspace
 			init_bean();
 			EzLogBean& bean = *ext();
 			PlacementNew( &bean.ezLogTime, ezlogspace::internal::ezlogtimespace::EzLogTimeEnum::NOW );
-			bean.tid = ezlogspace::internal::s_tid;
+			bean.tid = ezlogspace::internal::GetThreadIDString();
 			bean.file = file;
 			bean.fileLen = fileLen;
 			bean.line = line;
@@ -2266,7 +2269,7 @@ static_assert(EZLOG_GLOBAL_QUEUE_MAX_SIZE >= 2 * EZLOG_SINGLE_THREAD_QUEUE_MAX_S
 
 
 //------------------------------------------define micro for user------------------------------------------//
-#define EZLOG_CSTR(str)   [](){ static_assert(!std::is_pointer<decltype(str)>::value,"must be a c-style array");return ezlogspace::internal::EzLogStringInternal::EzlogStringEnum::DEFAULT; }(),str,sizeof(str)-1
+#define EZLOG_CSTR(str)   [](){ static_assert(!std::is_pointer<decltype(str)>::value,"must be a c-style array");return ezlogspace::internal::EzLogStringEnum::DEFAULT; }(),str,sizeof(str)-1
 
 #if EZLOG_STATIC_LOG__LEVEL >= EZLOG_LEVEL_COUT
 #define EZCOUT   (EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_COUT)  )

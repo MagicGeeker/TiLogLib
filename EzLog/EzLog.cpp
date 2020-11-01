@@ -35,7 +35,7 @@
 #else
 #define DEBUG_PRINT(lv, ...)  do{ if_constexpr(lv<=EZLOG_STATIC_LOG__LEVEL)                                        \
       { char _s_log_[EZLOG_INTERNAL_LOG_MAX_LEN];                                                                       \
-      int _s_len = sprintf(_s_log_," %u ",s_internalLogFlag++);                                                         \
+      int _s_len = sprintf(_s_log_," %u ",ezloghelperspace::GetInternalLogFlag()++);                                                         \
       int _limit_len_with_zero = EZLOG_INTERNAL_LOG_MAX_LEN - _s_len;                                              \
       int _suppose_len= snprintf(_s_log_+ _s_len,_limit_len_with_zero,__VA_ARGS__);                                     \
       FILE* _pFile = getInternalFilePtr(); if (_pFile != NULL) {                                                       \
@@ -73,7 +73,11 @@ using namespace ezlogspace;
 
 namespace ezloghelperspace
 {
-	static atomic_uint32_t s_internalLogFlag(0);
+	static atomic_uint32_t& GetInternalLogFlag()
+	{
+		static atomic_uint32_t s_internalLogFlag(0);
+		return s_internalLogFlag;
+	}
 	static uint32_t FastRand()
 	{
 		static const uint32_t M = 2147483647L;  // 2^31-1
@@ -97,7 +101,13 @@ namespace ezloghelperspace
 			char s[1 + len_s] = EZLOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER;
 			memcpy(s + len_folder, EZLOG_INTERNAL_LOG_FILE_PATH, len_file);
 			s[len_s] = '\0';
-			return fopen(s, "w");
+			FILE* p= fopen(s, "a");
+			if (p)
+			{
+				char s[] = "\n\n\ncreate new internal log";
+				fwrite(s, sizeof(char), EZLOG_STRING_LEN_OF_CHAR_ARRAY(s), p);
+			}
+			return p;
 		}();
 		return s_pInternalFile;
 	}
@@ -190,10 +200,7 @@ namespace ezlogspace
 
 	namespace internal
 	{
-		std::atomic<ezlogtimespace::steady_flag_t> ezlogtimespace::steady_flag_helper::s_steady_t_helper(
-				ezlogtimespace::steady_flag_helper::min());
-
-		const String* GetThreadIDString()
+		const String* GetNewThreadIDString()
 		{
 			StringStream os;
 			os << ( std::this_thread::get_id() );
@@ -206,7 +213,11 @@ namespace ezlogspace
 #endif
 			return eznew<String>(std::move(id));
 		}
-		thread_local const String* s_tid = GetThreadIDString();
+
+		const String* GetThreadIDString(){
+			thread_local static const String* s_tid= GetNewThreadIDString();
+			return s_tid;
+		}
 
 #ifdef        __________________________________________________EzLogCircularQueue__________________________________________________
 
@@ -253,6 +264,10 @@ namespace ezlogspace
 
 			bool normalized() const
 			{
+				DEBUG_ASSERT2(pMem <= pFirst, pMem, pFirst);
+				DEBUG_ASSERT2(pFirst < pMemEnd, pFirst, pMemEnd);
+				DEBUG_ASSERT2(pMem <= pEnd, pMem, pEnd);
+				DEBUG_ASSERT2(pEnd <= pMemEnd, pEnd, pMemEnd);
 				return pEnd >= pFirst;
 			}
 
@@ -380,7 +395,14 @@ namespace ezlogspace
 					DEBUG_ASSERT((pFirst <= _to && _to <= pMemEnd) || (pMem <= _to && _to <= pEnd));
 				}
 
-				pFirst = _to;
+				if (_to == pMemEnd)
+				{
+					pFirst = pMem;
+				} else
+				{
+					pFirst = _to;
+				}
+
 				DEBUG_ASSERT (_to != pMem);//use pMemEnd instead of pMem
 			}
 
@@ -478,7 +500,6 @@ namespace ezlogspace
 		protected:
 			EzLoggerTerminalPrinter();
 
-			static EzLoggerTerminalPrinter *s_ins;
 		};
 
 		class EzLoggerFilePrinter : public EzLoggerPrinter
@@ -498,16 +519,14 @@ namespace ezlogspace
 
 			~EzLoggerFilePrinter() override;
 
-			static String tryToGetFileName(const char *logs, size_t size, uint32_t index);
+			String tryToGetFileName(const char *logs, size_t size, uint32_t index);
 
 		protected:
-			static const String folderPath;
-
-			static EzLoggerFilePrinter *s_ins;
-
+			const String folderPath = EZLOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER;
+			std::FILE *m_pFile = nullptr;
+			uint32_t index = 1;
 		};
 
-		const String EzLoggerFilePrinter::folderPath = EZLOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER;
 
 		using ThreadLocalSpinLock =SpinLock<50>;
 
@@ -520,7 +539,7 @@ namespace ezlogspace
 			std::mutex thrdExistMtx;
 			std::condition_variable thrdExistCV;
 
-			explicit ThreadStru(size_t cacheSize) : vcache(cacheSize), spinLock(), tid(s_tid), thrdExistMtx(),
+			explicit ThreadStru(size_t cacheSize) : vcache(cacheSize), spinLock(), tid(GetThreadIDString()), thrdExistMtx(),
 													thrdExistCV()
 			{
 			};
@@ -693,15 +712,30 @@ namespace ezlogspace
 
 		class EzLogImpl
 		{
+			EZLOG_MEMORY_MANAGER_FRIEND
+
 			friend class EZLogOutputThread;
 
 			friend class ezlogspace::EzLogStream;
 
 		public:
+			struct Deleter
+			{
+				constexpr Deleter() noexcept = default;
 
-			EzLogImpl();
+				Deleter(const Deleter &) noexcept = default;
 
-			~EzLogImpl();
+				void operator()(EzLoggerPrinter *p) const
+				{
+					if (!p->isStatic())
+						delete p;
+				}
+			};
+
+			using UniquePtrPrinter=std::unique_ptr<EzLoggerPrinter, Deleter>;
+		public:
+
+			static EzLogImpl &getInstance();
 
 			static void pushLog(internal::EzLogBean *pBean);
 
@@ -710,13 +744,7 @@ namespace ezlogspace
 			static uint64_t getPrintedLogsLength();
 
 		public:
-			static bool init();
-
-			static bool init(EzLoggerPrinter *p_ezLoggerPrinter);
-
-			static void registerSignalFunc();
-
-			static void onSegmentFault(int signal);
+			static bool setPrinter(UniquePtrPrinter p_ezLoggerPrinter);
 
 			static EzLoggerPrinter *getDefaultTermialLoggerPrinter();
 
@@ -730,10 +758,14 @@ namespace ezlogspace
 
 			static EzLoggerPrinter *getCurrentPrinter();
 
+		protected:
+
+			EzLogImpl()= default;
+
+			~EzLogImpl()= default;
 		private:
-			static EzLoggerPrinter *s_printer;
-			static volatile EzLogLeveLEnum s_level;
-			static bool s_inited;
+			UniquePtrPrinter m_printer{EzLoggerFilePrinter::getInstance()};
+			volatile EzLogLeveLEnum m_level = VERBOSE;
 		};
 
 	}
@@ -746,10 +778,10 @@ namespace ezlogspace
 	{
 
 #ifdef __________________________________________________EzLoggerTerminalPrinter__________________________________________________
-		EzLoggerTerminalPrinter *EzLoggerTerminalPrinter::s_ins = eznew<EzLoggerTerminalPrinter>();
 
 		EzLoggerTerminalPrinter *EzLoggerTerminalPrinter::getInstance()
 		{
+			static EzLoggerTerminalPrinter *s_ins = eznew<EzLoggerTerminalPrinter>();//do not delete
 			return s_ins;
 		}
 
@@ -774,11 +806,10 @@ namespace ezlogspace
 
 
 #ifdef __________________________________________________EzLoggerFilePrinter__________________________________________________
-		EzLoggerFilePrinter *EzLoggerFilePrinter::s_ins = eznew<EzLoggerFilePrinter>();
-		std::FILE *s_pFile = nullptr;
 
 		EzLoggerFilePrinter *EzLoggerFilePrinter::getInstance()
 		{
+			static EzLoggerFilePrinter *s_ins = eznew<EzLoggerFilePrinter>();//do not delete
 			return s_ins;
 		}
 
@@ -788,40 +819,39 @@ namespace ezlogspace
 
 		EzLoggerFilePrinter::~EzLoggerFilePrinter()
 		{
-			fflush(s_pFile);
-			if (s_pFile != nullptr)
+			fflush(m_pFile);
+			if (m_pFile != nullptr)
 			{
-				fclose(s_pFile);
+				fclose(m_pFile);
 			}
 		}
 
 		void EzLoggerFilePrinter::onAcceptLogs(const char *const logs, size_t size)
 		{
-			static uint32_t index = 1;
-			static bool firstRun = [=]() {
+			if (index == 1)
+			{
 				String s = tryToGetFileName(logs, size, index);
 				index++;
-				s_pFile = fopen(s.data(), "w");
-				return true;
-			}();
+				m_pFile = fopen(s.data(), "w");
+			};
 
 			if (singleFilePrintedLogSize > EZLOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE)
 			{
 				singleFilePrintedLogSize = 0;
-				fflush(s_pFile);
-				if (s_pFile != nullptr)
+				fflush(m_pFile);
+				if (m_pFile != nullptr)
 				{
-					fclose(s_pFile);
+					fclose(m_pFile);
 					DEBUG_PRINT(EZLOG_LEVEL_VERBOSE, "sync and write index=%u \n", (unsigned)index);
 				}
 
 				String s = tryToGetFileName(logs, size, index);
 				index++;
-				s_pFile = fopen(s.data(), "w");
+				m_pFile = fopen(s.data(), "w");
 			}
-			if (s_pFile != nullptr)
+			if (m_pFile != nullptr)
 			{
-				fwrite(logs, sizeof(char), size, s_pFile);
+				fwrite(logs, sizeof(char), size, m_pFile);
 				singleFilePrintedLogSize += size;
 			}
 		}
@@ -856,62 +886,23 @@ namespace ezlogspace
 
 		void EzLoggerFilePrinter::sync()
 		{
-			fflush(s_pFile);
+			fflush(m_pFile);
 		}
 
 #endif
 
 #ifdef __________________________________________________EzLogImpl__________________________________________________
 
-
-		EzLoggerPrinter *EzLogImpl::s_printer = nullptr;
-		volatile EzLogLeveLEnum EzLogImpl::s_level = OPEN;
-		bool EzLogImpl::s_inited = init();
-
-
-		EzLogImpl::EzLogImpl()
+		EzLogImpl &EzLogImpl::getInstance()
 		{
-
+			static EzLogImpl &ipml = *eznew<EzLogImpl>();//do not delete
+			return ipml;
 		}
 
-		EzLogImpl::~EzLogImpl()
+		bool EzLogImpl::setPrinter(UniquePtrPrinter p_ezLoggerPrinter)
 		{
-			delete s_printer;
-		}
-
-		bool EzLogImpl::init()
-		{
-			registerSignalFunc();
-			s_printer = EzLoggerFilePrinter::getInstance();
-			return s_inited = true;
-		}
-
-		bool EzLogImpl::init(EzLoggerPrinter *p_ezLoggerPrinter)
-		{
-			registerSignalFunc();
-			if (!s_printer->isStatic())
-			{
-				delete s_printer;
-			}
-			s_printer = p_ezLoggerPrinter;
-			return s_inited = true;
-		}
-
-		void EzLogImpl::registerSignalFunc()
-		{
-#ifdef NDEBUG
-			if (!s_inited)
-			{
-				signal(SIGSEGV, onSegmentFault);
-			}
-#endif
-		}
-
-		void EzLogImpl::onSegmentFault(int signal)
-		{
-			cerr << "accept signal " << signal;
-			EZLOGE << "accept signal " << signal;
-			exit(signal);
+			getInstance().m_printer = std::move(p_ezLoggerPrinter);
+			return true;
 		}
 
 		void EzLogImpl::pushLog(EzLogBean *pBean)
@@ -941,17 +932,17 @@ namespace ezlogspace
 
 		void EzLogImpl::setLogLevel(EzLogLeveLEnum level)
 		{
-			s_level = level;
+			getInstance().m_level = level;
 		}
 
 		EzLogLeveLEnum EzLogImpl::getDynamicLogLevel()
 		{
-			return s_level;
+			return getInstance().m_level;
 		}
 
 		EzLoggerPrinter *EzLogImpl::getCurrentPrinter()
 		{
-			return s_printer;
+			return getInstance().m_printer.get();
 		}
 
 #endif
@@ -1064,11 +1055,11 @@ namespace ezlogspace
 			if ((volatile std::mutex *) EZLogOutputThread::s_pMtxQueue == nullptr ||
 				EZLogOutputThread::s_threadStruQueue_inited != true)  //s_threadStruQueue is not inited
 			{
-				DEBUG_PRINT(EZLOG_LEVEL_WARN, "s_threadStruQueue not inited tid= %s\n", s_tid->c_str());
+				const String *p_tid = GetNewThreadIDString();
+				DEBUG_PRINT(EZLOG_LEVEL_WARN, "s_threadStruQueue not inited tid= %s\n", p_tid->c_str());
 				fflush(stdout);
-				ezdelete(s_tid);
+				ezdelete(p_tid);
 				s_pThreadLocalStru = nullptr;
-				s_tid = nullptr;
 				return s_pThreadLocalStru;
 			}
 			InitForValidThread();
@@ -1077,15 +1068,12 @@ namespace ezlogspace
 
 		void EZLogOutputThread::InitForValidThread()
 		{
-			if (s_tid == nullptr)
-			{
-				s_tid = GetThreadIDString();
-			}
 			s_pThreadLocalStru = eznew<ThreadStru>(EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE);
 			DEBUG_ASSERT(s_pThreadLocalStru != nullptr);
+			DEBUG_ASSERT(s_pThreadLocalStru->tid != nullptr);
 			{
 				lock_guard<mutex> lgd(s_mtxQueue);
-				DEBUG_PRINT(EZLOG_LEVEL_VERBOSE, "availQueue insert thrd tid= %s\n", s_tid->c_str());
+				DEBUG_PRINT(EZLOG_LEVEL_VERBOSE, "availQueue insert thrd tid= %s\n", s_pThreadLocalStru->tid->c_str());
 				s_threadStruQueue.availQueue.emplace_back(s_pThreadLocalStru);
 			}
 			unique_lock<mutex> lk(s_pThreadLocalStru->thrdExistMtx);
@@ -1718,14 +1706,9 @@ namespace ezlogspace
 
 #ifdef __________________________________________________EzLog__________________________________________________
 
-	void ezlogspace::EzLog::init()
+	void EzLog::setPrinter(EzLoggerPrinter *p_ezLog_managed_Printer)
 	{
-		EzLogImpl::init();
-	}
-
-	void EzLog::init(EzLoggerPrinter *p_ezLoggerPrinter)
-	{
-		EzLogImpl::init(p_ezLoggerPrinter);
+		EzLogImpl::setPrinter(EzLogImpl::UniquePtrPrinter(p_ezLog_managed_Printer));
 	}
 
 	void EzLog::pushLog(EzLogBean *pBean)
