@@ -15,10 +15,10 @@
 #include "EzLog.h"
 
 #define __________________________________________________EzLogCircularQueue__________________________________________________
-#define __________________________________________________EzLoggerTerminalPrinter__________________________________________________
-#define __________________________________________________EzLoggerFilePrinter__________________________________________________
+#define __________________________________________________EzLogTerminalPrinter__________________________________________________
+#define __________________________________________________EzLogFilePrinter__________________________________________________
 #define __________________________________________________EzLogImpl__________________________________________________
-#define __________________________________________________EZLogOutputThread__________________________________________________
+#define __________________________________________________EzLogCore__________________________________________________
 
 #define    __________________________________________________EzLog__________________________________________________
 #define __________________________________________________EzLogStream__________________________________________________
@@ -485,11 +485,11 @@ namespace ezlogspace
 			}
 		};
 
-		class EzLoggerTerminalPrinter : public EzLoggerPrinter
+		class EzLogTerminalPrinter : public EzLoggerPrinter
 		{
 			EZLOG_MEMORY_MANAGER_FRIEND
 		public:
-			static EzLoggerTerminalPrinter *getInstance();
+			static EzLogTerminalPrinter *getInstance();
 
 			void onAcceptLogs(const char *const logs, size_t size) override;
 
@@ -498,15 +498,15 @@ namespace ezlogspace
 			bool isThreadSafe() override;
 
 		protected:
-			EzLoggerTerminalPrinter();
+			EzLogTerminalPrinter();
 
 		};
 
-		class EzLoggerFilePrinter : public EzLoggerPrinter
+		class EzLogFilePrinter : public EzLoggerPrinter
 		{
 			EZLOG_MEMORY_MANAGER_FRIEND
 		public:
-			static EzLoggerFilePrinter *getInstance();
+			static EzLogFilePrinter *getInstance();
 
 			void onAcceptLogs(const char *const logs, size_t size) override;
 
@@ -515,9 +515,9 @@ namespace ezlogspace
 			bool isThreadSafe() override;
 
 		protected:
-			EzLoggerFilePrinter();
+			EzLogFilePrinter();
 
-			~EzLoggerFilePrinter() override;
+			~EzLogFilePrinter() override;
 
 			String tryToGetFileName(const char *logs, size_t size, uint32_t index);
 
@@ -585,7 +585,7 @@ namespace ezlogspace
 			}
 		};
 
-		class EZLogOutputThread
+		class EzLogCore
 		{
 		public:
 			static void pushLog(EzLogBean *pBean);
@@ -595,7 +595,7 @@ namespace ezlogspace
 			static uint64_t getPrintedLogsLength();
 
 		private:
-			static EZLogOutputThread &getInstance();
+			static EzLogCore &getInstance();
 
 			void AtExit();
 
@@ -719,7 +719,7 @@ namespace ezlogspace
 		{
 			EZLOG_MEMORY_MANAGER_FRIEND
 
-			friend class EZLogOutputThread;
+			friend class EzLogCore;
 
 			friend class ezlogspace::EzLogStream;
 
@@ -753,7 +753,7 @@ namespace ezlogspace
 
 			static EzLoggerPrinter *getDefaultTermialLoggerPrinter();
 
-			static EzLoggerPrinter *getDefaultFileLoggerPrinter();
+			static EzLoggerPrinter *getDefaultFilePrinter();
 
 		public:
 			//these functions are not thread safe
@@ -769,7 +769,7 @@ namespace ezlogspace
 
 			~EzLogImpl()= default;
 		private:
-			UniquePtrPrinter m_printer{EzLoggerFilePrinter::getInstance()};
+			UniquePtrPrinter m_printer{EzLogFilePrinter::getInstance()};
 			volatile EzLogLeveLEnum m_level = VERBOSE;
 		};
 
@@ -782,27 +782,27 @@ namespace ezlogspace
 	namespace internal
 	{
 
-#ifdef __________________________________________________EzLoggerTerminalPrinter__________________________________________________
+#ifdef __________________________________________________EzLogTerminalPrinter__________________________________________________
 
-		EzLoggerTerminalPrinter *EzLoggerTerminalPrinter::getInstance()
+		EzLogTerminalPrinter *EzLogTerminalPrinter::getInstance()
 		{
-			static EzLoggerTerminalPrinter *s_ins = eznew<EzLoggerTerminalPrinter>();//do not delete
+			static EzLogTerminalPrinter *s_ins = eznew<EzLogTerminalPrinter>();//do not delete
 			return s_ins;
 		}
 
-		EzLoggerTerminalPrinter::EzLoggerTerminalPrinter() = default;
+		EzLogTerminalPrinter::EzLogTerminalPrinter() = default;
 
-		void EzLoggerTerminalPrinter::onAcceptLogs(const char *const logs, size_t size)
+		void EzLogTerminalPrinter::onAcceptLogs(const char *const logs, size_t size)
 		{
 			std::cout << logs;
 		}
 
-		bool EzLoggerTerminalPrinter::isThreadSafe()
+		bool EzLogTerminalPrinter::isThreadSafe()
 		{
 			return false;
 		}
 
-		void EzLoggerTerminalPrinter::sync()
+		void EzLogTerminalPrinter::sync()
 		{
 			std::cout.flush();
 		}
@@ -810,19 +810,19 @@ namespace ezlogspace
 #endif
 
 
-#ifdef __________________________________________________EzLoggerFilePrinter__________________________________________________
+#ifdef __________________________________________________EzLogFilePrinter__________________________________________________
 
-		EzLoggerFilePrinter *EzLoggerFilePrinter::getInstance()
+		EzLogFilePrinter *EzLogFilePrinter::getInstance()
 		{
-			static EzLoggerFilePrinter *s_ins = eznew<EzLoggerFilePrinter>();//do not delete
+			static EzLogFilePrinter *s_ins = eznew<EzLogFilePrinter>();//do not delete
 			return s_ins;
 		}
 
-		EzLoggerFilePrinter::EzLoggerFilePrinter()
+		EzLogFilePrinter::EzLogFilePrinter()
 		{
 		}
 
-		EzLoggerFilePrinter::~EzLoggerFilePrinter()
+		EzLogFilePrinter::~EzLogFilePrinter()
 		{
 			fflush(m_pFile);
 			if (m_pFile != nullptr)
@@ -831,7 +831,7 @@ namespace ezlogspace
 			}
 		}
 
-		void EzLoggerFilePrinter::onAcceptLogs(const char *const logs, size_t size)
+		void EzLogFilePrinter::onAcceptLogs(const char *const logs, size_t size)
 		{
 			if (index == 1)
 			{
@@ -861,7 +861,7 @@ namespace ezlogspace
 			}
 		}
 
-		String EzLoggerFilePrinter::tryToGetFileName(const char *logs, size_t size, uint32_t index)
+		String EzLogFilePrinter::tryToGetFileName(const char *logs, size_t size, uint32_t index)
 		{
 			String s;
 			char indexs[9];
@@ -884,12 +884,12 @@ namespace ezlogspace
 			return s;
 		}
 
-		bool EzLoggerFilePrinter::isThreadSafe()
+		bool EzLogFilePrinter::isThreadSafe()
 		{
 			return true;
 		}
 
-		void EzLoggerFilePrinter::sync()
+		void EzLogFilePrinter::sync()
 		{
 			fflush(m_pFile);
 		}
@@ -912,27 +912,27 @@ namespace ezlogspace
 
 		void EzLogImpl::pushLog(EzLogBean *pBean)
 		{
-			EZLogOutputThread::pushLog(pBean);
+			EzLogCore::pushLog(pBean);
 		}
 
 		uint64_t EzLogImpl::getPrintedLogs()
 		{
-			return EZLogOutputThread::getPrintedLogs();
+			return EzLogCore::getPrintedLogs();
 		}
 
 		uint64_t EzLogImpl::getPrintedLogsLength()
 		{
-			return EZLogOutputThread::getPrintedLogsLength();
+			return EzLogCore::getPrintedLogsLength();
 		}
 
 		EzLoggerPrinter *EzLogImpl::getDefaultTermialLoggerPrinter()
 		{
-			return EzLoggerTerminalPrinter::getInstance();
+			return EzLogTerminalPrinter::getInstance();
 		}
 
-		EzLoggerPrinter *EzLogImpl::getDefaultFileLoggerPrinter()
+		EzLoggerPrinter *EzLogImpl::getDefaultFilePrinter()
 		{
-			return EzLoggerFilePrinter::getInstance();
+			return EzLogFilePrinter::getInstance();
 		}
 
 		void EzLogImpl::setLogLevel(EzLogLeveLEnum level)
@@ -955,23 +955,23 @@ namespace ezlogspace
 
 	namespace internal
 	{
-#ifdef __________________________________________________EZLogOutputThread__________________________________________________
-		thread_local ThreadStru *EZLogOutputThread::s_pThreadLocalStru = EZLogOutputThread::getInstance().InitForEveryThread();
+#ifdef __________________________________________________EzLogCore__________________________________________________
+		thread_local ThreadStru *EzLogCore::s_pThreadLocalStru = EzLogCore::getInstance().InitForEveryThread();
 
-		EZLogOutputThread &EZLogOutputThread::getInstance()
+		EzLogCore &EzLogCore::getInstance()
 		{
-			static EZLogOutputThread &t = *eznew<EZLogOutputThread>();
+			static EzLogCore &t = *eznew<EzLogCore>();
 			return t;
 		}
 
 
-		inline bool EZLogOutputThread::localCircularQueuePushBack(EzLogBean *obj)
+		inline bool EzLogCore::localCircularQueuePushBack(EzLogBean *obj)
 		{
 			s_pThreadLocalStru->vcache.emplace_back(obj);
 			return s_pThreadLocalStru->vcache.size() >= EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE;
 		}
 
-		inline bool EZLogOutputThread::moveLocalCacheToGlobal(ThreadStru &bean)
+		inline bool EzLogCore::moveLocalCacheToGlobal(ThreadStru &bean)
 		{
 			s_globalCache.vcache.insert(s_globalCache.vcache.end(), bean.vcache.first_sub_queue_begin(),
 										bean.vcache.first_sub_queue_end());
@@ -984,47 +984,47 @@ namespace ezlogspace
 			return isGlobalFull;
 		}
 
-		std::thread EZLogOutputThread::CreatePollThread()
+		std::thread EzLogCore::CreatePollThread()
 		{
 			s_existThrdPoll = true;
-			thread th(&EZLogOutputThread::thrdFuncPoll,this);
+			thread th(&EzLogCore::thrdFuncPoll,this);
 			th.detach();
 			return th;
 		}
 
-		std::thread EZLogOutputThread::CreateMergeThread()
+		std::thread EzLogCore::CreateMergeThread()
 		{
 			s_existThrdMerge = true;
-			thread th(&EZLogOutputThread::thrdFuncMergeLogs,this);
+			thread th(&EzLogCore::thrdFuncMergeLogs,this);
 			th.detach();
 			return th;
 		}
 
-		std::thread EZLogOutputThread::CreatePrintThread()
+		std::thread EzLogCore::CreatePrintThread()
 		{
 			s_existThrdPrint = true;
-			thread th(&EZLogOutputThread::thrdFuncPrintLogs,this);
+			thread th(&EzLogCore::thrdFuncPrintLogs,this);
 			th.detach();
 			return th;
 		}
 
-		std::thread EZLogOutputThread::CreateGarbageCollectionThread()
+		std::thread EzLogCore::CreateGarbageCollectionThread()
 		{
 			s_existThrdGC = true;
-			thread th(&EZLogOutputThread::thrdFuncGarbageCollection,this);
+			thread th(&EzLogCore::thrdFuncGarbageCollection,this);
 			th.detach();
 			return th;
 		}
 
 
 
-		ThreadStru *EZLogOutputThread::InitForEveryThread()
+		ThreadStru *EzLogCore::InitForEveryThread()
 		{
 			//some thread run before main thread,so global var are not inited,which happens in msvc in some version,
 			//and cause crash because s_mtxMerge is not inited,these threads are often created by kernel.
 			//and in main thread,thread local var also may init before global var.and it cause s_pThreadLocalStru be deleted
-			if ((volatile std::mutex *) EZLogOutputThread::s_pMtxQueue == nullptr ||
-				EZLogOutputThread::s_threadStruQueue_inited != true)  //s_threadStruQueue is not inited
+			if ((volatile std::mutex *) EzLogCore::s_pMtxQueue == nullptr ||
+				EzLogCore::s_threadStruQueue_inited != true)  //s_threadStruQueue is not inited
 			{
 				const String *p_tid = GetNewThreadIDString();
 				DEBUG_PRINT(EZLOG_LEVEL_WARN, "s_threadStruQueue not inited tid= %s\n", p_tid->c_str());
@@ -1037,7 +1037,7 @@ namespace ezlogspace
 			return s_pThreadLocalStru;
 		}
 
-		void EZLogOutputThread::InitForValidThread()
+		void EzLogCore::InitForValidThread()
 		{
 			s_pThreadLocalStru = eznew<ThreadStru>(EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE);
 			DEBUG_ASSERT(s_pThreadLocalStru != nullptr);
@@ -1051,7 +1051,7 @@ namespace ezlogspace
 			notify_all_at_thread_exit(s_pThreadLocalStru->thrdExistCV, std::move(lk));
 		}
 
-		bool EZLogOutputThread::Init()
+		bool EzLogCore::Init()
 		{
 //TODO
 //			if (s_pThreadLocalStru == nullptr)
@@ -1071,7 +1071,7 @@ namespace ezlogspace
 		//根据c++11标准，在atexit函数构造前的全局变量会在atexit函数结束后析构，
 		//在atexit后构造的函数会先于atexit函数析构，
 		// 故用到全局变量需要在此函数前构造
-		void EZLogOutputThread::AtExit()
+		void EzLogCore::AtExit()
 		{
 			DEBUG_PRINT(EZLOG_LEVEL_INFO, "wait poll and printer\n");
 			s_pollPeriodus = 1;//make poll faster
@@ -1092,12 +1092,12 @@ namespace ezlogspace
 			DEBUG_PRINT(EZLOG_LEVEL_INFO, "exit\n");
 		}
 
-		void EZLogOutputThread::pushLog(EzLogBean *pBean)
+		void EzLogCore::pushLog(EzLogBean *pBean)
 		{
 			getInstance().ipushLog(pBean);
 		}
 
-		void EZLogOutputThread::ipushLog(EzLogBean *pBean)
+		void EzLogCore::ipushLog(EzLogBean *pBean)
 		{
 			s_pThreadLocalStru->spinLock.lock();
 			bool isLocalFull = localCircularQueuePushBack(pBean);
@@ -1119,7 +1119,7 @@ namespace ezlogspace
 		}
 
 
-		void EZLogOutputThread::InsertEveryThreadCachedLogToSet(List<ThreadStru *> &thread_queue,
+		void EzLogCore::InsertEveryThreadCachedLogToSet(List<ThreadStru *> &thread_queue,
 																MultiSet<EzLogBeanVector, EzLogCircularQueueComp> &s,
 																EzLogBean &bean)
 		{
@@ -1207,7 +1207,7 @@ namespace ezlogspace
 			}
 		}
 
-		void EZLogOutputThread::MergeSortForGlobalQueue()
+		void EzLogCore::MergeSortForGlobalQueue()
 		{
 			//use pointer(reference) to prevent delete before atexit.
 			static EzLogBeanVector& v = *eznew<EzLogBeanVector>();  //temp vector
@@ -1249,7 +1249,7 @@ namespace ezlogspace
 		}
 
 		//s_mtxMerge s_mtxPrinter must be owned
-		EzLogString & EZLogOutputThread::getMergedLogString()
+		EzLogString & EzLogCore::getMergedLogString()
 		{
 			using namespace std::chrono;
 
@@ -1300,7 +1300,7 @@ namespace ezlogspace
 
 
 #if defined(EZLOG_USE_STD_CHRONO) && defined(EZLOG_WITH_MILLISECONDS)
-		inline void EZLogOutputThread::getMilliTimeStrFromChrono(char *dst, size_t &len, EzLogBean &bean,
+		inline void EzLogCore::getMilliTimeStrFromChrono(char *dst, size_t &len, EzLogBean &bean,
 														  SystemTimePoint &cpptime_pre)
 		{
 			bean.time().cast_to_ms();
@@ -1315,7 +1315,7 @@ namespace ezlogspace
 			}
 		}
 #else
-		inline void EZLogOutputThread::getTimeStrFromCTime(char *dst, size_t &len, const EzLogBean &bean, time_t &tPre)
+		inline void EzLogCore::getTimeStrFromCTime(char *dst, size_t &len, const EzLogBean &bean, time_t &tPre)
 		{
 			time_t t = bean.time().to_time_t();
 			if (t == tPre)
@@ -1329,7 +1329,7 @@ namespace ezlogspace
 		}
 #endif
 
-		inline void EZLogOutputThread::getMergedSingleLog(EzLogString &logs, const char *ctimestr, size_t ctimestr_len,
+		inline void EzLogCore::getMergedSingleLog(EzLogString &logs, const char *ctimestr, size_t ctimestr_len,
 														  const EzLogBean &bean)
 		{
 			logs.reserve(bean.tid->size() + ctimestr_len + bean.fileLen + bean.str_view().size()
@@ -1354,14 +1354,14 @@ namespace ezlogspace
 			//reserve L1+L2 bytes
 		}
 
-		inline void EZLogOutputThread::getMergePermission(std::unique_lock<std::mutex> &lk)
+		inline void EzLogCore::getMergePermission(std::unique_lock<std::mutex> &lk)
 		{
 			DEBUG_ASSERT(!lk.owns_lock());
 			lk = std::unique_lock<std::mutex>(s_mtxMerge);
 			waitForMerge(lk);
 		}
 
-		bool EZLogOutputThread::tryGetMergePermission(std::unique_lock<std::mutex> &lk)
+		bool EzLogCore::tryGetMergePermission(std::unique_lock<std::mutex> &lk)
 		{
 			DEBUG_ASSERT(!lk.owns_lock());
 			lk = std::unique_lock<std::mutex>(s_mtxMerge, std::try_to_lock);
@@ -1373,7 +1373,7 @@ namespace ezlogspace
 			return false;
 		}
 
-		void EZLogOutputThread::waitForMerge(std::unique_lock<std::mutex> &lk)
+		void EzLogCore::waitForMerge(std::unique_lock<std::mutex> &lk)
 		{
 			DEBUG_ASSERT(lk.owns_lock());
 			while (s_merging)        //另外一个线程的本地缓存和全局缓存已满，本线程却拿到锁，应该需要等打印线程打印完
@@ -1389,7 +1389,7 @@ namespace ezlogspace
 			}
 		}
 
-		inline void EZLogOutputThread::getMoveGarbagePermission(std::unique_lock<std::mutex> &lk)
+		inline void EzLogCore::getMoveGarbagePermission(std::unique_lock<std::mutex> &lk)
 		{
 			DEBUG_ASSERT(!lk.owns_lock());
 			lk = std::unique_lock<std::mutex>(s_mtxDeleter);
@@ -1399,7 +1399,7 @@ namespace ezlogspace
 			}
 		}
 
-		void EZLogOutputThread::waitForGC(std::unique_lock<std::mutex> &lk)
+		void EzLogCore::waitForGC(std::unique_lock<std::mutex> &lk)
 		{
 			DEBUG_ASSERT(lk.owns_lock());
 			while (s_deleting)
@@ -1414,7 +1414,7 @@ namespace ezlogspace
 			}
 		}
 
-		void EZLogOutputThread::clearGlobalCacheQueueAndNotifyGC()
+		void EzLogCore::clearGlobalCacheQueueAndNotifyGC()
 		{
 			unique_lock<mutex> ulk;
 			getMoveGarbagePermission(ulk);
@@ -1428,7 +1428,7 @@ namespace ezlogspace
 			s_cvDeleter.notify_all();
 		}
 
-		void EZLogOutputThread::thrdFuncMergeLogs()
+		void EzLogCore::thrdFuncMergeLogs()
 		{
 			freeInternalThreadMemory();//this thread is no need log
 			while (true)
@@ -1461,7 +1461,7 @@ namespace ezlogspace
 		}
 
 
-		void EZLogOutputThread::printLogs()
+		void EzLogCore::printLogs()
 		{
 			static size_t bufSize = 0;
 			EzLogString &mergedLogString = s_global_cache_string;
@@ -1478,7 +1478,7 @@ namespace ezlogspace
 			}
 		}
 
-		void EZLogOutputThread::thrdFuncPrintLogs()
+		void EzLogCore::thrdFuncPrintLogs()
 		{
 			freeInternalThreadMemory();//this thread is no need log
 			while (true)
@@ -1528,7 +1528,7 @@ namespace ezlogspace
 			return;
 		}
 
-		void EZLogOutputThread::thrdFuncGarbageCollection()
+		void EzLogCore::thrdFuncGarbageCollection()
 		{
 			freeInternalThreadMemory();//this thread is no need log
 			while (true)
@@ -1572,7 +1572,7 @@ namespace ezlogspace
 		}
 
 		//return false when s_to_exit is true
-		inline bool EZLogOutputThread::pollThreadSleep()
+		inline bool EzLogCore::pollThreadSleep()
 		{
 			for (uint32_t t = s_pollPeriodSplitNum; t--;)
 			{
@@ -1586,7 +1586,7 @@ namespace ezlogspace
 			return true;
 		}
 
-		void EZLogOutputThread::thrdFuncPoll()
+		void EzLogCore::thrdFuncPoll()
 		{
 			freeInternalThreadMemory();//this thread is no need log
 			do
@@ -1633,7 +1633,7 @@ namespace ezlogspace
 			return;
 		}
 
-		void EZLogOutputThread::freeInternalThreadMemory()
+		void EzLogCore::freeInternalThreadMemory()
 		{
 			if(s_pThreadLocalStru == nullptr ) { return; }
 			DEBUG_PRINT(EZLOG_LEVEL_INFO, "free mem tid: %s\n", s_pThreadLocalStru->tid->c_str() );
@@ -1652,7 +1652,7 @@ namespace ezlogspace
 			}
 		}
 
-		inline void EZLogOutputThread::atInternalThreadExit(bool& existVar, std::mutex& mtxNextToExit, bool & cvFlagNextToExit, std::condition_variable & cvNextToExit)
+		inline void EzLogCore::atInternalThreadExit(bool& existVar, std::mutex& mtxNextToExit, bool & cvFlagNextToExit, std::condition_variable & cvNextToExit)
 		{
 			existVar = false;
 			mtxNextToExit.lock();
@@ -1662,12 +1662,12 @@ namespace ezlogspace
 		}
 
 
-		uint64_t EZLogOutputThread::getPrintedLogs()
+		uint64_t EzLogCore::getPrintedLogs()
 		{
 			return getInstance().s_printedLogs;
 		}
 
-		uint64_t EZLogOutputThread::getPrintedLogsLength()
+		uint64_t EzLogCore::getPrintedLogsLength()
 		{
 			return getInstance().s_printedLogsLength;
 		}
@@ -1716,14 +1716,14 @@ namespace ezlogspace
 	}
 #endif
 
-	EzLoggerPrinter *EzLog::getDefaultTerminalLoggerPrinter()
+	EzLoggerPrinter *EzLog::getDefaultTerminalPrinter()
 	{
 		return EzLogImpl::getDefaultTermialLoggerPrinter();
 	}
 
-	EzLoggerPrinter *EzLog::getDefaultFileLoggerPrinter()
+	EzLoggerPrinter *EzLog::getDefaultFilePrinter()
 	{
-		return EzLogImpl::getDefaultFileLoggerPrinter();
+		return EzLogImpl::getDefaultFilePrinter();
 	}
 
 #endif

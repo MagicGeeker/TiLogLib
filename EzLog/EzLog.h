@@ -2009,9 +2009,9 @@ namespace ezlogspace
 		//it will not be effective immediately
 		static void setPrinter(EzLoggerPrinter *p_ezLog_managed_Printer);
 
-		static EzLoggerPrinter *getDefaultTerminalLoggerPrinter();
+		static EzLoggerPrinter *getDefaultTerminalPrinter();
 
-		static EzLoggerPrinter *getDefaultFileLoggerPrinter();
+		static EzLoggerPrinter *getDefaultFilePrinter();
 
 		static void pushLog(internal::EzLogBean *pBean);
 
