@@ -5,17 +5,13 @@
 #include <string.h>
 #include <iostream>
 #include <sstream>
-#include <unordered_set>
-#include <unordered_map>
-#include <map>
-#include <set>
+
+
 #include <chrono>
 #include <algorithm>
 #include <thread>
 #include <future>
 #include <atomic>
-#include <list>
-#include <vector>
 #include "EzLog.h"
 
 #define __________________________________________________EzLogCircularQueue__________________________________________________
@@ -58,10 +54,6 @@
 using SystemTimePoint=std::chrono::system_clock::time_point;
 using SystemClock=std::chrono::system_clock;
 using EzLogTime=ezlogspace::internal::EzLogBean::EzLogTime;
-using ezmalloc_t = void *(*)(size_t);
-using ezfree_t=void (*)(void *);
-template<typename T> using List= std::list<T>;
-template<typename T> using Vector= std::vector<T>;
 
 
 #define ezmalloc(size)  EZLOG_MALLOC_FUNCTION(size)
@@ -201,20 +193,20 @@ namespace ezlogspace
 		std::atomic<ezlogtimespace::steady_flag_t> ezlogtimespace::steady_flag_helper::s_steady_t_helper(
 				ezlogtimespace::steady_flag_helper::min());
 
-		const std::string* GetThreadIDString()
+		const String* GetThreadIDString()
 		{
-			stringstream os;
+			StringStream os;
 			os << ( std::this_thread::get_id() );
-			string id = os.str();
+			String id = os.str();
 #ifdef EZLOG_THREAD_ID_MAX_LEN
 			if (id.size() > EZLOG_THREAD_ID_MAX_LEN)
 			{
 				id.resize(EZLOG_THREAD_ID_MAX_LEN);
 			}
 #endif
-			return eznew<std::string>(std::move(id));
+			return eznew<String>(std::move(id));
 		}
-		thread_local const std::string* s_tid = GetThreadIDString();
+		thread_local const String* s_tid = GetThreadIDString();
 
 #ifdef        __________________________________________________EzLogCircularQueue__________________________________________________
 
@@ -376,16 +368,6 @@ namespace ezlogspace
 				pEnd++;
 			}
 
-			/*
-			void pop_front()
-			{
-				DEBUG_ASSERT(!empty());
-				DEBUG_RUN( *pFirst = T() );
-				
-				//TODO
-			}
-			 */
-
 			//exclude _to
 			void erase_from_begin_to(iterator _to)
 			{
@@ -417,12 +399,6 @@ namespace ezlogspace
 				v.resize(0);
 				v.insert(v.end(), _beg, _end);
 			}
-
-		public:
-			class PodCircularQueueView
-			{
-
-			};
 
 		private:
 
@@ -522,16 +498,16 @@ namespace ezlogspace
 
 			~EzLoggerFilePrinter() override;
 
-			static string tryToGetFileName(const char *logs, size_t size, uint32_t index);
+			static String tryToGetFileName(const char *logs, size_t size, uint32_t index);
 
 		protected:
-			static const std::string folderPath;
+			static const String folderPath;
 
 			static EzLoggerFilePrinter *s_ins;
 
 		};
 
-		const std::string EzLoggerFilePrinter::folderPath = EZLOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER;
+		const String EzLoggerFilePrinter::folderPath = EZLOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER;
 
 		using ThreadLocalSpinLock =SpinLock<50>;
 
@@ -540,7 +516,7 @@ namespace ezlogspace
 			EzLogBeanCircularQueue vcache;
 			ThreadLocalSpinLock spinLock;//protect cache
 
-			const std::string *tid;
+			const String *tid;
 			std::mutex thrdExistMtx;
 			std::condition_variable thrdExistCV;
 
@@ -614,7 +590,7 @@ namespace ezlogspace
 			static EzLogString &getMergedLogString();
 
 			static void InsertEveryThreadCachedLogToSet(List<ThreadStru *> &thread_queue,
-														std::multiset<EzLogBeanVector, EzLogCircularQueueComp> &s,
+														MultiSet<EzLogBeanVector, EzLogCircularQueueComp> &s,
 														EzLogBean &bean);
 
 			static void MergeSortForGlobalQueue();
@@ -823,7 +799,7 @@ namespace ezlogspace
 		{
 			static uint32_t index = 1;
 			static bool firstRun = [=]() {
-				string s = tryToGetFileName(logs, size, index);
+				String s = tryToGetFileName(logs, size, index);
 				index++;
 				s_pFile = fopen(s.data(), "w");
 				return true;
@@ -839,7 +815,7 @@ namespace ezlogspace
 					DEBUG_PRINT(EZLOG_LEVEL_VERBOSE, "sync and write index=%u \n", (unsigned)index);
 				}
 
-				string s = tryToGetFileName(logs, size, index);
+				String s = tryToGetFileName(logs, size, index);
 				index++;
 				s_pFile = fopen(s.data(), "w");
 			}
@@ -850,9 +826,9 @@ namespace ezlogspace
 			}
 		}
 
-		string EzLoggerFilePrinter::tryToGetFileName(const char *logs, size_t size, uint32_t index)
+		String EzLoggerFilePrinter::tryToGetFileName(const char *logs, size_t size, uint32_t index)
 		{
-			string s;
+			String s;
 			char indexs[9];
 			snprintf(indexs, 9, "%07d ", index);
 			if (size != 0)
@@ -1179,7 +1155,7 @@ namespace ezlogspace
 
 
 		void EZLogOutputThread::InsertEveryThreadCachedLogToSet(List<ThreadStru *> &thread_queue,
-																std::multiset<EzLogBeanVector, EzLogCircularQueueComp> &s,
+																MultiSet<EzLogBeanVector, EzLogCircularQueueComp> &s,
 																EzLogBean &bean)
 		{
 			//use pointer(reference) to prevent delete before atexit.
@@ -1272,7 +1248,7 @@ namespace ezlogspace
 			static EzLogBeanVector& v = *eznew<EzLogBeanVector>();  //temp vector
 
 			v.clear();
-			std::multiset<EzLogBeanVector, EzLogCircularQueueComp> s;  //set of ThreadStru cache
+			MultiSet<EzLogBeanVector, EzLogCircularQueueComp> s;  //set of ThreadStru cache
 			EzLogBean bean;
 			bean.time()=s_log_last_time;
 			DEBUG_PRINT(EZLOG_LEVEL_INFO, "Begin of MergeSortForGlobalQueue s_globalCache.vcache size= %u\n", (unsigned)s_globalCache.vcache.size());

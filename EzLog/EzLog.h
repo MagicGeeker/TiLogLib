@@ -9,6 +9,13 @@
 #include<type_traits>
 #include <ostream>
 
+#include <list>
+#include <vector>
+#include <map>
+#include <set>
+#include <unordered_set>
+#include <unordered_map>
+
 #include "../depend_libs/IUtils/idef.h"
 #include "../depend_libs/sse/sse2.h"
 #include "../depend_libs/miloyip/dtoa_milo.h"
@@ -54,8 +61,20 @@
 #define       EZLOG_LEVEL_DEBUG    8
 #define       EZLOG_LEVEL_VERBOSE    9
 
-/**************************************************MACRO FOR USER**************************************************/
-
+/**************************************************STL FOR USER**************************************************/
+namespace ezlogspace
+{
+	//user-defined stl,can customize allocator
+	template<typename T> using Allocator= std::allocator<T>;
+	using String= std::basic_string<char, std::char_traits<char>, Allocator<char> >;
+	using StringStream= std::basic_stringstream<char, std::char_traits<char>, Allocator<char>>;
+	template<typename T> using List= std::list<T, Allocator<T>>;
+	template<typename T> using Vector= std::vector<T, Allocator<T>>;
+	template<typename K> using Set= std::set<K, std::less<K>, Allocator<K>>;
+	template<typename K, typename Comp=std::less<K>> using MultiSet= std::multiset<K, Comp, Allocator<K>>;
+	template<typename K, typename V, typename Comp=std::less<K>> using Map= std::map<K, V, Comp, Allocator<std::pair<const K, V> >>;
+	template<typename K, typename V, typename Comp=std::less<K>> using MultiMap= std::multimap<K, V, Comp, Allocator<std::pair<const K, V> >>;
+}
 
 namespace ezlogspace
 {
@@ -158,7 +177,7 @@ namespace ezlogspace
 		class EzLogBean;
 		class EzLogString;
 
-		extern thread_local const std::string *s_tid;
+		extern thread_local const String *s_tid;
 
 
 #ifndef NDEBUG
@@ -276,7 +295,7 @@ namespace ezlogspace
 				*this = std::move(x);
 			}
 
-			inline EzLogString &operator=(const std::string &str)
+			inline EzLogString &operator=(const String &str)
 			{
 				resize(0);
 				return append(str.data(), str.size());
@@ -302,9 +321,9 @@ namespace ezlogspace
 				std::swap(this->m_cap, str.m_cap);
 			}
 
-			inline explicit operator std::string() const
+			inline explicit operator String() const
 			{
-				return std::string(m_front, size());
+				return String(m_front, size());
 			}
 
 		public:
@@ -404,7 +423,7 @@ namespace ezlogspace
 				return append_unsafe(cstr, length);
 			}
 
-			inline EzLogString &append(const std::string &str)
+			inline EzLogString &append(const String &str)
 			{
 				size_t length = str.length();
 				ensureCap(size_with_zero() + length);
@@ -488,7 +507,7 @@ namespace ezlogspace
 				return *this;
 			}
 
-			inline EzLogString &append_unsafe(const std::string &str)
+			inline EzLogString &append_unsafe(const String &str)
 			{
 				size_t length = str.length();
 				memcpy(m_end, str.data(), length);
@@ -588,7 +607,7 @@ namespace ezlogspace
 				return append(cstr);
 			}
 
-			inline EzLogString &operator+=(const std::string &str)
+			inline EzLogString &operator+=(const String &str)
 			{
 				return append(str);
 			}
@@ -726,9 +745,9 @@ namespace ezlogspace
 			return os << internal.c_str();
 		}
 
-		inline std::string operator+(const std::string &lhs, const EzLogString &rhs)
+		inline String operator+(const String &lhs, const EzLogString &rhs)
 		{
-			return std::string(lhs + rhs.c_str());
+			return String(lhs + rhs.c_str());
 		}
 
 		template<typename T, typename= typename std::enable_if<std::is_arithmetic<T>::value, void>::type>
@@ -845,7 +864,7 @@ namespace ezlogspace
 				//x.resize(0);
 			}
 
-			inline EzLogStringExtend &operator=(const std::string &str)
+			inline EzLogStringExtend &operator=(const String &str)
 			{
 				resize(0);
 				return append(str.data(), str.size());
@@ -869,9 +888,9 @@ namespace ezlogspace
 				std::swap(this->pCore, rhs.pCore);
 			}
 
-			inline explicit operator std::string() const
+			inline explicit operator String() const
 			{
-				return std::string(pFront(), size());
+				return String(pFront(), size());
 			}
 
 		public:
@@ -1016,7 +1035,7 @@ namespace ezlogspace
 				return append_unsafe(cstr, length);
 			}
 
-			inline EzLogStringExtend &append(const std::string &str)
+			inline EzLogStringExtend &append(const String &str)
 			{
 				size_t length = str.length();
 				ensureCap(size_with_zero() + length);
@@ -1102,7 +1121,7 @@ namespace ezlogspace
 				return *this;
 			}
 
-			inline EzLogStringExtend &append_unsafe(const std::string &str)
+			inline EzLogStringExtend &append_unsafe(const String &str)
 			{
 				size_t length = str.length();
 				memcpy(pEnd(), str.data(), length);
@@ -1202,7 +1221,7 @@ namespace ezlogspace
 				return append(cstr);
 			}
 
-			inline EzLogStringExtend &operator+=(const std::string &str)
+			inline EzLogStringExtend &operator+=(const String &str)
 			{
 				return append(str);
 			}
@@ -1244,7 +1263,7 @@ namespace ezlogspace
 
 			friend std::ostream &operator<<(std::ostream &os, const EzLogStringExtend<ExtType> &s)
 			{
-				return os << std::string(s.c_str(), s.size());
+				return os << String(s.c_str(), s.size());
 			}
 
 		protected:
@@ -1864,7 +1883,7 @@ namespace ezlogspace
 #ifdef EZLOG_USE_STRING
 			EzLogString dataStr;
 #endif // EZLOG_USE_STRING
-			const std::string *tid;
+			const String *tid;
 			const char *file;
 			DEBUG_CANARY_UINT32(flag2)
 			EzLogTime ezLogTime;
@@ -2158,13 +2177,13 @@ namespace ezlogspace
 			return *this;
 		}
 
-		inline EzLogStream &operator<<(const std::string &s)
+		inline EzLogStream &operator<<(const String &s)
 		{
 			*this += s;
 			return *this;
 		}
 
-		inline EzLogStream &operator<<(std::string &&s)
+		inline EzLogStream &operator<<(String &&s)
 		{
 			*this += std::move(s);
 			return *this;
