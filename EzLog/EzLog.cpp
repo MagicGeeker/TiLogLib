@@ -29,7 +29,6 @@
 #define __________________________________________________EzLogBean__________________________________________________
 
 
-//#define EZLOG_ENABLE_ASSERT_ON_RELEASE
 //#define EZLOG_ENABLE_PRINT_ON_RELEASE
 
 #define EZLOG_INTERNAL_LOG_MAX_LEN  200
@@ -48,34 +47,7 @@
       }                           }while (0)
 #endif
 
-#if !defined(NDEBUG) || defined(EZLOG_ENABLE_ASSERT_ON_RELEASE)
 
-#ifndef DEBUG_ASSERT
-#define DEBUG_ASSERT(what)   \
-do{ if(!(what)){std::cerr<<"\n ERROR:\n"<<__FILE__<<":"<<__LINE__<<"\n"<<(#what)<<"\n"; assert(false);  }  }while(0)
-#endif
-
-#ifndef DEBUG_ASSERT1
-#define DEBUG_ASSERT1(what, X)   \
-do{ if(!(what)){std::cerr<<"\n ERROR:\n"<< __FILE__ <<":"<< __LINE__ <<"\n"<<(#what)<<"\n"<<(#X)<<": "<<(X); assert(false);  }  }while(0)
-#endif
-
-#ifndef DEBUG_ASSERT2
-#define DEBUG_ASSERT2(what, X, Y)   \
-do{ if(!(what)){std::cerr<<"\n ERROR:\n"<< __FILE__ <<":"<< __LINE__ <<"\n"<<(#what)<<"\n"<<(#X)<<": "<<(X)<<" "<<(#Y)<<": "<<(Y); assert(false);  }  }while(0)
-#endif
-
-#ifndef DEBUG_ASSERT3
-#define DEBUG_ASSERT3(what, X, Y, Z)   \
-do{ if(!(what)){std::cerr<<"\n ERROR:\n"<< __FILE__ <<":"<< __LINE__ <<"\n"<<(#what)<<"\n"<<(#X)<<": "<<(X)<<" "<<(#Y)<<": "<<Y<<" "<<(#Z)<<": "<<(Z); assert(false);  }  }while(0)
-#endif
-
-#else
-#define DEBUG_ASSERT(what)           do{}while(0)
-#define DEBUG_ASSERT1(what, X)           do{}while(0)
-#define DEBUG_ASSERT2(what, X, Y)       do{}while(0)
-#define DEBUG_ASSERT3(what, X, Y, Z)    do{}while(0)
-#endif
 
 #define EZLOG_SIZE_OF_ARRAY(arr)        (sizeof(arr)/sizeof(arr[0]))
 #define EZLOG_STRING_LEN_OF_CHAR_ARRAY(char_str) ((sizeof(char_str)-1)/sizeof(char_str[0]))
