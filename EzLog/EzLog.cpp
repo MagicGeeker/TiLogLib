@@ -175,20 +175,6 @@ namespace ezloghelperspace
 		return len;
 	}
 
-	static size_t CTimeToCStr(char *timecstr, time_t t)
-	{
-		struct tm *tmd = localtime(&t);
-		if (tmd != nullptr)
-		{
-			return strftime(timecstr, EZLOG_CTIME_MAX_LEN, "%Y-%m-%d %H:%M:%S", tmd);
-		}
-		else
-		{
-			timecstr[0] = '\0';
-			return 0;
-		}
-	}
-
 }
 
 using namespace ezloghelperspace;
@@ -461,7 +447,7 @@ namespace ezlogspace
 #endif
 
 		template<size_t _SleepWhenAcquireFailedInNanoSeconds = size_t(-1)>
-		class SpinLock
+		class SpinMutex
 		{
 			std::atomic_flag locked_flag_ = ATOMIC_FLAG_INIT;
 		public:
@@ -472,7 +458,7 @@ namespace ezlogspace
 					if_constexpr (_SleepWhenAcquireFailedInNanoSeconds == size_t(-1))
 					{
 						std::this_thread::yield();
-					} else if (_SleepWhenAcquireFailedInNanoSeconds != 0)
+					} else if_constexpr (_SleepWhenAcquireFailedInNanoSeconds != 0)
 					{
 						std::this_thread::sleep_for(std::chrono::nanoseconds(_SleepWhenAcquireFailedInNanoSeconds));
 					}
@@ -485,7 +471,7 @@ namespace ezlogspace
 			}
 		};
 
-		class EzLogTerminalPrinter : public EzLoggerPrinter
+		class EzLogTerminalPrinter : public EzLogPrinter
 		{
 			EZLOG_MEMORY_MANAGER_FRIEND
 		public:
@@ -502,7 +488,7 @@ namespace ezlogspace
 
 		};
 
-		class EzLogFilePrinter : public EzLoggerPrinter
+		class EzLogFilePrinter : public EzLogPrinter
 		{
 			EZLOG_MEMORY_MANAGER_FRIEND
 		public:
@@ -528,12 +514,12 @@ namespace ezlogspace
 		};
 
 
-		using ThreadLocalSpinLock =SpinLock<50>;
+		using ThreadLocalSpinMutex =SpinMutex<50>;
 
 		struct ThreadStru
 		{
 			EzLogBeanCircularQueue vcache;
-			ThreadLocalSpinLock spinLock;//protect cache
+			ThreadLocalSpinMutex spinLock;//protect cache
 
 			const String *tid;
 			std::mutex thrdExistMtx;
@@ -601,17 +587,12 @@ namespace ezlogspace
 
 			ThreadStru *InitForEveryThread();
 
-			void InitForValidThread();
-
 			bool Init();
 
 			void ipushLog(EzLogBean *pBean);
 
-#if defined(EZLOG_USE_STD_CHRONO) && defined(EZLOG_WITH_MILLISECONDS)
-			inline void getMilliTimeStrFromChrono(char *dst, size_t &len, EzLogBean &bean, SystemTimePoint &cpptime_pre);
-#else
-			inline void getTimeStrFromCTime(char *dst, size_t &len, const EzLogBean &bean, time_t &tPre);
-#endif
+			inline void getMilliTimeStrFromSystemClock(char *dst, size_t &len, EzLogBean &bean,
+													   SystemTimePoint &cpptime_pre);
 
 			inline void getMergedSingleLog(EzLogString &logs, const char *ctimestr, size_t ctimestr_len,
 										  const EzLogBean &bean);
@@ -675,7 +656,6 @@ namespace ezlogspace
 			std::mutex *s_pMtxQueue = new std::mutex();
 			std::mutex &s_mtxQueue = *s_pMtxQueue;
 			ThreadStruQueue s_threadStruQueue;
-			volatile bool s_threadStruQueue_inited = true;
 
 			CacheStru s_globalCache{GLOBAL_SIZE};
 			uint64_t s_printedLogsLength = 0;
@@ -730,14 +710,14 @@ namespace ezlogspace
 
 				Deleter(const Deleter &) noexcept = default;
 
-				void operator()(EzLoggerPrinter *p) const
+				void operator()(EzLogPrinter *p) const
 				{
 					if (!p->isStatic())
 						delete p;
 				}
 			};
 
-			using UniquePtrPrinter=std::unique_ptr<EzLoggerPrinter, Deleter>;
+			using UniquePtrPrinter=std::unique_ptr<EzLogPrinter, Deleter>;
 		public:
 
 			static EzLogImpl &getInstance();
@@ -749,11 +729,11 @@ namespace ezlogspace
 			static uint64_t getPrintedLogsLength();
 
 		public:
-			static bool setPrinter(UniquePtrPrinter p_ezLoggerPrinter);
+			static bool setPrinter(UniquePtrPrinter p_ezLogPrinter);
 
-			static EzLoggerPrinter *getDefaultTermialLoggerPrinter();
+			static EzLogPrinter *getDefaultTermialPrinter();
 
-			static EzLoggerPrinter *getDefaultFilePrinter();
+			static EzLogPrinter *getDefaultFilePrinter();
 
 		public:
 			//these functions are not thread safe
@@ -761,7 +741,7 @@ namespace ezlogspace
 
 			static EzLogLeveLEnum getDynamicLogLevel();
 
-			static EzLoggerPrinter *getCurrentPrinter();
+			static EzLogPrinter *getCurrentPrinter();
 
 		protected:
 
@@ -904,9 +884,9 @@ namespace ezlogspace
 			return ipml;
 		}
 
-		bool EzLogImpl::setPrinter(UniquePtrPrinter p_ezLoggerPrinter)
+		bool EzLogImpl::setPrinter(UniquePtrPrinter p_ezLogPrinter)
 		{
-			getInstance().m_printer = std::move(p_ezLoggerPrinter);
+			getInstance().m_printer = std::move(p_ezLogPrinter);
 			return true;
 		}
 
@@ -925,12 +905,12 @@ namespace ezlogspace
 			return EzLogCore::getPrintedLogsLength();
 		}
 
-		EzLoggerPrinter *EzLogImpl::getDefaultTermialLoggerPrinter()
+		EzLogPrinter *EzLogImpl::getDefaultTermialPrinter()
 		{
 			return EzLogTerminalPrinter::getInstance();
 		}
 
-		EzLoggerPrinter *EzLogImpl::getDefaultFilePrinter()
+		EzLogPrinter *EzLogImpl::getDefaultFilePrinter()
 		{
 			return EzLogFilePrinter::getInstance();
 		}
@@ -945,7 +925,7 @@ namespace ezlogspace
 			return getInstance().m_level;
 		}
 
-		EzLoggerPrinter *EzLogImpl::getCurrentPrinter()
+		EzLogPrinter *EzLogImpl::getCurrentPrinter()
 		{
 			return getInstance().m_printer.get();
 		}
@@ -1020,25 +1000,6 @@ namespace ezlogspace
 
 		ThreadStru *EzLogCore::InitForEveryThread()
 		{
-			//some thread run before main thread,so global var are not inited,which happens in msvc in some version,
-			//and cause crash because s_mtxMerge is not inited,these threads are often created by kernel.
-			//and in main thread,thread local var also may init before global var.and it cause s_pThreadLocalStru be deleted
-			if ((volatile std::mutex *) EzLogCore::s_pMtxQueue == nullptr ||
-				EzLogCore::s_threadStruQueue_inited != true)  //s_threadStruQueue is not inited
-			{
-				const String *p_tid = GetNewThreadIDString();
-				DEBUG_PRINT(EZLOG_LEVEL_WARN, "s_threadStruQueue not inited tid= %s\n", p_tid->c_str());
-				fflush(stdout);
-				ezdelete(p_tid);
-				s_pThreadLocalStru = nullptr;
-				return s_pThreadLocalStru;
-			}
-			InitForValidThread();
-			return s_pThreadLocalStru;
-		}
-
-		void EzLogCore::InitForValidThread()
-		{
 			s_pThreadLocalStru = eznew<ThreadStru>(EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE);
 			DEBUG_ASSERT(s_pThreadLocalStru != nullptr);
 			DEBUG_ASSERT(s_pThreadLocalStru->tid != nullptr);
@@ -1049,15 +1010,11 @@ namespace ezlogspace
 			}
 			unique_lock<mutex> lk(s_pThreadLocalStru->thrdExistMtx);
 			notify_all_at_thread_exit(s_pThreadLocalStru->thrdExistCV, std::move(lk));
+			return s_pThreadLocalStru;
 		}
 
 		bool EzLogCore::Init()
 		{
-//TODO
-//			if (s_pThreadLocalStru == nullptr)
-//			{
-//				InitForValidThread();
-//			}
 			lock_guard<mutex> lgd_merge(s_mtxMerge);
 			lock_guard<mutex> lgd_print(s_mtxPrinter);
 			lock_guard<mutex> lgd_del(s_mtxDeleter);
@@ -1258,11 +1215,7 @@ namespace ezlogspace
 			MergeSortForGlobalQueue();
 
 			char ctimestr[EZLOG_CTIME_MAX_LEN] = {0};
-#if defined(EZLOG_WITH_MILLISECONDS) && defined(EZLOG_USE_STD_CHRONO)
 			SystemTimePoint cpptime_pre = SystemTimePoint::min();
-#else
-			time_t tPre = 0;
-#endif
 			size_t len = 0;
 			EzLogString logs;
 
@@ -1273,11 +1226,7 @@ namespace ezlogspace
 				EzLogBean &bean = *pBean;
 				DEBUG_ASSERT1(bean.file != nullptr, bean.file);
 
-#if defined(EZLOG_USE_STD_CHRONO) && defined(EZLOG_WITH_MILLISECONDS)
-				getMilliTimeStrFromChrono(ctimestr, len, bean, cpptime_pre);
-#else
-				getTimeStrFromCTime(ctimestr, len, bean, tPre);
-#endif
+				getMilliTimeStrFromSystemClock(ctimestr, len, bean, cpptime_pre);
 				{
 					getMergedSingleLog(logs, ctimestr, len, bean);
 
@@ -1299,9 +1248,8 @@ namespace ezlogspace
 
 
 
-#if defined(EZLOG_USE_STD_CHRONO) && defined(EZLOG_WITH_MILLISECONDS)
-		inline void EzLogCore::getMilliTimeStrFromChrono(char *dst, size_t &len, EzLogBean &bean,
-														  SystemTimePoint &cpptime_pre)
+		inline void EzLogCore::getMilliTimeStrFromSystemClock(char *dst, size_t &len, EzLogBean &bean,
+															  SystemTimePoint &cpptime_pre)
 		{
 			bean.time().cast_to_ms();
 			SystemTimePoint &&cpptime = bean.time().get_origin_time();
@@ -1314,20 +1262,6 @@ namespace ezlogspace
 				cpptime_pre = len == 0 ? SystemTimePoint::min() : cpptime;
 			}
 		}
-#else
-		inline void EzLogCore::getTimeStrFromCTime(char *dst, size_t &len, const EzLogBean &bean, time_t &tPre)
-		{
-			time_t t = bean.time().to_time_t();
-			if (t == tPre)
-			{
-				//time is equal to pre,no need to update
-			} else
-			{
-				len = CTimeToCStr(dst, t);
-				tPre = len == 0 ? ezlogtimespace::time_t_helper::min() : t;
-			}
-		}
-#endif
 
 		inline void EzLogCore::getMergedSingleLog(EzLogString &logs, const char *ctimestr, size_t ctimestr_len,
 														  const EzLogBean &bean)
@@ -1468,7 +1402,7 @@ namespace ezlogspace
 			bufSize += mergedLogString.length();
 			s_printedLogsLength += mergedLogString.length();
 
-			EzLoggerPrinter *printer = EzLogImpl::getCurrentPrinter();
+			EzLogPrinter *printer = EzLogImpl::getCurrentPrinter();
 			DEBUG_PRINT(EZLOG_LEVEL_INFO, "prepare to print %u bytes\n", (unsigned)mergedLogString.size());
 			printer->onAcceptLogs(mergedLogString.data(), mergedLogString.size());
 			if (bufSize >= EZLOG_GLOBAL_BUF_SIZE)
@@ -1517,7 +1451,7 @@ namespace ezlogspace
 				this_thread::yield();
 				if (!s_existThrdMerge)
 				{
-					EzLoggerPrinter *printer = EzLogImpl::getCurrentPrinter();
+					EzLogPrinter *printer = EzLogImpl::getCurrentPrinter();
 					printer->sync();
 					break;
 				}
@@ -1684,7 +1618,7 @@ namespace ezlogspace
 
 #ifdef __________________________________________________EzLog__________________________________________________
 
-	void EzLog::setPrinter(EzLoggerPrinter *p_ezLog_managed_Printer)
+	void EzLog::setPrinter(EzLogPrinter *p_ezLog_managed_Printer)
 	{
 		EzLogImpl::setPrinter(EzLogImpl::UniquePtrPrinter(p_ezLog_managed_Printer));
 	}
@@ -1716,12 +1650,12 @@ namespace ezlogspace
 	}
 #endif
 
-	EzLoggerPrinter *EzLog::getDefaultTerminalPrinter()
+	EzLogPrinter *EzLog::getDefaultTerminalPrinter()
 	{
-		return EzLogImpl::getDefaultTermialLoggerPrinter();
+		return EzLogImpl::getDefaultTermialPrinter();
 	}
 
-	EzLoggerPrinter *EzLog::getDefaultFilePrinter()
+	EzLogPrinter *EzLog::getDefaultFilePrinter()
 	{
 		return EzLogImpl::getDefaultFilePrinter();
 	}

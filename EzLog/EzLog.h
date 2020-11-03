@@ -22,10 +22,8 @@
 #include "../depend_libs/ftoa-fast/ftoa.h"
 
 /**************************************************MACRO FOR USER**************************************************/
-//#define    EZLOG_USE_CTIME
-#define    EZLOG_USE_STD_CHRONO
+#define    EZLOG_USE_STD_SYSTEM_CLOCK
 #define    EZLOG_WITH_MILLISECONDS
-#define EZLOG_TIME_IS_STEADY    FALSE     //customize time is steady or not
 
 //#define EZLOG_USE_STRING
 #define EZLOG_USE_STRING_EXTEND
@@ -89,8 +87,9 @@ namespace ezlogspace
 
 #ifndef NDEBUG
 #undef EZLOG_MALLOC_FUNCTION
-#define	EZLOG_MALLOC_FUNCTION(size) EZLOG_CALLOC_FUNCTION(size,1)
+#define    EZLOG_MALLOC_FUNCTION(size) EZLOG_CALLOC_FUNCTION(size,1)
 #endif
+
 	class EzLogMemoryManager
 	{
 	public:
@@ -173,27 +172,38 @@ namespace ezlogspace
     constexpr size_t EZLOG_DOUBLE_MAX_CHAR_LEN =(25+1); //TODO
     constexpr size_t EZLOG_FLOAT_MAX_CHAR_LEN =(25+1);  //TODO
 
-    class EzLogStream;
+
+
+}
+
+namespace ezlogspace{
+	class EzLogStream;
+
 	namespace internal
 	{
 		class EzLogBean;
+
 		class EzLogString;
 
 		const String *GetThreadIDString();
 
 #ifndef NDEBUG
+
 		class positive_size_t
+		{
+			size_t sz;
+		public:
+			positive_size_t(size_t sz) : sz(sz)
 			{
-				size_t sz;
-			public:
-				 positive_size_t(size_t sz):sz(sz){
-					 assert(sz!=0);
-				 }
-				 operator size_t()const
-				 {
-					 return sz;
-				 }
-			};
+				assert(sz != 0);
+			}
+
+			operator size_t() const
+			{
+				return sz;
+			}
+		};
+
 #else
 		using positive_size_t=size_t;
 #endif
@@ -222,6 +232,7 @@ namespace ezlogspace
 				m_front = front;
 				m_end = front + sz;
 			}
+
 			const char *data() const
 			{
 				return m_front;
@@ -233,9 +244,9 @@ namespace ezlogspace
 			}
 		};
 
-        //notice! For faster in append and etc function, this is not always end with '\0'
-        //if you want to use c-style function on this object, such as strlen(&this->front())
-        //you must call c_str() function before to ensure end with the '\0'
+		//notice! For faster in append and etc function, this is not always end with '\0'
+		//if you want to use c-style function on this object, such as strlen(&this->front())
+		//you must call c_str() function before to ensure end with the '\0'
 		//see ensureZero
 		class EzLogString : public EzLogObject
 		{
@@ -853,7 +864,7 @@ namespace ezlogspace
 			inline EzLogStringExtend(const EzLogStringExtend &x)
 			{
 				do_malloc(x.pCore->size, get_better_cap(x.pCore->size));
-				memcpy(this->pCore, x.pCore, size_head()+x.pCore->size);
+				memcpy(this->pCore, x.pCore, size_head() + x.pCore->size);
 				ensureZero();
 			}
 
@@ -917,7 +928,7 @@ namespace ezlogspace
 				return pCore->capacity;
 			}
 
-			inline size_t memsize()const
+			inline size_t memsize() const
 			{
 				return capacity() + sizeof('\0') + size_head();
 			}
@@ -1361,6 +1372,7 @@ namespace ezlogspace
 			{
 				return pCore->buf + pCore->size;
 			}
+
 			inline char *pEnd()
 			{
 				return pCore->buf + pCore->size;
@@ -1371,10 +1383,11 @@ namespace ezlogspace
 				pCore->size += sz;
 			}
 
-			inline const char *pCapacity()const
+			inline const char *pCapacity() const
 			{
 				return pCore->buf + pCore->capacity;
 			}
+
 			inline char *pCapacity()
 			{
 				return pCore->buf + pCore->capacity;
@@ -1394,11 +1407,13 @@ namespace ezlogspace
 		};
 
 
+	}
 
-
+	namespace internal
+	{
 		namespace ezlogtimespace
 		{
-			enum EzLogTimeEnum
+			enum class EzLogTimeEnum
 			{
 				NOW, MIN, MAX
 			};
@@ -1414,10 +1429,11 @@ namespace ezlogspace
 			using steady_flag_t = uint32_t;
 #endif
 			static_assert(EZLOG_MAX_LOG_NUM <= std::numeric_limits<steady_flag_t>::max(),
-				"Fatal error,max++ is equal to min,it will be not steady!");
+						  "Fatal error,max++ is equal to min,it will be not steady!");
 #else
 			using steady_flag_t = uint64_t;  //no use
 #endif
+
 			struct steady_flag_helper
 			{
 				static inline steady_flag_t now()
@@ -1440,41 +1456,6 @@ namespace ezlogspace
 			private:
 
 			};
-
-#define EZLOG_TIME_T_TEMPLATE_FOR(TYPE)    template<typename T = time_t, typename std::enable_if< std::is_same<T, TYPE>::value, TYPE>::type* = nullptr>
-			struct time_t_helper
-			{
-				inline static time_t now()
-				{
-					return time(NULL);
-				}
-
-				constexpr inline static time_t min()
-				{
-					return (time_t) (0);
-				}
-
-				EZLOG_TIME_T_TEMPLATE_FOR(uint64_t)  constexpr inline static time_t max()
-				{
-					return (time_t) (UINT64_MAX);
-				}
-
-				EZLOG_TIME_T_TEMPLATE_FOR(int64_t)  constexpr inline static time_t max()
-				{
-					return (time_t) (INT64_MAX);
-				}
-
-				EZLOG_TIME_T_TEMPLATE_FOR(uint32_t) constexpr  inline static time_t max()
-				{
-					return (time_t) (UINT32_MAX);
-				}
-
-				EZLOG_TIME_T_TEMPLATE_FOR(int32_t)  constexpr inline static time_t max()
-				{
-					return (time_t) (INT32_MAX);
-				}
-			};
-#undef EZLOG_TIME_T_TEMPLATE_FOR
 
 			//for customize timer，must be similar to EzLogTimeImplBase
 			EZLOG_ABSTRACT class EzLogTimeImplBase
@@ -1543,117 +1524,6 @@ namespace ezlogspace
 				steady_flag_t steadyT;
 
 			};
-
-			EZLOG_ABSTRACT class EzLogCTimeBase : EzLogTimeImplBase
-			{
-			public:
-				using origin_time_type=time_t;
-			public:
-				inline time_t to_time_t() const
-				{ return ctime; }
-
-				inline void cast_to_ms()
-				{}
-
-				inline origin_time_type get_origin_time() const
-				{ return ctime; }
-
-			protected:
-				time_t ctime;
-			};
-
-			//to use this class ,make sure time() is steady
-			class EzLogSteadyCTime : public EzLogCTimeBase
-			{
-			public:
-				using steady_flag_t = time_t;
-			public:
-				inline EzLogSteadyCTime()
-				{
-					*this = min();
-				}
-
-				inline EzLogSteadyCTime(time_t t)
-				{
-					ctime = t;
-				}
-
-				inline bool operator<(const EzLogSteadyCTime &rhs) const
-				{
-					return ctime < rhs.ctime;
-				}
-
-				inline bool operator<=(const EzLogSteadyCTime &rhs) const
-				{
-					return ctime <= rhs.ctime;
-				}
-
-				inline EzLogSteadyCTime &operator=(const EzLogSteadyCTime &t) = default;
-//				{
-//					ctime = t.ctime;
-//					return *this;
-//				}
-
-				inline steady_flag_t toSteadyFlag() const
-				{
-					return ctime;
-				}
-
-				inline static EzLogSteadyCTime now()
-				{
-					return time_t_helper::now();
-				}
-
-				inline static EzLogSteadyCTime min()
-				{
-					return time_t_helper::min();
-				}
-
-				inline static EzLogSteadyCTime max()
-				{
-					return time_t_helper::max();
-				}
-			};
-
-			class EzLogNOSteadyCTime : public EzLogCTimeBase, public EzLogNoSteadyTimeImplBase
-			{
-
-			public:
-				inline EzLogNOSteadyCTime()
-				{
-					*this = min();
-				}
-
-				inline EzLogNOSteadyCTime(time_t t, steady_flag_t st)
-				{
-					ctime = t;
-					steadyT = st;
-				}
-
-				inline EzLogNOSteadyCTime &operator=(const EzLogNOSteadyCTime &t) = default;
-//				{
-//					ctime = t.ctime;
-//					steadyT = t.steadyT;
-//					return *this;
-//				}
-
-
-				inline static EzLogNOSteadyCTime now()
-				{
-					return {time_t_helper::now(), steady_flag_helper::now()};
-				}
-
-				inline static EzLogNOSteadyCTime min()
-				{
-					return {time_t_helper::min(), steady_flag_helper::min()};
-				}
-
-				inline static EzLogNOSteadyCTime max()
-				{
-					return {time_t_helper::max(), steady_flag_helper::max()};
-				}
-			};
-
 
 			EZLOG_ABSTRACT class EzLogChornoTimeBase : EzLogTimeImplBase
 			{
@@ -1791,13 +1661,13 @@ namespace ezlogspace
 				{
 					switch (e)
 					{
-						case NOW:
+						case EzLogTimeEnum::NOW:
 							impl = EzLogTimeImplType::now();
 							break;
-						case MIN:
+						case EzLogTimeEnum::MIN:
 							impl = EzLogTimeImplType::min();
 							break;
-						case MAX:
+						case EzLogTimeEnum::MAX:
 							impl = EzLogTimeImplType::max();
 							break;
 						default:
@@ -1858,23 +1728,31 @@ namespace ezlogspace
 			private:
 				EzLogTimeImplType impl;
 			};
+
+			template<typename T, typename T2=void>
+			struct SystemLockHelper
+			{
+				using type=ezlogspace::internal::ezlogtimespace::EzLogNoSteadyChornoTime;
+			};
+
+			template<typename T>
+			struct SystemLockHelper<T, typename std::enable_if<T::is_steady>::type>
+			{
+				using type=ezlogspace::internal::ezlogtimespace::EzLogSteadyChornoTime;
+			};
 		};
 
+	}
 
-
+	namespace internal
+	{
 		class EzLogBean : public EzLogObject
 		{
 		public:
+			using SystemLock=std::chrono::system_clock;
 			using TimePoint=std::chrono::system_clock::time_point;
-#if defined( EZLOG_USE_CTIME) && !EZLOG_TIME_IS_STEADY
-			using EzLogTime=ezlogspace::internal::ezlogtimespace::EzLogTime<ezlogspace::internal::ezlogtimespace::EzLogNOSteadyCTime>;
-#elif defined( EZLOG_USE_CTIME) && EZLOG_TIME_IS_STEADY
-			using EzLogTime=ezlogspace::internal::ezlogtimespace::EzLogTime<ezlogspace::internal::ezlogtimespace::EzLogSteadyCTime>;
-#elif defined( EZLOG_USE_STD_CHRONO) && !EZLOG_TIME_IS_STEADY
-			using EzLogTime=ezlogspace::internal::ezlogtimespace::EzLogTime<ezlogspace::internal::ezlogtimespace::EzLogNoSteadyChornoTime>;
-#elif defined( EZLOG_USE_STD_CHRONO) && EZLOG_TIME_IS_STEADY
-			using EzLogTime=ezlogspace::internal::ezlogtimespace::EzLogTime<ezlogspace::internal::ezlogtimespace::EzLogSteadyChornoTime>;
-#endif
+			using EzLogTime=ezlogspace::internal::ezlogtimespace::EzLogTime<ezlogspace::internal::ezlogtimespace::SystemLockHelper<SystemLock>::type>;
+
 			static_assert(std::is_trivially_copyable<TimePoint>::value, "");
 			static_assert(std::is_trivially_destructible<TimePoint>::value, "");
 			static_assert(std::is_trivially_copyable<EzLogTime>::value, "");
@@ -1897,12 +1775,12 @@ namespace ezlogspace
 
 		public:
 
-			const EzLogTime& time() const
+			const EzLogTime &time() const
 			{
 				return ezLogTime;
 			}
 
-			EzLogTime& time()
+			EzLogTime &time()
 			{
 				return ezLogTime;
 			}
@@ -1952,23 +1830,28 @@ namespace ezlogspace
 			inline static void DestroyInstance(EzLogBean *p)
 			{
 				check(p);
-				DEBUG_RUN(p->flag3=3, p->flag2=2, p->flag1 = 1;);
+				DEBUG_RUN(p->flag3 = 3, p->flag2 = 2, p->flag1 = 1;);
 				EZLOG_FREE_FUNCTION(p);
 			}
+
 #endif
+
 			inline static void check(EzLogBean *p)
 			{
 				assert(p != nullptr);//in this program,p is not null
-				DEBUG_RUN(assert(!(p->flag3==3 || p->flag2==2 || p->flag1==1)););
-				DEBUG_RUN(assert(!(p->line==0 || p->fileLen==0)););
+				DEBUG_RUN(assert(!(p->flag3 == 3 || p->flag2 == 2 || p->flag1 == 1)););
+				DEBUG_RUN(assert(!(p->line == 0 || p->fileLen == 0)););
 			}
 		};
 
 	}
+}
 
+namespace ezlogspace
+{
 	class EzLogStream;
 
-	EZLOG_ABSTRACT class EzLoggerPrinter : public EzLogObject
+	EZLOG_ABSTRACT class EzLogPrinter : public EzLogObject
 	{
 	public:
 
@@ -1984,7 +1867,7 @@ namespace ezlogspace
 			return true;
 		}
 
-		virtual ~EzLoggerPrinter() = default;
+		virtual ~EzLogPrinter() = default;
 
 	protected:
 		size_t singleFilePrintedLogSize = 0;
@@ -2007,11 +1890,11 @@ namespace ezlogspace
 		//p_ezLog_managed_Printer will be managed and deleted by EzLog,no need to free by user
 		//or p_ezLog_managed_Printer is static and will not be deleted
 		//it will not be effective immediately
-		static void setPrinter(EzLoggerPrinter *p_ezLog_managed_Printer);
+		static void setPrinter(EzLogPrinter *p_ezLog_managed_Printer);
 
-		static EzLoggerPrinter *getDefaultTerminalPrinter();
+		static EzLogPrinter *getDefaultTerminalPrinter();
 
-		static EzLoggerPrinter *getDefaultFilePrinter();
+		static EzLogPrinter *getDefaultFilePrinter();
 
 		static void pushLog(internal::EzLogBean *pBean);
 
@@ -2256,10 +2139,6 @@ namespace ezlogspace
 	};
 }
 
-
-#if (defined(EZLOG_USE_CTIME) && defined(EZLOG_USE_STD_CHRONO)) || (!defined(EZLOG_USE_CTIME) && !defined(EZLOG_USE_STD_CHRONO))
-#error "only one stratrgy can be and must be selected"
-#endif
 
 
 static_assert(EZLOG_GLOBAL_QUEUE_MAX_SIZE > 0, "fatal err!");
