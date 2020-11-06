@@ -180,6 +180,13 @@ namespace ezlogspace
 namespace ezlogspace{
 	class EzLogStream;
 
+#ifdef EZLOG_LOG_WILL_NOT_BIGGER_THAN_UINT32MAX
+	using size_type = uint32_t;
+#else
+	using size_type = size_t;
+#endif
+	static_assert(sizeof(size_type) <= sizeof(size_t), "fatal error");
+
 	namespace internal
 	{
 		class EzLogBean;
@@ -192,21 +199,21 @@ namespace ezlogspace{
 
 		class positive_size_t
 		{
-			size_t sz;
+			size_type sz;
 		public:
-			positive_size_t(size_t sz) : sz(sz)
+			positive_size_t(size_type sz) : sz(sz)
 			{
 				assert(sz != 0);
 			}
 
-			operator size_t() const
+			operator size_type() const
 			{
 				return sz;
 			}
 		};
 
 #else
-		using positive_size_t=size_t;
+		using positive_size_t= size_type;
 #endif
 
 		enum class EzLogStringEnum
@@ -597,6 +604,7 @@ namespace ezlogspace{
 				ensureZero();
 			}
 
+			//std::string will set '\0' for all increased char,but this class not.
 			inline void resize(size_t size)
 			{
 				ensureCap(size);
@@ -800,12 +808,7 @@ namespace ezlogspace{
 			friend class ezlogspace::EzLogStream;
 
 		protected:
-#ifdef EZLOG_LOG_WILL_NOT_BIGGER_THAN_UINT32MAX
-			using size_type = uint32_t ;
-#else
-			using size_type = size_t ;
-#endif
-			static_assert(sizeof(size_type) <= sizeof(size_t), "fatal error");
+
 			constexpr static size_type SIZE_OF_EXTEND = (size_type)sizeof(ExtType);
 
 		public:
@@ -878,7 +881,7 @@ namespace ezlogspace{
 				ensureZero();
 			}
 
-			inline EzLogStringExtend(EzLogStringExtend &&x)
+			inline EzLogStringExtend(EzLogStringExtend &&x) noexcept
 			{
 				//create();
 				this->pCore = nullptr;
@@ -1056,7 +1059,8 @@ namespace ezlogspace{
 
 			inline EzLogStringExtend &append(const String &str)
 			{
-				size_type length = str.length();
+				DEBUG_ASSERT(str.length() < std::numeric_limits<size_type>::max());
+				size_type length = (size_type) str.length();
 				ensureCap(size_with_zero() + length);
 				return append_unsafe(str);
 			}
@@ -1142,7 +1146,8 @@ namespace ezlogspace{
 
 			inline EzLogStringExtend &append_unsafe(const String &str)
 			{
-				size_type length = str.length();
+				DEBUG_ASSERT(str.length() < std::numeric_limits<size_type>::max());
+				size_type length = (size_type) str.length();
 				memcpy(pEnd(), str.data(), length);
 				increase_size(length);
 				ensureZero();
@@ -1194,7 +1199,7 @@ namespace ezlogspace{
 			inline EzLogStringExtend &append_unsafe(double x)
 			{
 				dtoa_milo(x, pEnd());
-				size_type off = strlen(pEnd());
+				size_type off = (size_type) strlen(pEnd());
 				increase_size(off);
 				ensureZero();
 				return *this;
@@ -1215,6 +1220,7 @@ namespace ezlogspace{
 				ensureZero();
 			}
 
+			//std::string will set '\0' for all increased char,but this class not.
 			inline void resize(size_type size)
 			{
 				ensureCap(size);
@@ -1485,6 +1491,8 @@ namespace ezlogspace{
 
 				inline time_t to_time_t() const;
 
+				inline void cast_to_sec();
+
 				inline void cast_to_ms();
 
 				inline origin_time_type get_origin_time() const;
@@ -1541,7 +1549,10 @@ namespace ezlogspace{
 				{
 					return SystemLock::to_time_t(chronoTime);
 				}
-
+				inline void cast_to_sec()
+				{
+					chronoTime = std::chrono::time_point_cast<std::chrono::seconds>(chronoTime);
+				}
 				inline void cast_to_ms()
 				{
 					chronoTime = std::chrono::time_point_cast<std::chrono::milliseconds>(chronoTime);
@@ -1706,11 +1717,14 @@ namespace ezlogspace{
 				{
 					return impl.to_time_t();
 				}
-
+				inline void cast_to_sec()
+				{
+					impl.cast_to_sec();
+				}
 				inline void cast_to_ms()
 				{
 					impl.cast_to_ms();
-				};
+				}
 
 				inline origin_time_type get_origin_time() const
 				{ return impl.get_origin_time(); }
@@ -1878,7 +1892,9 @@ namespace ezlogspace
 		size_t singleFilePrintedLogSize = 0;
 	};
 
-	enum EzLogLeveLEnum
+	//set as uint8_t to make sure reading from memory to register or
+	//writing from register to memory is atomic
+	enum EzLogLeveLEnum:uint8_t
 	{
 		CLOSED = 1,
 		COUT, ALWAYS, FATAL, ERROR, WARN, INFO, DEBUG, VERBOSE,
@@ -2021,7 +2037,7 @@ namespace ezlogspace
 		}
 #endif
 
-		inline EzLogStream&operator()(EzLogStringEnum ,const char* s,size_t length)
+		inline EzLogStream&operator()(EzLogStringEnum ,const char* s,size_type length)
 		{
 			this->append(s,length);
 			return *this;
@@ -2037,7 +2053,8 @@ namespace ezlogspace
 			va_end(vaList);
 			if (sz > 0)
 			{
-				this->append(buf, sz);
+				DEBUG_ASSERT(sz < std::numeric_limits<size_type>::max());
+				this->append(buf, (size_type)sz);
 			}
 
 			return *this;

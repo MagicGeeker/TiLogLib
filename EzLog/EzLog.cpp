@@ -581,7 +581,7 @@ namespace ezlogspace
 			static uint64_t getPrintedLogsLength();
 
 		private:
-			static EzLogCore &getInstance();
+			inline static EzLogCore &getInstance();
 
 			void AtExit();
 
@@ -597,7 +597,7 @@ namespace ezlogspace
 			inline void getMergedSingleLog(EzLogString &logs, const char *ctimestr, size_t ctimestr_len,
 										  const EzLogBean &bean);
 
-			EzLogString &getMergedLogString();
+			void getMergedLogString();
 
 			void InsertEveryThreadCachedLogToSet(List<ThreadStru *> &thread_queue,
 												MultiSet<EzLogBeanVector, EzLogCircularQueueComp> &s,
@@ -774,7 +774,7 @@ namespace ezlogspace
 
 		void EzLogTerminalPrinter::onAcceptLogs(const char *const logs, size_t size)
 		{
-			std::cout << logs;
+			std::cout.write(logs,size);
 		}
 
 		bool EzLogTerminalPrinter::isThreadSafe()
@@ -878,7 +878,7 @@ namespace ezlogspace
 
 #ifdef __________________________________________________EzLogImpl__________________________________________________
 
-		EzLogImpl &EzLogImpl::getInstance()
+		inline EzLogImpl &EzLogImpl::getInstance()
 		{
 			static EzLogImpl &ipml = *eznew<EzLogImpl>();//do not delete
 			return ipml;
@@ -1206,7 +1206,7 @@ namespace ezlogspace
 		}
 
 		//s_mtxMerge s_mtxPrinter must be owned
-		EzLogString & EzLogCore::getMergedLogString()
+		void EzLogCore::getMergedLogString()
 		{
 			using namespace std::chrono;
 
@@ -1242,7 +1242,6 @@ namespace ezlogspace
 			}
 
 			DEBUG_PRINT(EZLOG_LEVEL_INFO, "End of getMergedLogString,s_global_cache_string size= %u\n", (unsigned)str.size());
-			return str;
 		}
 
 
@@ -1251,7 +1250,11 @@ namespace ezlogspace
 		inline void EzLogCore::getMilliTimeStrFromSystemClock(char *dst, size_t &len, EzLogBean &bean,
 															  SystemTimePoint &cpptime_pre)
 		{
+#ifdef EZLOG_WITH_MILLISECONDS
 			bean.time().cast_to_ms();
+#else
+			bean.time().cast_to_sec();
+#endif
 			SystemTimePoint &&cpptime = bean.time().get_origin_time();
 			if (cpptime == cpptime_pre)
 			{
@@ -1373,7 +1376,7 @@ namespace ezlogspace
 				});
 
 				std::unique_lock<std::mutex> lk_print(s_mtxPrinter);
-				EzLogString &mergedLogString = getMergedLogString();
+				getMergedLogString();
 				clearGlobalCacheQueueAndNotifyGC();
 				s_merging = false;
 				lk_merge.unlock();
@@ -1510,12 +1513,12 @@ namespace ezlogspace
 		{
 			for (uint32_t t = s_pollPeriodSplitNum; t--;)
 			{
+				this_thread::sleep_for(chrono::microseconds(s_pollPeriodus));
 				if (s_to_exit)
 				{
-					DEBUG_PRINT(EZLOG_LEVEL_INFO, "poll thrd prepare to exit\n");
+					DEBUG_PRINT(EZLOG_LEVEL_INFO, "poll thrd prepare to exit,try last poll\n");
 					return false;
 				}
-				this_thread::sleep_for(chrono::microseconds(s_pollPeriodus));
 			}
 			return true;
 		}
