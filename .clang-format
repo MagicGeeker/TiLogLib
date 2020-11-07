@@ -81,7 +81,7 @@ BreakBeforeTernaryOperators:	true
 
 BreakConstructorInitializersBeforeComma:	false
 
-ColumnLimit:	200
+ColumnLimit:	140
 
 CommentPragmas:	'^ IWYU pragma:'
 
