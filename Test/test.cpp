@@ -7,7 +7,7 @@ using namespace ezlogspace;
 
 #include "../depend_libs/catch/catch.hpp"
 
-
+//__________________________________________________major test__________________________________________________//
 //#define single_thread_log_test_____________________
 //#define multi_thread_log_test_____________________
 //#define file_multi_thread_log_test_____________________
@@ -20,13 +20,18 @@ using namespace ezlogspace;
 //#define file_multi_thread_benchmark_test_____________________
 //#define file_multi_thread_close_print_benchmark_test_____________________
 //#define file_single_thread_operator_test_____________________
-//#define terminal_multi_thread_poll__log_test_____________________
-//#define file_multi_thread_memory_leak_stress_test_____________________
-//#define ezlog_string_test_____________________
-//#define ezlog_string_extend_test_____________________
 //#define terminal_single_thread_long_string_log_test_____________________
 //#define file_multi_thread_print_level_test_____________________
 #define file_static_log_test_____________________
+
+//__________________________________________________long time test__________________________________________________//
+//#define terminal_multi_thread_poll__log_test_____________________
+//#define file_multi_thread_memory_leak_stress_test_____________________
+
+//__________________________________________________other test__________________________________________________//
+//#define ezlog_string_test_____________________
+//#define ezlog_string_extend_test_____________________
+
 
 uint64_t complexCalFunc(uint64_t x)
 {
@@ -277,7 +282,7 @@ TEST_CASE("file_time_multi_thread_simulation__log_test_____________________")
 			shared_lock<shared_mutex> slck(smtx);
 			cva.wait(slck, []() -> bool { return begin; });
 
-			for (int loops = rate * LOOPS; loops; loops--)
+			for (uint64_t loops = (uint64_t)(rate * LOOPS); loops; loops--)
 			{
 				//do something cost 20ms,and log once
 				//this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -607,11 +612,11 @@ TEST_CASE("ezlog_string_test_____________________")
 	String str6=str4;
 	str6.append(" nhmyootrnpkbf");
 
-	std::cout 
+	std::cout
 		<< str2 << std::endl
-		<< str3 << std::endl 
-		<< str4 << std::endl 
-		<< str5 << std::endl 
+		<< str3 << std::endl
+		<< str4 << std::endl
+		<< str5 << std::endl
 		<< str6 << std::endl;
 
 	String longStr("long string ");
@@ -677,6 +682,7 @@ TEST_CASE( "ezlog_string_extend_test_____________________" )
 	for( uint32_t i = 0; i < 10000; i++ )
 	{
 		longStr.append(char('a' + i % 26));
+		if (i % 26 == 0) longStr.append('\n');
 	}
 	std::cout<<"\n longStr:\n"<<longStr<<std::endl;
 
@@ -684,6 +690,7 @@ TEST_CASE( "ezlog_string_extend_test_____________________" )
 	for( uint32_t i = 0; i < 10000; i++ )
 	{
 		longStr2.append(char('R' + i % 11));
+		if (i % (3*11) == 0) longStr2.append('\n');
 	}
 	std::cout<<"\n longStr2:\n"<<longStr2<<std::endl;
 }
@@ -749,7 +756,7 @@ TEST_CASE("file_multi_thread_print_level_test_____________________")
 				EZLOG(index) << "index= " << index << " j= " << j;
 				if (index == EzLogLeveLEnum::ALWAYS && (j * 8) % loops == 0)
 				{
-					uint32_t v = j * 8 / loops;  //1-8
+					uint64_t v = j * 8 / loops;	   // 1-8
 					EzLog::setLogLevel((ezlogspace::EzLogLeveLEnum) (9 - v));
 				}
 			}
