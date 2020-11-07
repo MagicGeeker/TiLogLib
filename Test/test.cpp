@@ -22,15 +22,30 @@ using namespace ezlogspace;
 //#define file_single_thread_operator_test_____________________
 //#define terminal_single_thread_long_string_log_test_____________________
 //#define file_multi_thread_print_level_test_____________________
-#define file_static_log_test_____________________
+//#define file_static_log_test_____________________
+
+
 
 //__________________________________________________long time test__________________________________________________//
 //#define terminal_multi_thread_poll__log_test_____________________
 //#define file_multi_thread_memory_leak_stress_test_____________________
 
+
+
+
 //__________________________________________________other test__________________________________________________//
 //#define ezlog_string_test_____________________
 //#define ezlog_string_extend_test_____________________
+
+
+
+
+//__________________________________________________special test__________________________________________________//
+//#define special_log_test_____________________
+//#define static_log_level_multi_thread_benchmark_test_____________________
+//#define dynamic_log_level_multi_thread_benchmark_test_____________________
+
+
 
 
 uint64_t complexCalFunc(uint64_t x)
@@ -550,7 +565,7 @@ TEST_CASE("file_multi_thread_memory_leak_stress_test_____________________")
 #ifdef NDEBUG
 	constexpr int32_t threads = 20000;
 #else
-	constexpr int32_t threads = 100;
+	constexpr int32_t threads = 500;
 #endif
 	constexpr uint64_t loops = 50;
 
@@ -786,7 +801,7 @@ static bool b0_file_static_log_test = []() {
 	EzLog::setPrinter(EzLog::getDefaultTerminalPrinter());
 	EZCOUT << "Prepare file_static_log_test_____________________";
 
-	auto s=EZLOGD ("long string \n");
+	auto s= std::move( EZLOGD ("long string \n") );
 	for (uint32_t i = 0; i < 10000; i++)
 	{
 		s<<(char('a' + i % 26));
@@ -794,12 +809,162 @@ static bool b0_file_static_log_test = []() {
 		else s <<" "<< i/26<<'\n';
 	}
 	return true;
-}();  
+}();
 TEST_CASE("file_static_log_test_____________________")
 {
 	EZCOUT << "Complete file_static_log_test_____________________\n";
 }
 
+#endif
+
+#ifdef special_log_test_____________________
+TEST_CASE("special_log_test_____________________")
+{
+	static_assert(EZLOG_STATIC_LOG__LEVEL == EZLOG_LEVEL_WARN, "set warn to begin test");
+	EZCOUT << "special_log_test_____________________";
+	EzLog::setPrinter(EzLog::getDefaultTerminalPrinter());
+	{
+		auto ezlogcout = EZCOUT;
+		ezlogcout << "ezlogcout test__";
+	}
+	{
+		auto ezlog001 = EZLOGW;
+		ezlog001 << "ezlog001 test__";
+	}
+	{
+		EZLOGV << "ezlog003";
+	}
+	{
+		auto ezlog004 = std::move(EZLOGV << "ezlog004");
+	}
+	{
+		EzLogStream ezlogv = std::move(EZLOGV << "ezlogv test__");
+		ezlogv << "ezlogv test__ 123";
+		ezlogv << "ezlogv test__ 456";
+	}
+	{
+		EzLogStream ezlogd = std::move(EZLOGD << "ezlogd test__");
+		ezlogd << "ezlogd test__ 123";
+		ezlogd << "ezlogd test__ 456";
+	}
+	{
+		EzLogStream ezlogi = std::move(EZLOGI << "ezlogi test__");
+		ezlogi << "ezlogi test__ 123";
+		ezlogi << "ezlogi test__ 456";
+	}
+	{
+		EzLogStream ezlogw = std::move(EZLOGW << "ezlogw test__");
+		ezlogw << "ezlogw test__ 123";
+		ezlogw << "ezlogw test__ 456";
+	}
+	{
+		EzLogStream ezloge = std::move(EZLOGE << "ezloge test__");
+		ezloge << "ezloge test__ 123";
+		ezloge << "ezloge test__ 456";
+	}
+}
+#endif
+
+
+#ifdef static_log_level_multi_thread_benchmark_test_____________________
+TEST_CASE("static_log_level_multi_thread_benchmark_test_____________________")
+{
+	static_assert(EZLOG_STATIC_LOG__LEVEL == EZLOG_LEVEL_WARN, "set warn to begin test");
+	static_assert(!EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL, "disable it to test");
+
+	EZLOGI << "static_log_level_multi_thread_benchmark_test_____________________";
+#ifdef NDEBUG
+	constexpr uint64_t loops = (uint64_t)3e7;
+#else
+	constexpr uint64_t loops = 10000 + 1 * (1 << 20);
+#endif
+	constexpr int32_t threads = 12;
+
+	SimpleTimer s1m;
+
+	static bool begin = false;
+	static condition_variable_any cva;
+	static shared_mutex smtx;
+
+	std::vector<std::thread> vec;
+
+	for (int i = 1; i <= threads; i++)
+	{
+		vec.emplace_back(thread(
+			[&](int index) -> void {
+				shared_lock<shared_mutex> slck(smtx);
+				cva.wait(slck, []() -> bool { return begin; });
+
+				for (uint64_t j = 0; j < loops; j++)
+				{
+					EZLOGD << "index= " << index << " j= " << j;
+				}
+			},
+			i));
+	}
+
+	unique_lock<shared_mutex> ulk(smtx);
+	begin = true;
+	ulk.unlock();
+	cva.notify_all();
+	for (auto& th : vec)
+	{
+		th.join();
+	}
+	uint64_t us = s1m.GetMicrosecondsUpToNOW();
+	EZCOUT << (1000 * threads * loops / us) << " logs per millisecond\n";
+	EZCOUT << 1.0 * us / (loops * threads) << " us per log\n";
+}
+#endif
+
+#ifdef dynamic_log_level_multi_thread_benchmark_test_____________________
+TEST_CASE("dynamic_log_level_multi_thread_benchmark_test_____________________")
+{
+	static_assert(EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL, "enable it to test");
+	EZLOGI << "dynamic_log_level_multi_thread_benchmark_test_____________________";
+#ifdef NDEBUG
+	constexpr uint64_t loops = (uint64_t)3e7;
+#else
+	constexpr uint64_t loops = 10000 + 1 * (1 << 20);
+#endif
+	constexpr int32_t threads = 12;
+
+	SimpleTimer s1m;
+
+	static bool begin = false;
+	static condition_variable_any cva;
+	static shared_mutex smtx;
+
+	std::vector<std::thread> vec;
+
+	EzLog::setLogLevel(EzLogLeveLEnum::INFO);
+	for (int i = 1; i <= threads; i++)
+	{
+		vec.emplace_back(thread(
+			[&](int index) -> void {
+				shared_lock<shared_mutex> slck(smtx);
+				cva.wait(slck, []() -> bool { return begin; });
+
+				for (uint64_t j = 0; j < loops; j++)
+				{
+					EZLOG(EzLogLeveLEnum::DEBUG) << "index= " << index << " j= " << j;
+				}
+			},
+			i));
+	}
+
+	unique_lock<shared_mutex> ulk(smtx);
+	begin = true;
+	ulk.unlock();
+	cva.notify_all();
+	for (auto& th : vec)
+	{
+		th.join();
+	}
+	uint64_t us = s1m.GetMicrosecondsUpToNOW();
+	EZCOUT << (1000 * threads * loops / us) << " logs per millisecond\n";
+	EZCOUT << 1.0 * us / (loops * threads) << " us per log\n";
+}
 #endif
 
 #endif
