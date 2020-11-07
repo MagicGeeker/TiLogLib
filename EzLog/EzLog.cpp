@@ -305,6 +305,7 @@ namespace ezlogspace
 				return size();
 			}
 
+			// exclude '\0'
 			inline size_t capacity() const
 			{
 				check();
@@ -350,13 +351,13 @@ namespace ezlogspace
 
 			inline EzLogString& append(char c)
 			{
-				ensureCap(size_with_zero() + sizeof(char));
+				request_new_size(sizeof(char));
 				return append_unsafe(c);
 			}
 
 			inline EzLogString& append(unsigned char c)
 			{
-				ensureCap(size_with_zero() + sizeof(char));
+				request_new_size(sizeof(unsigned char));
 				return append_unsafe(c);
 			}
 
@@ -368,7 +369,7 @@ namespace ezlogspace
 				{
 					if (m_end >= m_cap - 1)
 					{
-						ensureCap(sizeof(char) + capacity());
+						request_new_size(size() / 8 + 8);
 						m_end = m_front + off;
 					}
 					*m_end = *p;
@@ -386,58 +387,58 @@ namespace ezlogspace
 			// length without '\0'
 			inline EzLogString& append(const char* cstr, size_t length)
 			{
-				ensureCap(size_with_zero() + length);
+				request_new_size(length);
 				return append_unsafe(cstr, length);
 			}
 
 			inline EzLogString& append(const String& str)
 			{
 				size_t length = str.length();
-				ensureCap(size_with_zero() + length);
+				request_new_size((size_type)length);
 				return append_unsafe(str);
 			}
 
 			inline EzLogString& append(const EzLogString& str)
 			{
 				size_t length = str.length();
-				ensureCap(size_with_zero() + length);
+				request_new_size(length);
 				return append_unsafe(str);
 			}
 
 
 			inline EzLogString& append(uint64_t x)
 			{
-				ensureCap(size() + EZLOG_UINT64_MAX_CHAR_LEN);
+				request_new_size(EZLOG_UINT64_MAX_CHAR_LEN);
 				return append_unsafe(x);
 			}
 
 			inline EzLogString& append(int64_t x)
 			{
-				ensureCap(size() + EZLOG_INT64_MAX_CHAR_LEN);
+				request_new_size(EZLOG_INT64_MAX_CHAR_LEN);
 				return append_unsafe(x);
 			}
 
 			inline EzLogString& append(uint32_t x)
 			{
-				ensureCap(size() + EZLOG_UINT32_MAX_CHAR_LEN);
+				request_new_size(EZLOG_UINT32_MAX_CHAR_LEN);
 				return append_unsafe(x);
 			}
 
 			inline EzLogString& append(int32_t x)
 			{
-				ensureCap(size() + EZLOG_INT32_MAX_CHAR_LEN);
+				request_new_size(EZLOG_INT32_MAX_CHAR_LEN);
 				return append_unsafe(x);
 			}
 
 			inline EzLogString& append(double x)
 			{
-				ensureCap(size() + EZLOG_DOUBLE_MAX_CHAR_LEN);
+				request_new_size(EZLOG_DOUBLE_MAX_CHAR_LEN);
 				return append_unsafe(x);
 			}
 
 			inline EzLogString& append(float x)
 			{
-				ensureCap(size() + EZLOG_FLOAT_MAX_CHAR_LEN);
+				request_new_size(EZLOG_FLOAT_MAX_CHAR_LEN);
 				return append_unsafe(x);
 			}
 
@@ -622,12 +623,18 @@ namespace ezlogspace
 				return size() + sizeof(char);
 			}
 
-			inline void ensureCap(size_t ensure_cap)
+			inline void request_new_size(size_type new_size)
 			{
-				size_t pre_cap = capacity();
-				size_t new_cap = ((ensure_cap * RESERVE_RATE_DEFAULT) >> RESERVE_RATE_BASE);
-				// you must ensure (ensure_cap * RESERVE_RATE_DEFAULT) will not over-flow
-				if (pre_cap >= new_cap) { return; }
+				ensureCap(new_size + size());
+			}
+
+			inline void ensureCap(size_type ensure_cap)
+			{
+				size_type pre_cap = capacity();
+				if (pre_cap >= ensure_cap) { return; }
+				size_type new_cap = ((ensure_cap * RESERVE_RATE_DEFAULT) >> RESERVE_RATE_BASE);
+				// you must ensure (ensure_cap * RESERVE_RATE_DEFAULT) will not over-flow size_type max
+				DEBUG_ASSERT2(new_cap > ensure_cap, new_cap, ensure_cap);
 				do_realloc(new_cap);
 			}
 
@@ -663,7 +670,7 @@ namespace ezlogspace
 				return DEFAULT_CAPACITY > cap ? DEFAULT_CAPACITY : cap;
 			}
 
-			inline void do_malloc(size_t size, size_t cap)
+			inline void do_malloc(const size_t size, const size_t cap)
 			{
 				m_front = nullptr;
 				m_end = m_front + size;
@@ -671,17 +678,17 @@ namespace ezlogspace
 				do_realloc(cap);
 			}
 
-			inline void do_realloc(size_t new_cap)
+			inline void do_realloc(const size_t new_cap)
 			{
 				check();
 				size_t sz = this->size();
 				size_t cap = this->capacity();
-				new_cap += sizeof('\0');
-				char* p = (char*)EZLOG_REALLOC_FUNCTION(this->m_front, new_cap);
+				size_type mem_size = new_cap + sizeof('\0');	// request extra 1 byte for '\0'
+				char* p = (char*)EZLOG_REALLOC_FUNCTION(this->m_front, mem_size);
 				assert(p != NULL);
 				this->m_front = p;
 				this->m_end = this->m_front + sz;
-				this->m_cap = this->m_front + new_cap;
+				this->m_cap = this->m_front + new_cap;	  // capacity without '\0'
 				check();
 			}
 
@@ -697,7 +704,7 @@ namespace ezlogspace
 			constexpr static uint32_t RESERVE_RATE_BASE = 3;
 			char* m_front;	  // front of c-style str
 			char* m_end;	  // the next of the last char of c-style str,
-			char* m_cap;	  // the next of buf end,
+			char* m_cap;	  // the next of buf end,also the position of '\0'
 
 			static_assert((RESERVE_RATE_DEFAULT >> RESERVE_RATE_BASE) >= 1, "fatal error, see constructor capacity must bigger than length");
 		};

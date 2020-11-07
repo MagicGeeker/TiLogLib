@@ -285,8 +285,8 @@ namespace ezlogspace
 			struct Core
 			{
 				char ex[SIZE_OF_EXTEND];
-				size_type capacity;
-				size_type size;
+				size_type capacity;	   // exclude '\0',it means Core can save capacity + 1 chars include '\0'
+				size_type size;		   // exclude '\0'
 				char buf[];
 			};
 			using core_class_type = Core;
@@ -398,6 +398,7 @@ namespace ezlogspace
 				return size();
 			}
 
+			// exclude '\0'
 			inline size_type capacity() const
 			{
 				assert(pCore->size <= pCore->capacity);
@@ -484,36 +485,27 @@ namespace ezlogspace
 
 			inline EzLogStringExtend& append(char c)
 			{
-				ensureCap(size_with_zero() + sizeof(char));
+				request_new_size(sizeof(char));
 				return append_unsafe(c);
 			}
 
 			inline EzLogStringExtend& append(unsigned char c)
 			{
-				ensureCap(size_with_zero() + sizeof(char));
+				request_new_size(sizeof(unsigned char));
 				return append_unsafe(c);
 			}
 
 			inline EzLogStringExtend& append(const char* cstr)
 			{
-				char* p = (char*)cstr;
-				size_type off = size();
-				while (*p != '\0')
-				{
-					if (pEnd() >= pCapacity() - 1) { ensureCap(sizeof(char) + capacity()); }
-					*pEnd() = *p;
-					increase_size(1);
-					p++;
-					off++;
-				}
-				ensureZero();
-				return *this;
+				size_t L = strlen(cstr);
+				DEBUG_ASSERT(L < std::numeric_limits<size_type>::max());
+				return append(cstr, (size_type)L);
 			}
 
 			// length without '\0'
 			inline EzLogStringExtend& append(const char* cstr, size_type length)
 			{
-				ensureCap(size_with_zero() + length);
+				request_new_size(length);
 				return append_unsafe(cstr, length);
 			}
 
@@ -521,51 +513,51 @@ namespace ezlogspace
 			{
 				DEBUG_ASSERT(str.length() < std::numeric_limits<size_type>::max());
 				size_type length = (size_type)str.length();
-				ensureCap(size_with_zero() + length);
+				request_new_size(length);
 				return append_unsafe(str);
 			}
 
 			inline EzLogStringExtend& append(const EzLogStringExtend& str)
 			{
 				size_type length = str.length();
-				ensureCap(size_with_zero() + length);
+				request_new_size(length);
 				return append_unsafe(str);
 			}
 
 
 			inline EzLogStringExtend& append(uint64_t x)
 			{
-				ensureCap(size() + EZLOG_UINT64_MAX_CHAR_LEN);
+				request_new_size(EZLOG_UINT64_MAX_CHAR_LEN);
 				return append_unsafe(x);
 			}
 
 			inline EzLogStringExtend& append(int64_t x)
 			{
-				ensureCap(size() + EZLOG_INT64_MAX_CHAR_LEN);
+				request_new_size(EZLOG_INT64_MAX_CHAR_LEN);
 				return append_unsafe(x);
 			}
 
 			inline EzLogStringExtend& append(uint32_t x)
 			{
-				ensureCap(size() + EZLOG_UINT32_MAX_CHAR_LEN);
+				request_new_size(EZLOG_UINT32_MAX_CHAR_LEN);
 				return append_unsafe(x);
 			}
 
 			inline EzLogStringExtend& append(int32_t x)
 			{
-				ensureCap(size() + EZLOG_INT32_MAX_CHAR_LEN);
+				request_new_size(EZLOG_INT32_MAX_CHAR_LEN);
 				return append_unsafe(x);
 			}
 
 			inline EzLogStringExtend& append(double x)
 			{
-				ensureCap(size() + EZLOG_DOUBLE_MAX_CHAR_LEN);
+				request_new_size(EZLOG_DOUBLE_MAX_CHAR_LEN);
 				return append_unsafe(x);
 			}
 
 			inline EzLogStringExtend& append(float x)
 			{
-				ensureCap(size() + EZLOG_FLOAT_MAX_CHAR_LEN);
+				request_new_size(EZLOG_FLOAT_MAX_CHAR_LEN);
 				return append_unsafe(x);
 			}
 
@@ -756,12 +748,18 @@ namespace ezlogspace
 				return size() + sizeof('\0');
 			}
 
+			inline void request_new_size(size_type new_size)
+			{
+				ensureCap(new_size + size());
+			}
+
 			inline void ensureCap(size_type ensure_cap)
 			{
 				size_type pre_cap = capacity();
+				if (pre_cap >= ensure_cap) { return; }
 				size_type new_cap = ((ensure_cap * RESERVE_RATE_DEFAULT) >> RESERVE_RATE_BASE);
-				// you must ensure (ensure_cap * RESERVE_RATE_DEFAULT) will not over-flow
-				if (pre_cap >= new_cap) { return; }
+				// you must ensure (ensure_cap * RESERVE_RATE_DEFAULT) will not over-flow size_type max
+				DEBUG_ASSERT2(new_cap > ensure_cap, new_cap, ensure_cap);
 				do_realloc(new_cap);
 			}
 
@@ -793,12 +791,12 @@ namespace ezlogspace
 			inline void do_malloc(const size_type size, const size_type cap)
 			{
 				assert(size <= cap);
-				size_type mem_size = cap + sizeof('\0') + size_head();
+				size_type mem_size = cap + (size_type)sizeof('\0') + size_head();	 // request extra 1 byte for '\0'
 				Core* p = (Core*)EZLOG_MALLOC_FUNCTION(mem_size);
 				assert(p != nullptr);
 				pCore = p;
 				this->pCore->size = size;
-				this->pCore->capacity = cap;
+				this->pCore->capacity = cap;	// capacity without '\0'
 				check();
 			}
 
@@ -806,11 +804,11 @@ namespace ezlogspace
 			{
 				check();
 				size_type cap = this->capacity();
-				size_type mem_size = new_cap + sizeof('\0') + size_head();
+				size_type mem_size = new_cap + (size_type)sizeof('\0') + size_head();	 // request extra 1 byte for '\0'
 				Core* p = (Core*)EZLOG_REALLOC_FUNCTION(this->pCore, mem_size);
 				assert(p != nullptr);
 				pCore = p;
-				this->pCore->capacity = new_cap;
+				this->pCore->capacity = new_cap;	// capacity without '\0'
 				check();
 			}
 
