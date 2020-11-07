@@ -20,7 +20,7 @@
 #include "../depend_libs/sse/sse2.h"
 #include "../depend_libs/miloyip/dtoa_milo.h"
 #include "../depend_libs/ftoa-fast/ftoa.h"
-
+// clang-format off
 /**************************************************MACRO FOR USER**************************************************/
 #define EZLOG_USE_STD_SYSTEM_CLOCK
 #define EZLOG_WITH_MILLISECONDS
@@ -46,7 +46,7 @@
 #define EZLOG_FREE_FUNCTION(ptr) free(ptr)
 
 #define EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL FALSE
-#define EZLOG_STATIC_LOG__LEVEL 9	 // set the static log level,dynamic log level will always <= static log level
+#define EZLOG_STATIC_LOG__LEVEL 6	 // set the static log level,dynamic log level will always <= static log level
 
 #define EZLOG_LEVEL_CLOSE 1
 #define EZLOG_LEVEL_COUT 2
@@ -83,7 +83,7 @@ namespace ezlogspace
 	template <typename K, typename Hash = std::hash<K>, typename EqualTo = std::equal_to<K>>
 	using UnorderedSet = std::unordered_set<K, Hash, EqualTo, Allocator<K>>;
 }	 // namespace ezlogspace
-
+// clang-format on
 namespace ezlogspace
 {
 #if defined(_M_X64) || defined(__amd64__)
@@ -266,7 +266,7 @@ namespace ezlogspace
 		// you must call c_str() function before to ensure end with the '\0'
 		// see ensureZero
 		// EzLogStringExtend is a string which include a extend head before front()
-		template <typename ExtType>
+		template <typename ExtType, typename ReqNewSizeType = std::nullptr_t>
 		class EzLogStringExtend : public EzLogObject
 		{
 			static_assert(std::is_trivially_copy_assignable<ExtType>::value, "fatal error");
@@ -277,8 +277,8 @@ namespace ezlogspace
 			constexpr static size_type SIZE_OF_EXTEND = (size_type)sizeof(ExtType);
 
 		public:
-			using class_type = EzLogStringExtend<ExtType>;
-			using this_type = EzLogStringExtend<ExtType>*;
+			using class_type = EzLogStringExtend<ExtType, ReqNewSizeType>;
+			using this_type = EzLogStringExtend<ExtType, ReqNewSizeType>*;
 			using const_this_type = const this_type;
 
 		public:
@@ -310,6 +310,9 @@ namespace ezlogspace
 			{
 				create();
 			}
+
+			// init a invalid string,only use internally
+			inline EzLogStringExtend(EzLogStringEnum) noexcept {};
 
 			// init with capacity n
 			inline EzLogStringExtend(EzLogStringEnum, positive_size_t n)
@@ -737,7 +740,7 @@ namespace ezlogspace
 				return append(x);
 			}
 
-			friend std::ostream& operator<<(std::ostream& os, const EzLogStringExtend<ExtType>& s)
+			friend std::ostream& operator<<(std::ostream& os, const class_type& s)
 			{
 				return os << String(s.c_str(), s.size());
 			}
@@ -748,7 +751,19 @@ namespace ezlogspace
 				return size() + sizeof('\0');
 			}
 
-			inline void request_new_size(size_type new_size)
+			template <typename T = ReqNewSizeType, typename T2 = bool>
+			inline void request_new_size(const size_type new_size)
+			{
+				ReqNewSizeType::request_new_size(reinterpret_cast<typename ReqNewSizeType::ObjectType*>(this), new_size);
+			}
+
+			template <typename T = ReqNewSizeType, typename std::enable_if<std::is_same<T, std::nullptr_t>::value, T>::type* = nullptr>
+			inline void request_new_size(const size_type new_size)
+			{
+				do_request_new_size(new_size);
+			}
+
+			inline void do_request_new_size(const size_type new_size)
 			{
 				ensureCap(new_size + size());
 			}
@@ -866,7 +881,8 @@ namespace ezlogspace
 			constexpr static size_type DEFAULT_CAPACITY = 32;
 			constexpr static uint32_t RESERVE_RATE_DEFAULT = 16;
 			constexpr static uint32_t RESERVE_RATE_BASE = 3;
-			static_assert((RESERVE_RATE_DEFAULT >> RESERVE_RATE_BASE) >= 1, "fatal error, see constructor capacity must bigger than length");
+			static_assert(
+				(RESERVE_RATE_DEFAULT >> RESERVE_RATE_BASE) >= 1, "fatal error, see constructor capacity must bigger than length");
 		};
 
 
@@ -893,7 +909,8 @@ namespace ezlogspace
 #else
 			using steady_flag_t = uint32_t;
 #endif
-			static_assert(EZLOG_MAX_LOG_NUM <= std::numeric_limits<steady_flag_t>::max(), "Fatal error,max++ is equal to min,it will be not steady!");
+			static_assert(
+				EZLOG_MAX_LOG_NUM <= std::numeric_limits<steady_flag_t>::max(), "Fatal error,max++ is equal to min,it will be not steady!");
 #else
 			using steady_flag_t = uint64_t;	   // no use
 #endif
@@ -1227,7 +1244,8 @@ namespace ezlogspace
 		public:
 			using SystemLock = std::chrono::system_clock;
 			using TimePoint = std::chrono::system_clock::time_point;
-			using EzLogTime = ezlogspace::internal::ezlogtimespace::EzLogTime<ezlogspace::internal::ezlogtimespace::SystemLockHelper<SystemLock>::type>;
+			using EzLogTime =
+				ezlogspace::internal::ezlogtimespace::EzLogTime<ezlogspace::internal::ezlogtimespace::SystemLockHelper<SystemLock>::type>;
 
 			static_assert(std::is_trivially_copyable<TimePoint>::value, "");
 			static_assert(std::is_trivially_destructible<TimePoint>::value, "");
@@ -1360,28 +1378,69 @@ namespace ezlogspace
 		~EzLog();
 	};
 
+	class EzLogNoneStream;
+	namespace internal
+	{
+		struct EzLogStreamHelper;
+	}
 
 	// clang-format off
-#define EZLOG_INTERNAL_CREATE_EZLOG_STREAM(lv)                                                                                                            \
-	(lv)>ezlogspace::EzLog::getDynamicLogLevel()?                                                                                                       \
-	ezlogspace::EzLogStream():                                                                                                                               \
-	ezlogspace::EzLogStream((lv),                                                                                                                              \
-	[&]()->const char*{ assert((lv)>=ezlogspace::EzLogLeveLEnum::MIN);assert((lv)<=ezlogspace::EzLogLeveLEnum::MAX); return __FILE__;}(),                     \
-	[]()->uint16_t{static_assert( sizeof( __FILE__ ) - 1 <= UINT16_MAX, "fatal error,file path is too long" ); return (uint16_t)(sizeof(__FILE__)-1);}(),  \
-	[]()->uint16_t{static_assert(__LINE__<=UINT16_MAX,"fatal error,file line too big"); return  (uint16_t)(__LINE__);}())
+
+#define EZLOG_INTERNAL_GET_LEVEL(lv)  	[&]()->char{ DEBUG_ASSERT((lv)>=ezlogspace::EzLogLeveLEnum::MIN);DEBUG_ASSERT((lv)<=ezlogspace::EzLogLeveLEnum::MAX); return (lv);}()
+#define EZLOG_INTERNAL_GET_FILE()  	[]()->const char*{return __FILE__;}()
+#define EZLOG_INTERNAL_GET_FILE_LEN()  []()->uint16_t{static_assert( sizeof( __FILE__ ) - 1 <= UINT16_MAX, "fatal error,file path is too long" ); return (uint16_t)(sizeof(__FILE__)-1);}()
+#define EZLOG_INTERNAL_GET_LINE()  []()->uint16_t{static_assert(__LINE__<=UINT16_MAX,"fatal error,file line too big"); return  (uint16_t)(__LINE__);}()
+
+#define EZLOG_INTERNAL_CREATE_EZLOG_STREAM(lv)                                       \
+	[&]{ return	                                                                     \
+	((lv)>ezlogspace::EzLog::getDynamicLogLevel()?                                   \
+	ezlogspace::EzLogStream(ezlogspace::internal::EzLogStringEnum::DEFAULT):         \
+	ezlogspace::EzLogStream(EZLOG_INTERNAL_GET_LEVEL(lv),                            \
+	EZLOG_INTERNAL_GET_FILE(),                                                     \
+	EZLOG_INTERNAL_GET_FILE_LEN(),                                                   \
+	EZLOG_INTERNAL_GET_LINE()  ));}()
+
 	// clang-format on
 
-#define EZLOG_INTERNAL_STRING_TYPE ezlogspace::internal::EzLogStringExtend<ezlogspace::internal::EzLogBean>
+#define EZLOG_INTERNAL_STRING_TYPE                                                                                                         \
+	ezlogspace::internal::EzLogStringExtend<ezlogspace::internal::EzLogBean, ezlogspace::internal::EzLogStreamHelper>
 	class EzLogStream : public EZLOG_INTERNAL_STRING_TYPE
 	{
+		EZLOG_MEMORY_MANAGER_FRIEND
+		friend struct ezlogspace::internal::EzLogStreamHelper;
 		using StringType = EZLOG_INTERNAL_STRING_TYPE;
 		using EzLogBean = ezlogspace::internal::EzLogBean;
 		using EzLogStringEnum = ezlogspace::internal::EzLogStringEnum;
 
+		using StringType::StringType;
+		EzLogStream(const EzLogStream& rhs) = delete;
+		EzLogStream& operator=(const EzLogStream& rhs) = delete;
+
 	public:
-		inline EzLogStream(uint32_t lv, const char* file, uint16_t fileLen, uint16_t line) : StringType(EzLogStringEnum::DEFAULT, EZLOG_SINGLE_LOG_RESERVE_LEN)
+		// default constructor
+		explicit inline EzLogStream() : StringType(EzLogStringEnum::DEFAULT, EZLOG_SINGLE_LOG_RESERVE_LEN)
 		{
-			init_bean();
+			ext()->level = INVALID_LEVEL_CHAR;
+		}
+		// move constructor
+		inline EzLogStream(EzLogStream&& rhs) noexcept : StringType(std::move(rhs))
+		{
+			rhs.bindToNoUseStream();
+		}
+		// make a empty stream
+		inline EzLogStream(EzLogNoneStream&& rhs) noexcept : StringType(EzLogStringEnum::DEFAULT)
+		{
+			bindToNoUseStream();
+		}
+		inline EzLogStream(EzLogStringEnum) noexcept : StringType(EzLogStringEnum::DEFAULT)
+		{
+			bindToNoUseStream();
+		}
+
+		// make a valid stream
+		inline EzLogStream(uint32_t lv, const char* file, uint16_t fileLen, uint16_t line)
+			: StringType(EzLogStringEnum::DEFAULT, EZLOG_SINGLE_LOG_RESERVE_LEN)
+		{
 			EzLogBean& bean = *ext();
 			PlacementNew(&bean.ezLogTime, ezlogspace::internal::ezlogtimespace::EzLogTimeEnum::NOW);
 			bean.tid = ezlogspace::internal::GetThreadIDString();
@@ -1392,25 +1451,71 @@ namespace ezlogspace
 			bean.toTernimal = lv == EZLOG_LEVEL_COUT;
 		}
 
-		inline EzLogStream() : StringType(EzLogStringEnum::DEFAULT, EZLOG_SINGLE_LOG_RESERVE_LEN)
-		{
-			init_bean();
-			ext()->level = '~';
-		}
-
 		inline ~EzLogStream()
 		{
-			if (ext()->level == '~') { return; }
-			if (pCore != nullptr)
+			DEBUG_ASSERT(pCore != nullptr);
+			switch (ext()->level)
 			{
+			case INVALID_LEVEL_CHAR:
+				break;
+			case NO_USED_LEVEL_CHAR:
+				pCore = nullptr;	// prevent delete s_pNoUsedStream->pCore
+				break;
+			default:
 				DEBUG_RUN(EzLogBean::check(this->ext()));
 				EzLog::pushLog(this->ext());
-				pCore = nullptr;	// prevent delete
+				pCore = nullptr;	// prevent delete this->pCore
+				break;
 			}
 		}
 
-		inline void init_bean() {}
+	private:
+		// special constructor for s_pNoUsedStream
+		inline EzLogStream(EzLogStringEnum, bool) : StringType()
+		{
+			setAsNoUsedStream();
+		}
 
+		// over write super class
+		inline void request_new_size(size_type new_size)
+		{
+			if (!isNoUsedStream())
+			{
+				StringType::do_request_new_size(new_size);
+			} else
+			{
+				request_no_use_size(new_size);
+			}
+		}
+
+		inline void request_no_use_size(const size_type new_size)
+		{
+			check();
+			if (new_size > capacity())
+			{
+				StringType::ensureCap(new_size);
+				s_pNoUsedStream->pCore = this->pCore;	 // update the s_pNoUsedStream->pCore
+			}
+			pCore->size = 0;	// force set size=0
+			check();
+		}
+
+		inline bool isNoUsedStream()
+		{
+			return ext()->level == NO_USED_LEVEL_CHAR;
+		}
+
+		inline void setAsNoUsedStream()
+		{
+			ext()->level = NO_USED_LEVEL_CHAR;
+		}
+
+		inline void bindToNoUseStream()
+		{
+			this->pCore = s_pNoUsedStream->pCore;
+		}
+
+	public:
 		inline EzLogStream& operator()(EzLogStringEnum, const char* s, size_type length)
 		{
 			this->append(s, length);
@@ -1471,60 +1576,75 @@ namespace ezlogspace
 			return *this;
 		}
 
-		inline EzLogStream& operator<<(double s)
+		template <typename T, typename = typename std::enable_if<std::is_arithmetic<T>::value, void>::type>
+		inline EzLogStream& operator<<(T val)
 		{
-			*this += s;
+			*this += val;
 			return *this;
 		}
 
-		inline EzLogStream& operator<<(float s)
-		{
-			*this += s;
-			return *this;
-		}
+	public:
+		constexpr static char NO_USED_LEVEL_CHAR = '~';
+		constexpr static char INVALID_LEVEL_CHAR = '!';
 
-		inline EzLogStream& operator<<(uint64_t s)
-		{
-			*this += s;
-			return *this;
-		}
-
-		inline EzLogStream& operator<<(int64_t s)
-		{
-			*this += s;
-			return *this;
-		}
-
-		inline EzLogStream& operator<<(int32_t s)
-		{
-			*this += s;
-			return *this;
-		}
-
-		inline EzLogStream& operator<<(uint32_t s)
-		{
-			*this += s;
-			return *this;
-		}
-
+	private:
+		thread_local static EzLogStream* s_pNoUsedStream;
 	};
 #undef EZLOG_INTERNAL_STRING_TYPE
 
+	namespace internal
+	{
+		struct EzLogStreamHelper : public EzLogObject
+		{
+			using ObjectType = EzLogStream;
+			static inline void request_new_size(EzLogStream* obj, const size_type new_size)
+			{
+				obj->request_new_size(new_size);
+			}
+
+			static EzLogStream* get_no_used_stream()
+			{
+				return EzLogStream::s_pNoUsedStream;
+			}
+			static void free_no_used_stream(EzLogStream* p)
+			{
+				p->ext()->level = EzLogStream::INVALID_LEVEL_CHAR;
+				Delete(p);
+			}
+		};
+
+	}	 // namespace internal
+
+
+#define EZLOG_INTERNAL_CREATE_EZLOG_NONE_STREAM()                                                                                          \
+	[] {                                                                                                                                   \
+		EZLOG_INTERNAL_GET_FILE_LEN();                                                                                                     \
+		EZLOG_INTERNAL_GET_LINE();                                                                                                         \
+		return ezlogspace::EzLogNoneStream();                                                                                              \
+	}()
 	class EzLogNoneStream
 	{
 	public:
-		inline EzLogNoneStream() = default;
+		inline EzLogNoneStream() noexcept = default;
 
-		inline ~EzLogNoneStream() = default;
+		inline ~EzLogNoneStream() noexcept = default;
+
+		inline EzLogNoneStream(const EzLogNoneStream& rhs) = delete;
+		inline EzLogNoneStream(EzLogNoneStream&& rhs) noexcept {}
 
 		template <typename T>
-		inline EzLogNoneStream& operator<<(const T& s)
+		inline EzLogNoneStream& operator<<(const T& s) noexcept
 		{
 			return *this;
 		}
 
 		template <typename T>
-		inline EzLogNoneStream& operator<<(T&& s)
+		inline EzLogNoneStream& operator<<(T&& s) noexcept
+		{
+			return *this;
+		}
+
+		inline EzLogNoneStream& operator()(const char* fmt, ...) noexcept
 		{
 			return *this;
 		}
@@ -1540,63 +1660,63 @@ static_assert(EZLOG_GLOBAL_QUEUE_MAX_SIZE >= 2 * EZLOG_SINGLE_THREAD_QUEUE_MAX_S
 
 
 //------------------------------------------define micro for user------------------------------------------//
-#define EZLOG_CSTR(str)                                                                                                                                                                                \
-	[]() {                                                                                                                                                                                             \
-		static_assert(!std::is_pointer<decltype(str)>::value, "must be a c-style array");                                                                                                              \
-		return ezlogspace::internal::EzLogStringEnum::DEFAULT;                                                                                                                                         \
-	}(),                                                                                                                                                                                               \
+#define EZLOG_CSTR(str)                                                                                                                    \
+	[]() {                                                                                                                                 \
+		static_assert(!std::is_pointer<decltype(str)>::value, "must be a c-style array");                                                  \
+		return ezlogspace::internal::EzLogStringEnum::DEFAULT;                                                                             \
+	}(),                                                                                                                                   \
 		str, sizeof(str) - 1
 
 #if EZLOG_STATIC_LOG__LEVEL >= EZLOG_LEVEL_COUT
-#define EZCOUT (EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_COUT))
+#define EZCOUT EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_COUT)
 #else
-#define EZCOUT (ezlogspace::EzLogNoneStream())
+#define EZCOUT EZLOG_INTERNAL_CREATE_EZLOG_NONE_STREAM()
 #endif
 
 #if EZLOG_STATIC_LOG__LEVEL >= EZLOG_LEVEL_ALWAYS
-#define EZLOGA (EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_ALWAYS))
+#define EZLOGA EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_ALWAYS)
 #else
-#define EZLOGA (ezlogspace::EzLogNoneStream())
+#define EZLOGA EZLOG_INTERNAL_CREATE_EZLOG_NONE_STREAM()
 #endif
 
 #if EZLOG_STATIC_LOG__LEVEL >= EZLOG_LEVEL_FATAL
-#define EZLOGF (EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_FATAL))
+#define EZLOGF EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_FATAL)
 #else
-#define EZLOGF (ezlogspace::EzLogNoneStream())
+#define EZLOGF EZLOG_INTERNAL_CREATE_EZLOG_NONE_STREAM()
 #endif
 
 #if EZLOG_STATIC_LOG__LEVEL >= EZLOG_LEVEL_ERROR
-#define EZLOGE (EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_ERROR))
+#define EZLOGE EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_ERROR)
 #else
-#define EZLOGE (ezlogspace::EzLogNoneStream())
+#define EZLOGE EZLOG_INTERNAL_CREATE_EZLOG_NONE_STREAM()
 #endif
 
 #if EZLOG_STATIC_LOG__LEVEL >= EZLOG_LEVEL_WARN
-#define EZLOGW (EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_WARN))
+#define EZLOGW EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_WARN)
 #else
-#define EZLOGW (ezlogspace::EzLogNoneStream())
+#define EZLOGW EZLOG_INTERNAL_CREATE_EZLOG_NONE_STREAM()
 #endif
 
 #if EZLOG_STATIC_LOG__LEVEL >= EZLOG_LEVEL_INFO
-#define EZLOGI (EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_INFO))
+#define EZLOGI EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_INFO)
 #else
-#define EZLOGI (ezlogspace::EzLogNoneStream())
+#define EZLOGI EZLOG_INTERNAL_CREATE_EZLOG_NONE_STREAM()
 #endif
 
 #if EZLOG_STATIC_LOG__LEVEL >= EZLOG_LEVEL_DEBUG
-#define EZLOGD (EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_DEBUG))
+#define EZLOGD EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_DEBUG)
 #else
-#define EZLOGD (ezlogspace::EzLogNoneStream())
+#define EZLOGD EZLOG_INTERNAL_CREATE_EZLOG_NONE_STREAM()
 #endif
 
 #if EZLOG_STATIC_LOG__LEVEL >= EZLOG_LEVEL_VERBOSE
-#define EZLOGV (EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_VERBOSE))
+#define EZLOGV EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_VERBOSE)
 #else
-#define EZLOGV (ezlogspace::EzLogNoneStream())
+#define EZLOGV EZLOG_INTERNAL_CREATE_EZLOG_NONE_STREAM()
 #endif
 
 // not recommend,use EZCOUT to EZLOGV for better performance
-#define EZLOG(lv) (EZLOG_INTERNAL_CREATE_EZLOG_STREAM(lv))
+#define EZLOG(lv) EZLOG_INTERNAL_CREATE_EZLOG_STREAM(lv)
 //------------------------------------------end define micro for user------------------------------------------//
 
 

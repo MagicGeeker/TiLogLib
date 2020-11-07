@@ -182,6 +182,7 @@ using namespace ezloghelperspace;
 namespace ezlogspace
 {
 	class EzLogStream;
+	thread_local EzLogStream* EzLogStream::s_pNoUsedStream = eznew<EzLogStream>(EzLogStringEnum::DEFAULT, false);
 
 	namespace internal
 	{
@@ -1056,14 +1057,18 @@ namespace ezlogspace
 			EzLogBeanCircularQueue vcache;
 			ThreadLocalSpinMutex spinLock;	  // protect cache
 
+			EzLogStream* noUseStream;
 			const String* tid;
 			std::mutex thrdExistMtx;
 			std::condition_variable thrdExistCV;
 
-			explicit ThreadStru(size_t cacheSize) : vcache(cacheSize), spinLock(), tid(GetThreadIDString()), thrdExistMtx(), thrdExistCV(){};
+			explicit ThreadStru(size_t cacheSize)
+				: vcache(cacheSize), spinLock(), noUseStream(EzLogStreamHelper::get_no_used_stream()), tid(GetThreadIDString()),
+				  thrdExistMtx(), thrdExistCV(){};
 
 			~ThreadStru()
 			{
+				EzLogStreamHelper::free_no_used_stream(noUseStream);
 				ezdelete(tid);
 				DEBUG_RUN(tid = NULL);
 			}
@@ -2053,6 +2058,7 @@ namespace ezlogspace
 		void EzLogCore::freeInternalThreadMemory()
 		{
 			if (s_pThreadLocalStru == nullptr) { return; }
+			EzLogStreamHelper::free_no_used_stream(s_pThreadLocalStru->noUseStream);
 			DEBUG_PRINT(EZLOG_LEVEL_INFO, "free mem tid: %s\n", s_pThreadLocalStru->tid->c_str());
 			ezdelete(s_pThreadLocalStru->tid);
 			s_pThreadLocalStru->tid = NULL;
