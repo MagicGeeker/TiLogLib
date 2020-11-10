@@ -46,7 +46,7 @@
 #define EZLOG_FREE_FUNCTION(ptr) free(ptr)
 
 #define EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL FALSE
-#define EZLOG_STATIC_LOG__LEVEL 6	 // set the static log level,dynamic log level will always <= static log level
+#define EZLOG_STATIC_LOG__LEVEL 9	 // set the static log level,dynamic log level will always <= static log level
 
 #define EZLOG_LEVEL_CLOSE 1
 #define EZLOG_LEVEL_COUT 2
@@ -653,8 +653,8 @@ namespace ezlogspace
 
 			inline EzLogStringExtend& append_unsafe(double x)
 			{
-				dtoa_milo(x, pEnd());
-				size_type off = (size_type)strlen(pEnd());
+				char* _end = rapidjson::internal::dtoa(x, pEnd());
+				size_type off = (size_type)(_end - pEnd());
 				increase_size(off);
 				ensureZero();
 				return *this;

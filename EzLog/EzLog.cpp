@@ -154,24 +154,27 @@ namespace ezloghelperspace
 	{
 		time_t t = std::chrono::system_clock::to_time_t(nowTime);
 		struct tm* tmd = localtime(&t);
-		size_t len = strftime(dst, EZLOG_CTIME_MAX_LEN, "%Y-%m-%d %H:%M:%S", tmd);
-		// len without zero '\0'
-		if (len == 0)
+		do
 		{
-			dst[0] = '\0';
-			return 0;
-		}
+			if (tmd == nullptr) { break; }
+			size_t len = strftime(dst, EZLOG_CTIME_MAX_LEN, "%Y-%m-%d %H:%M:%S", tmd);
+			// len without zero '\0'
+			if (len == 0) { break; }
 #ifdef EZLOG_WITH_MILLISECONDS
-		auto since_epoch = nowTime.time_since_epoch();
-		std::chrono::seconds s = std::chrono::duration_cast<std::chrono::seconds>(since_epoch);
-		since_epoch -= s;
-		std::chrono::milliseconds milli = std::chrono::duration_cast<std::chrono::milliseconds>(since_epoch);
-		int n_with_zero = EZLOG_CTIME_MAX_LEN - len;
-		int len2 = snprintf(dst + len, n_with_zero, ".%03u", (unsigned)milli.count());	  // len2 without zero
-		DEBUG_ASSERT(len2 > 0);
-		len += std::min(len2, n_with_zero - 1);
+			auto since_epoch = nowTime.time_since_epoch();
+			std::chrono::seconds s = std::chrono::duration_cast<std::chrono::seconds>(since_epoch);
+			since_epoch -= s;
+			std::chrono::milliseconds milli = std::chrono::duration_cast<std::chrono::milliseconds>(since_epoch);
+			size_t n_with_zero = EZLOG_CTIME_MAX_LEN - len;
+			DEBUG_ASSERT((int32_t)n_with_zero > 0);
+			int len2 = snprintf(dst + len, n_with_zero, ".%03u", (unsigned)milli.count());	  // len2 without zero
+			DEBUG_ASSERT(len2 > 0);
+			len += std::min((size_t)len2, n_with_zero - 1);
 #endif
-		return len;
+			return len;
+		} while (false);
+		dst[0] = '\0';
+		return 0;
 	}
 
 }	 // namespace ezloghelperspace
@@ -529,9 +532,8 @@ namespace ezlogspace
 
 			inline EzLogString& append_unsafe(double x)
 			{
-				dtoa_milo(x, m_end);
-				size_t off = strlen(m_end);
-				m_end += off;
+				char* _end = rapidjson::internal::dtoa(x, m_end);
+				m_end = _end;
 				ensureZero();
 				return *this;
 			}
@@ -624,16 +626,16 @@ namespace ezlogspace
 				return size() + sizeof(char);
 			}
 
-			inline void request_new_size(size_type new_size)
+			inline void request_new_size(size_t new_size)
 			{
 				ensureCap(new_size + size());
 			}
 
-			inline void ensureCap(size_type ensure_cap)
+			inline void ensureCap(size_t ensure_cap)
 			{
-				size_type pre_cap = capacity();
+				size_t pre_cap = capacity();
 				if (pre_cap >= ensure_cap) { return; }
-				size_type new_cap = ((ensure_cap * RESERVE_RATE_DEFAULT) >> RESERVE_RATE_BASE);
+				size_t new_cap = ((ensure_cap * RESERVE_RATE_DEFAULT) >> RESERVE_RATE_BASE);
 				// you must ensure (ensure_cap * RESERVE_RATE_DEFAULT) will not over-flow size_type max
 				DEBUG_ASSERT2(new_cap > ensure_cap, new_cap, ensure_cap);
 				do_realloc(new_cap);
@@ -684,7 +686,7 @@ namespace ezlogspace
 				check();
 				size_t sz = this->size();
 				size_t cap = this->capacity();
-				size_type mem_size = new_cap + sizeof('\0');	// request extra 1 byte for '\0'
+				size_t mem_size = new_cap + sizeof('\0');	 // request extra 1 byte for '\0'
 				char* p = (char*)EZLOG_REALLOC_FUNCTION(this->m_front, mem_size);
 				assert(p != NULL);
 				this->m_front = p;

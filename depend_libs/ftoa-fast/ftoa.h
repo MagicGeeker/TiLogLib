@@ -3,6 +3,10 @@
 #include <stdint.h>
 #include <math.h>
 
+#ifdef __cplusplus
+extern "C"{
+#endif
+
 /* Convert IEEE single precison numbers into decimal ASCII strings, while
    satisfying the following two properties:
    1) Calling strtof or '(float) strtod' on the result must produce the
@@ -231,5 +235,10 @@ inline unsigned int ftoahex(char *s, float f, int *K)
     s[14] = 0;
     return 14;
 }
+
+#ifdef __cplusplus
+}
+#endif
+
 
 #endif
