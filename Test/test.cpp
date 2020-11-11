@@ -618,7 +618,7 @@ TEST_CASE("ezlog_string_test_____________________")
 	String str3 ("asyindfafa");
 	str3 += str2;
 
-	String str4(ezlogspace::internal::EzLogStringEnum::DEFAULT, 100 );
+	String str4(ezlogspace::internal::EString::DEFAULT, 100 );
 	str4 = "dascvda";
 
 	str3 = str4;
@@ -671,7 +671,7 @@ TEST_CASE( "ezlog_string_extend_test_____________________" )
 	String str3( "asyindfafa" );
 	str3 += str2;
 
-	String str4( ezlogspace::internal::EzLogStringEnum::DEFAULT, 100 );
+	String str4( ezlogspace::internal::EString::DEFAULT, 100 );
 	str4 = "dascvda";
 
 	str3 = str4;
@@ -760,7 +760,7 @@ TEST_CASE("file_multi_thread_print_level_test_____________________")
 
 	std::vector<std::thread> vec;
 
-	for (int i = EzLogLeveLEnum::ALWAYS; i <= EzLogLeveLEnum::VERBOSE; i++)
+	for (int i = ELevel::ALWAYS; i <= ELevel::VERBOSE; i++)
 	{
 		vec.emplace_back(thread([&](int index) -> void {
 			shared_lock<shared_mutex> slck(smtx);
@@ -769,10 +769,10 @@ TEST_CASE("file_multi_thread_print_level_test_____________________")
 			for (uint64_t j = 1; j <= loops; j++)
 			{
 				EZLOG(index) << "index= " << index << " j= " << j;
-				if (index == EzLogLeveLEnum::ALWAYS && (j * 8) % loops == 0)
+				if (index == ELevel::ALWAYS && (j * 8) % loops == 0)
 				{
 					uint64_t v = j * 8 / loops;	   // 1-8
-					EzLog::setLogLevel((ezlogspace::EzLogLeveLEnum) (9 - v));
+					EzLog::setLogLevel((ezlogspace::ELevel) (9 - v));
 				}
 			}
 		}, i));
@@ -787,10 +787,10 @@ TEST_CASE("file_multi_thread_print_level_test_____________________")
 		th.join();
 	}
 	uint64_t us = s1m.GetMicrosecondsUpToNOW();
-	EzLog::setLogLevel(ezlogspace::EzLogLeveLEnum::VERBOSE);
+	EzLog::setLogLevel(ezlogspace::ELevel::VERBOSE);
 	EZCOUT << (1000.0f * EzLog::getPrintedLogs() / us) << " logs per millisecond\n";
 	EZCOUT << 1.0 * us / (EzLog::getPrintedLogs()) << " us per log\n";
-	EZLOG(ezlogspace::EzLogLeveLEnum::VERBOSE) << "Complete!\n";
+	EZLOG(ezlogspace::ELevel::VERBOSE) << "Complete!\n";
 }
 
 #endif
@@ -937,7 +937,7 @@ TEST_CASE("dynamic_log_level_multi_thread_benchmark_test_____________________")
 
 	std::vector<std::thread> vec;
 
-	EzLog::setLogLevel(EzLogLeveLEnum::INFO);
+	EzLog::setLogLevel(ELevel::INFO);
 	for (int i = 1; i <= threads; i++)
 	{
 		vec.emplace_back(thread(
@@ -947,7 +947,7 @@ TEST_CASE("dynamic_log_level_multi_thread_benchmark_test_____________________")
 
 				for (uint64_t j = 0; j < loops; j++)
 				{
-					EZLOG(EzLogLeveLEnum::DEBUG) << "index= " << index << " j= " << j;
+					EZLOG(ELevel::DEBUG) << "index= " << index << " j= " << j;
 				}
 			},
 			i));

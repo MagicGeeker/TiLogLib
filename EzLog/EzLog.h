@@ -23,25 +23,14 @@
 // clang-format off
 /**************************************************MACRO FOR USER**************************************************/
 #define EZLOG_USE_STD_SYSTEM_CLOCK
-#define EZLOG_WITH_MILLISECONDS
+#define EZLOG_WITH_MILLISECONDS TRUE
 
 #define EZLOG_LOG_WILL_NOT_BIGGER_THAN_UINT32MAX TRUE
 
-#define EZLOG_POLL_DEFAULT_THREAD_SLEEP_MS 1000						  // poll period to ensure print every logs for every thread
-#define EZLOG_GLOBAL_BUF_FULL_SLEEP_US 10							  // work thread sleep for period when global buf is full and logging
-#define EZLOG_GLOBAL_BUF_SIZE ((size_t)1 << 20U)					  // global cache string reserve length
-#define EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE ((size_t)1 << 8U)		  // single thread cache queue max length
-#define EZLOG_GLOBAL_QUEUE_MAX_SIZE ((size_t)1 << 12U)				  // global cache queue max length
-#define EZLOG_GARBAGE_COLLECTION_QUEUE_MAX_SIZE ((size_t)4 << 12U)	  // garbage collection queue max length
-#define EZLOG_SINGLE_LOG_RESERVE_LEN 50								  // reserve for every log except for level,tid ...
-//#define EZLOG_THREAD_ID_MAX_LEN  20    //define tid max len,no define means no limit,in popular system limit is EZLOG_UINT64_MAX_CHAR_LEN
-#define EZLOG_MAX_LOG_NUM SIZE_MAX	  // max log numbers
-
 #define EZLOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER "a:/"
-#define EZLOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE (8U << 20U)	// log size per file,it is not accurate,especially EZLOG_GLOBAL_BUF_SIZE is bigger
 
 #define EZLOG_MALLOC_FUNCTION(size) malloc(size)
-#define EZLOG_CALLOC_FUNCTION(num, size) calloc(num, size)
+#define EZLOG_CALLOC_FUNCTION(num_elements, size_of_element) calloc(num_elements, size_of_element)
 #define EZLOG_REALLOC_FUNCTION(ptr, new_size) realloc(ptr, new_size)
 #define EZLOG_FREE_FUNCTION(ptr) free(ptr)
 
@@ -83,7 +72,36 @@ namespace ezlogspace
 	template <typename K, typename Hash = std::hash<K>, typename EqualTo = std::equal_to<K>>
 	using UnorderedSet = std::unordered_set<K, Hash, EqualTo, Allocator<K>>;
 }	 // namespace ezlogspace
+
+/**************************************************ENUMS AND CONSTEXPRS FOR USER**************************************************/
+namespace ezlogspace
+{
+	//set as uint8_t to make sure reading from memory to register or
+	//writing from register to memory is atomic
+	enum ELevel:uint8_t
+	{
+		CLOSED = 1,
+		COUT, ALWAYS, FATAL, ERROR, WARN, INFO, DEBUG, VERBOSE,
+		OPEN = VERBOSE,
+		STATIC_LOG_LEVEL = EZLOG_STATIC_LOG__LEVEL,
+		MIN = COUT,
+		MAX= VERBOSE
+	};
+
+	constexpr static uint32_t EZLOG_POLL_DEFAULT_THREAD_SLEEP_MS = 1000;	// poll period to ensure print every logs for every thread
+	constexpr static uint32_t EZLOG_GLOBAL_BUF_FULL_SLEEP_US = 10;	// work thread sleep for period when global buf is full and logging
+	constexpr static size_t EZLOG_GLOBAL_BUF_SIZE = ((size_t)1 << 20U);						 // global cache string reserve length
+	constexpr static size_t EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE = ((size_t)1 << 8U);			 // single thread cache queue max length
+	constexpr static size_t EZLOG_GLOBAL_QUEUE_MAX_SIZE = ((size_t)1 << 12U);				 // global cache queue max length
+	constexpr static size_t EZLOG_GARBAGE_COLLECTION_QUEUE_MAX_SIZE = ((size_t)4 << 12U);	// garbage collection queue max length
+	constexpr static size_t EZLOG_SINGLE_LOG_RESERVE_LEN = 50;	// reserve for every log except for level,tid ...
+	constexpr static size_t EZLOG_THREAD_ID_MAX_LEN = SIZE_MAX;	// tid max len,SIZE_MAX means no limit,in popular system limit is EZLOG_UINT64_MAX_CHAR_LEN
+	constexpr static size_t EZLOG_MAX_LOG_NUM = SIZE_MAX;	// max log numbers
+
+	constexpr static size_t EZLOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE= (8U << 20U);	// log size per file,it is not accurate,especially EZLOG_GLOBAL_BUF_SIZE is bigger
+}	 // namespace ezlogspace
 // clang-format on
+
 namespace ezlogspace
 {
 #if defined(_M_X64) || defined(__amd64__)
@@ -93,76 +111,40 @@ namespace ezlogspace
 #define EZLOG_ABSTRACT
 #define EZLOG_INTERFACE
 
-#ifndef NDEBUG
-#undef EZLOG_MALLOC_FUNCTION
-#define EZLOG_MALLOC_FUNCTION(size) EZLOG_CALLOC_FUNCTION(size, 1)
-#endif
 
 	class EzLogMemoryManager
 	{
 	public:
-		template <typename T>
-		static T* NewTrivial()
+		inline static void* operator new(size_t sz)
 		{
-			static_assert(std::is_trivial<T>::value, "fatal error");
-			return (T*)EZLOG_MALLOC_FUNCTION(sizeof(T));
+			return EZLOG_MALLOC_FUNCTION(sz);
 		}
 
-		template <typename T, typename... _Args>
-		static T* New(_Args&&... __args)
+		inline static void operator delete(void* p)
 		{
-			T* pOri = (T*)EZLOG_MALLOC_FUNCTION(sizeof(T));
-			return new (pOri) T(std::forward<_Args>(__args)...);
+			EZLOG_FREE_FUNCTION(p);
 		}
 
-		template <typename T, typename... _Args>
-		static T* PlacementNew(T* ptr, _Args&&... __args)
+		inline static void* ezmalloc(size_t sz)
 		{
-			return new (ptr) T(std::forward<_Args>(__args)...);
+			return EZLOG_MALLOC_FUNCTION(sz);
 		}
 
-		template <typename T>
-		static void Delete(T* p)
+		inline static void* ezcalloc(size_t num_elements, size_t size_of_element)
 		{
-			p->~T();
-			EZLOG_FREE_FUNCTION((void*)p);
+			return EZLOG_CALLOC_FUNCTION(num_elements, size_of_element);
 		}
 
-		template <typename T>
-		static T* NewTrivialArray(size_t N)
+		inline static void* ezrealloc(void* p, size_t sz)
 		{
-			static_assert(std::is_trivial<T>::value, "fatal error");
-			return (T*)EZLOG_MALLOC_FUNCTION(N * sizeof(T));
+			return EZLOG_REALLOC_FUNCTION(p, sz);
 		}
 
-		template <typename T, typename... _Args>
-		static T* NewArray(size_t N, _Args&&... __args)
+		inline static void ezfree(void* p)
 		{
-			char* pOri = (char*)EZLOG_MALLOC_FUNCTION(sizeof(size_t) + N * sizeof(T));
-			T* pBeg = (T*)(pOri + sizeof(size_t));
-			T* pEnd = pBeg + N;
-			for (T* p = pBeg; p < pEnd; p++)
-			{
-				new (p) T(std::forward<_Args>(__args)...);
-			}
-			return pBeg;
-		}
-
-		template <typename T>
-		static void DeleteArray(T* p)
-		{
-			size_t* pOri = (size_t*)((char*)p - sizeof(size_t));
-			T* pEnd = p + (*pOri);
-			T* pBeg = p;
-			for (p = pEnd - 1; p >= pBeg; p--)
-			{
-				p->~T();
-			}
-			EZLOG_FREE_FUNCTION((void*)pOri);
+			EZLOG_FREE_FUNCTION(p);
 		}
 	};
-
-#define EZLOG_MEMORY_MANAGER_FRIEND friend class ezlogspace::EzLogMemoryManager;
 
 	class EzLogObject : public EzLogMemoryManager
 	{
@@ -176,12 +158,12 @@ namespace ezlogspace
 	constexpr size_t EZLOG_INT32_MAX_CHAR_LEN = (11 + 1);
 	constexpr size_t EZLOG_UINT64_MAX_CHAR_LEN = (20 + 1);
 	constexpr size_t EZLOG_INT64_MAX_CHAR_LEN = (20 + 1);
-	constexpr size_t EZLOG_DOUBLE_MAX_CHAR_LEN = (25 + 1);	  // TODO
-	constexpr size_t EZLOG_FLOAT_MAX_CHAR_LEN = (25 + 1);	  // TODO
+	constexpr size_t EZLOG_DOUBLE_MAX_CHAR_LEN = (25 + 1);	// TODO
+	constexpr size_t EZLOG_FLOAT_MAX_CHAR_LEN = (25 + 1);	 // TODO
 
 
 
-}	 // namespace ezlogspace
+}	// namespace ezlogspace
 
 namespace ezlogspace
 {
@@ -202,14 +184,14 @@ namespace ezlogspace
 
 #ifndef NDEBUG
 
-		class positive_size_t
+		class positive_size_type
 		{
 			size_type sz;
 
 		public:
-			positive_size_t(size_type sz) : sz(sz)
+			positive_size_type(size_type sz) : sz(sz)
 			{
-				assert(sz != 0);
+				DEBUG_ASSERT(sz != 0);
 			}
 
 			operator size_type() const
@@ -219,10 +201,10 @@ namespace ezlogspace
 		};
 
 #else
-		using positive_size_t = size_type;
+		using positive_size_type = size_type;
 #endif
 
-		enum class EzLogStringEnum
+		enum class EString
 		{
 			DEFAULT = 0
 		};
@@ -236,15 +218,15 @@ namespace ezlogspace
 			EzLogStringView() : m_front(nullptr), m_end(nullptr) {}
 			EzLogStringView(const char* front, const char* ed)
 			{
-				assert(front != nullptr);
-				assert(ed >= front);
+				DEBUG_ASSERT(front != nullptr);
+				DEBUG_ASSERT(ed >= front);
 				m_front = front;
 				m_end = ed;
 			}
 
 			EzLogStringView(const char* front, size_t sz)
 			{
-				assert(front != nullptr);
+				DEBUG_ASSERT(front != nullptr);
 				m_front = front;
 				m_end = front + sz;
 			}
@@ -285,7 +267,7 @@ namespace ezlogspace
 			struct Core
 			{
 				char ex[SIZE_OF_EXTEND];
-				size_type capacity;	   // exclude '\0',it means Core can save capacity + 1 chars include '\0'
+				size_type capacity;	// exclude '\0',it means Core can save capacity + 1 chars include '\0'
 				size_type size;		   // exclude '\0'
 				char buf[];
 			};
@@ -300,7 +282,7 @@ namespace ezlogspace
 			{
 				if (pCore == nullptr) { return; }
 
-				assert((uintptr_t)pCore != (uintptr_t)UINTPTR_MAX);
+				DEBUG_ASSERT((uintptr_t)pCore != (uintptr_t)UINTPTR_MAX);
 				check();
 				do_free();
 				DEBUG_RUN(pCore = (Core*)UINTPTR_MAX);
@@ -312,17 +294,17 @@ namespace ezlogspace
 			}
 
 			// init a invalid string,only use internally
-			inline EzLogStringExtend(EzLogStringEnum) noexcept {};
+			explicit inline EzLogStringExtend(EString) noexcept {};
 
 			// init with capacity n
-			inline EzLogStringExtend(EzLogStringEnum, positive_size_t n)
+			inline EzLogStringExtend(EString, positive_size_type n)
 			{
 				do_malloc(0, n);
 				ensureZero();
 			}
 
 			// init with n count of c
-			inline EzLogStringExtend(positive_size_t n, char c)
+			inline EzLogStringExtend(positive_size_type n, char c)
 			{
 				do_malloc(n, n);
 				memset(pFront(), c, n);
@@ -392,7 +374,7 @@ namespace ezlogspace
 
 			inline size_type size() const
 			{
-				assert(pCore->size <= pCore->capacity);
+				DEBUG_ASSERT(pCore->size <= pCore->capacity);
 				return pCore->size;
 			}
 
@@ -404,7 +386,7 @@ namespace ezlogspace
 			// exclude '\0'
 			inline size_type capacity() const
 			{
-				assert(pCore->size <= pCore->capacity);
+				DEBUG_ASSERT(pCore->size <= pCore->capacity);
 				return pCore->capacity;
 			}
 
@@ -452,13 +434,13 @@ namespace ezlogspace
 
 			inline const ExtType* ext() const
 			{
-				assert((void*)pCore == (void*)pCore->ex);
+				DEBUG_ASSERT((void*)pCore == (void*)pCore->ex);
 				return reinterpret_cast<const ExtType*>(pCore->ex);
 			}
 
 			inline ExtType* ext()
 			{
-				assert((void*)pCore == (void*)pCore->ex);
+				DEBUG_ASSERT((void*)pCore == (void*)pCore->ex);
 				return reinterpret_cast<ExtType*>(pCore->ex);
 			}
 
@@ -790,12 +772,12 @@ namespace ezlogspace
 #ifndef NDEBUG
 				check();
 				if (pEnd() != nullptr) *pEnd() = '\0';
-#endif	  // !NDEBUG
+#endif	// !NDEBUG
 			}
 
 			inline void check() const
 			{
-				assert(size() <= capacity());
+				DEBUG_ASSERT(size() <= capacity());
 			}
 
 			inline size_type get_better_cap(size_type cap)
@@ -805,10 +787,10 @@ namespace ezlogspace
 
 			inline void do_malloc(const size_type size, const size_type cap)
 			{
-				assert(size <= cap);
-				size_type mem_size = cap + (size_type)sizeof('\0') + size_head();	 // request extra 1 byte for '\0'
+				DEBUG_ASSERT(size <= cap);
+				size_type mem_size = cap + (size_type)sizeof('\0') + size_head();	// request extra 1 byte for '\0'
 				Core* p = (Core*)EZLOG_MALLOC_FUNCTION(mem_size);
-				assert(p != nullptr);
+				DEBUG_ASSERT(p != nullptr);
 				pCore = p;
 				this->pCore->size = size;
 				this->pCore->capacity = cap;	// capacity without '\0'
@@ -819,9 +801,9 @@ namespace ezlogspace
 			{
 				check();
 				size_type cap = this->capacity();
-				size_type mem_size = new_cap + (size_type)sizeof('\0') + size_head();	 // request extra 1 byte for '\0'
-				Core* p = (Core*)EZLOG_REALLOC_FUNCTION(this->pCore, mem_size);
-				assert(p != nullptr);
+				size_type mem_size = new_cap + (size_type)sizeof('\0') + size_head();	// request extra 1 byte for '\0'
+				Core* p = (Core*)ezrealloc(this->pCore, mem_size);
+				DEBUG_ASSERT(p != nullptr);
 				pCore = p;
 				this->pCore->capacity = new_cap;	// capacity without '\0'
 				check();
@@ -886,22 +868,19 @@ namespace ezlogspace
 		};
 
 
-	}	 // namespace internal
+	}	// namespace internal
 
 	namespace internal
 	{
 		namespace ezlogtimespace
 		{
-			enum class EzLogTimeEnum
+			enum class ELogTime
 			{
 				NOW,
 				MIN,
 				MAX
 			};
 
-#if !EZLOG_TIME_IS_STEADY
-			// make sure write from register to memory is atomic
-			// for example write a uint64_t from register to memory is not atomic in 32bit system
 #ifdef EZLOG_X64
 			// suppose 1.0e7 logs per second(limit),1year=365.2422days,
 			// need 58455 years to UINT64_MAX,it is enough
@@ -911,9 +890,6 @@ namespace ezlogspace
 #endif
 			static_assert(
 				EZLOG_MAX_LOG_NUM <= std::numeric_limits<steady_flag_t>::max(), "Fatal error,max++ is equal to min,it will be not steady!");
-#else
-			using steady_flag_t = uint64_t;	   // no use
-#endif
 
 			struct steady_flag_helper
 			{
@@ -932,28 +908,25 @@ namespace ezlogspace
 				{
 					return std::numeric_limits<steady_flag_t>::max();
 				}
-
-
-			private:
 			};
 
-			// for customize timer，must be similar to EzLogTimeImplBase
-			EZLOG_ABSTRACT class EzLogTimeImplBase
+			// for customize timer，must be similar to BaseTimeImpl
+			EZLOG_ABSTRACT class BaseTimeImpl : public EzLogObject
 			{
 				/**
 			public:
 				 using origin_time_type=xxx;
 			public:
-				inline EzLogTimeImplBase() ;
+				inline BaseTimeImpl() ;
 
-				inline EzLogTimeImplBase(EzLogTimeEnum);
+				inline BaseTimeImpl(ELogTime);
 
 				//operators
-				inline bool operator<(const EzLogTimeImplBase &rhs);
+				inline bool operator<(const BaseTimeImpl &rhs);
 
-				inline bool operator<=(const EzLogTimeImplBase &rhs);
+				inline bool operator<=(const BaseTimeImpl &rhs);
 
-				inline EzLogTimeImplBase &operator=(const EzLogTimeImplBase &rhs);
+				inline BaseTimeImpl &operator=(const BaseTimeImpl &rhs);
 
 				//member functions
 				inline steady_flag_t toSteadyFlag() const;
@@ -967,31 +940,31 @@ namespace ezlogspace
 				inline origin_time_type get_origin_time() const;
 
 				//static functions
-				inline static EzLogTimeImplBase now();
+				inline static BaseTimeImpl now();
 
-				inline static EzLogTimeImplBase min();
+				inline static BaseTimeImpl min();
 
-				inline static EzLogTimeImplBase max();
+				inline static BaseTimeImpl max();
 				 */
 			};
 
-			EZLOG_ABSTRACT class EzLogNoSteadyTimeImplBase : public EzLogTimeImplBase
+			EZLOG_ABSTRACT class NoSteadyTimeHelper : public BaseTimeImpl
 			{
 			public:
 				using steady_flag_t = ezlogtimespace::steady_flag_t;
 
 			public:
-				inline EzLogNoSteadyTimeImplBase()
+				inline NoSteadyTimeHelper()
 				{
 					steadyT = steady_flag_helper::min();
 				}
 
-				inline bool operator<(const EzLogNoSteadyTimeImplBase& rhs) const
+				inline bool operator<(const NoSteadyTimeHelper& rhs) const
 				{
 					return steadyT < rhs.steadyT;
 				}
 
-				inline bool operator<=(const EzLogNoSteadyTimeImplBase& rhs) const
+				inline bool operator<=(const NoSteadyTimeHelper& rhs) const
 				{
 					return steadyT <= rhs.steadyT;
 				}
@@ -1005,7 +978,7 @@ namespace ezlogspace
 				steady_flag_t steadyT;
 			};
 
-			EZLOG_ABSTRACT class EzLogChornoTimeBase : EzLogTimeImplBase
+			EZLOG_ABSTRACT class SystemClockBase : BaseTimeImpl
 			{
 			public:
 				using SystemLock = std::chrono::system_clock;
@@ -1036,33 +1009,33 @@ namespace ezlogspace
 			};
 
 			// to use this class ,make sure system_lock is steady
-			class EzLogSteadyChornoTime : EzLogChornoTimeBase
+			class SteadySystemClock : SystemClockBase
 			{
 			public:
 				using steady_flag_t = SystemLock::rep;
 
 			public:
-				inline EzLogSteadyChornoTime()
+				inline SteadySystemClock()
 				{
 					chronoTime = TimePoint::min();
 				}
 
-				inline EzLogSteadyChornoTime(TimePoint t)
+				inline SteadySystemClock(TimePoint t)
 				{
 					chronoTime = t;
 				}
 
-				inline bool operator<(const EzLogSteadyChornoTime& rhs) const
+				inline bool operator<(const SteadySystemClock& rhs) const
 				{
 					return chronoTime < rhs.chronoTime;
 				}
 
-				inline bool operator<=(const EzLogSteadyChornoTime& rhs) const
+				inline bool operator<=(const SteadySystemClock& rhs) const
 				{
 					return chronoTime <= rhs.chronoTime;
 				}
 
-				inline EzLogSteadyChornoTime& operator=(const EzLogSteadyChornoTime& t) = default;
+				inline SteadySystemClock& operator=(const SteadySystemClock& t) = default;
 				//				{
 				//					chronoTime = t.chronoTime;
 				//					return *this;
@@ -1073,93 +1046,93 @@ namespace ezlogspace
 					return chronoTime.time_since_epoch().count();
 				}
 
-				inline static EzLogSteadyChornoTime now()
+				inline static SteadySystemClock now()
 				{
 					return SystemLock::now();
 				}
 
-				inline static EzLogSteadyChornoTime min()
+				inline static SteadySystemClock min()
 				{
 					return TimePoint::min();
 				}
 
-				inline static EzLogSteadyChornoTime max()
+				inline static SteadySystemClock max()
 				{
 					return TimePoint::max();
 				}
 			};
 
-			class EzLogNoSteadyChornoTime : public EzLogChornoTimeBase, public EzLogNoSteadyTimeImplBase
+			class NoSteadySystemClock : public SystemClockBase, public NoSteadyTimeHelper
 			{
 			public:
-				inline EzLogNoSteadyChornoTime()
+				inline NoSteadySystemClock()
 				{
 					chronoTime = TimePoint::min();
 				}
 
-				inline EzLogNoSteadyChornoTime(TimePoint t, steady_flag_t st)
+				inline NoSteadySystemClock(TimePoint t, steady_flag_t st)
 				{
 					steadyT = st;
 					chronoTime = t;
 				}
 
-				inline EzLogNoSteadyChornoTime& operator=(const EzLogNoSteadyChornoTime& t) = default;
+				inline NoSteadySystemClock& operator=(const NoSteadySystemClock& t) = default;
 				//				{
 				//					steadyT = t.steadyT;
 				//					chronoTime = t.chronoTime;
 				//					return *this;
 				//				}
 
-				inline static EzLogNoSteadyChornoTime now()
+				inline static NoSteadySystemClock now()
 				{
 					return { SystemLock::now(), steady_flag_helper::now() };
 				}
 
-				inline static EzLogNoSteadyChornoTime min()
+				inline static NoSteadySystemClock min()
 				{
 					return { TimePoint::min(), steady_flag_helper::min() };
 				}
 
-				inline static EzLogNoSteadyChornoTime max()
+				inline static NoSteadySystemClock max()
 				{
 					return { TimePoint::max(), steady_flag_helper::max() };
 				}
 			};
 
-			template <typename _EzLogTimeImplType>
+			template <typename _TimeImplType>
 			class EzLogTime
 			{
 			public:
-				using EzLogTimeImplType = _EzLogTimeImplType;
-				using origin_time_type = typename EzLogTimeImplType::origin_time_type;
-				using ezlog_steady_flag_t = typename _EzLogTimeImplType::steady_flag_t;
+				using TimeImplType = _TimeImplType;
+				using origin_time_type = typename TimeImplType::origin_time_type;
+				using ezlog_steady_flag_t = typename _TimeImplType::steady_flag_t;
 
 			public:
 				inline EzLogTime()
 				{
-					impl = EzLogTimeImplType::min();
+					impl = TimeImplType::min();
 				}
 
-				inline EzLogTime(const EzLogTimeImplType& t)
+				inline EzLogTime(const TimeImplType& t)
 				{
 					impl = t;
 				}
 
-				inline EzLogTime(EzLogTimeEnum e)
+				inline EzLogTime(ELogTime e)
 				{
 					switch (e)
 					{
-					case EzLogTimeEnum::NOW:
-						impl = EzLogTimeImplType::now();
+					case ELogTime::NOW:
+						impl = TimeImplType::now();
 						break;
-					case EzLogTimeEnum::MIN:
-						impl = EzLogTimeImplType::min();
+					case ELogTime::MIN:
+						impl = TimeImplType::min();
 						break;
-					case EzLogTimeEnum::MAX:
-						impl = EzLogTimeImplType::max();
+					case ELogTime::MAX:
+						impl = TimeImplType::max();
 						break;
 					default:
-						assert(false);
+						DEBUG_ASSERT(false);
 						break;
 					}
 				}
@@ -1203,39 +1176,39 @@ namespace ezlogspace
 					return impl.get_origin_time();
 				}
 
-				inline static EzLogTimeImplType now()
+				inline static TimeImplType now()
 				{
-					return EzLogTimeImplType::now();
+					return TimeImplType::now();
 				}
 
-				inline static EzLogTimeImplType min()
+				inline static TimeImplType min()
 				{
-					return EzLogTimeImplType::min();
+					return TimeImplType::min();
 				}
 
-				inline static EzLogTimeImplType max()
+				inline static TimeImplType max()
 				{
-					return EzLogTimeImplType::max();
+					return TimeImplType::max();
 				}
 
 			private:
-				EzLogTimeImplType impl;
+				TimeImplType impl;
 			};
 
 			template <typename T, typename T2 = void>
-			struct SystemLockHelper
+			struct SystemLockTag
 			{
-				using type = ezlogspace::internal::ezlogtimespace::EzLogNoSteadyChornoTime;
+				using type = ezlogspace::internal::ezlogtimespace::NoSteadySystemClock;
 			};
 
 			template <typename T>
-			struct SystemLockHelper<T, typename std::enable_if<T::is_steady>::type>
+			struct SystemLockTag<T, typename std::enable_if<T::is_steady>::type>
 			{
-				using type = ezlogspace::internal::ezlogtimespace::EzLogSteadyChornoTime;
+				using type = ezlogspace::internal::ezlogtimespace::SteadySystemClock;
 			};
-		};	  // namespace ezlogtimespace
+		};	// namespace ezlogtimespace
 
-	}	 // namespace internal
+	}	// namespace internal
 
 	namespace internal
 	{
@@ -1245,12 +1218,10 @@ namespace ezlogspace
 			using SystemLock = std::chrono::system_clock;
 			using TimePoint = std::chrono::system_clock::time_point;
 			using EzLogTime =
-				ezlogspace::internal::ezlogtimespace::EzLogTime<ezlogspace::internal::ezlogtimespace::SystemLockHelper<SystemLock>::type>;
+				ezlogspace::internal::ezlogtimespace::EzLogTime<ezlogspace::internal::ezlogtimespace::SystemLockTag<SystemLock>::type>;
 
-			static_assert(std::is_trivially_copyable<TimePoint>::value, "");
-			static_assert(std::is_trivially_destructible<TimePoint>::value, "");
-			static_assert(std::is_trivially_copyable<EzLogTime>::value, "");
-			static_assert(std::is_trivially_destructible<EzLogTime>::value, "");
+			static_assert(std::is_trivially_copy_assignable<EzLogTime>::value, "EzLogBean will be realloc so must be trivally-assignable");
+			static_assert(std::is_trivially_destructible<EzLogTime>::value, "EzLogBean will be realloc so must be trivally-destructible");
 
 		public:
 			DEBUG_CANARY_UINT32(flag1)
@@ -1282,20 +1253,19 @@ namespace ezlogspace
 			inline static void DestroyInstance(EzLogBean* p)
 			{
 				check(p);
-				DEBUG_RUN(p->flag3 = 3, p->flag2 = 2, p->flag1 = 1;);
+				DEBUG_RUN(p->line = 0, p->fileLen = 0);
 				EZLOG_FREE_FUNCTION(p);
 			}
 
 			inline static void check(EzLogBean* p)
 			{
-				assert(p != nullptr);	 // in this program,p is not null
-				DEBUG_RUN(assert(!(p->flag3 == 3 || p->flag2 == 2 || p->flag1 == 1)););
-				DEBUG_RUN(assert(!(p->line == 0 || p->fileLen == 0)););
+				DEBUG_ASSERT(p != nullptr);	// in this program,p is not null
+				DEBUG_RUN(DEBUG_ASSERT(!(p->line == 0 || p->fileLen == 0)););
 			}
 		};
 
-	}	 // namespace internal
-}	 // namespace ezlogspace
+	}	// namespace internal
+}	// namespace ezlogspace
 
 namespace ezlogspace
 {
@@ -1304,11 +1274,10 @@ namespace ezlogspace
 	EZLOG_ABSTRACT class EzLogPrinter : public EzLogObject
 	{
 	public:
-		virtual void onAcceptLogs(const char* const logs, size_t size) = 0;
-
+		// accept logs with size,logs and NOT end with '\0'
+		virtual void onAcceptLogs(const char* logs, size_t size) = 0;
+		// sync with printer's dest
 		virtual void sync() = 0;
-
-		virtual bool isThreadSafe() = 0;
 
 		// if it is static,it will not be deleted
 		virtual bool isStatic()
@@ -1322,19 +1291,6 @@ namespace ezlogspace
 		size_t singleFilePrintedLogSize = 0;
 	};
 
-	// clang-format off
-	//set as uint8_t to make sure reading from memory to register or
-	//writing from register to memory is atomic
-	enum EzLogLeveLEnum:uint8_t
-	{
-		CLOSED = 1,
-		COUT, ALWAYS, FATAL, ERROR, WARN, INFO, DEBUG, VERBOSE,
-		OPEN = VERBOSE,
-		STATIC_LOG_LEVEL = EZLOG_STATIC_LOG__LEVEL,
-		MIN = COUT,
-		MAX= VERBOSE
-	};
-	// clang-format on
 	class EzLog
 	{
 
@@ -1359,23 +1315,23 @@ namespace ezlogspace
 
 #if EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL == TRUE
 
-		static void setLogLevel(EzLogLeveLEnum level);
+		static void setLogLevel(ELevel level);
 
-		static EzLogLeveLEnum getDynamicLogLevel();
+		static ELevel getDynamicLogLevel();
 #else
 
-		static void setLogLevel(EzLogLeveLEnum level) {}
+		static void setLogLevel(ELevel level) {}
 
-		static constexpr EzLogLeveLEnum getDynamicLogLevel()
+		static constexpr ELevel getDynamicLogLevel()
 		{
-			return EzLogLeveLEnum::STATIC_LOG_LEVEL;
+			return ELevel::STATIC_LOG_LEVEL;
 		}
 #endif
 
 	private:
-		EzLog();
+		EzLog() = delete;
 
-		~EzLog();
+		~EzLog() = delete;
 	};
 
 	class EzLogNoneStream;
@@ -1386,7 +1342,7 @@ namespace ezlogspace
 
 	// clang-format off
 
-#define EZLOG_INTERNAL_GET_LEVEL(lv)  	[&]()->char{ DEBUG_ASSERT((lv)>=ezlogspace::EzLogLeveLEnum::MIN);DEBUG_ASSERT((lv)<=ezlogspace::EzLogLeveLEnum::MAX); return (lv);}()
+#define EZLOG_INTERNAL_GET_LEVEL(lv)  	[&]()->char{ DEBUG_ASSERT((lv)>=ezlogspace::ELevel::MIN);DEBUG_ASSERT((lv)<=ezlogspace::ELevel::MAX); return (lv);}()
 #define EZLOG_INTERNAL_GET_FILE()  	[]()->const char*{return __FILE__;}()
 #define EZLOG_INTERNAL_GET_FILE_LEN()  []()->uint16_t{static_assert( sizeof( __FILE__ ) - 1 <= UINT16_MAX, "fatal error,file path is too long" ); return (uint16_t)(sizeof(__FILE__)-1);}()
 #define EZLOG_INTERNAL_GET_LINE()  []()->uint16_t{static_assert(__LINE__<=UINT16_MAX,"fatal error,file line too big"); return  (uint16_t)(__LINE__);}()
@@ -1394,7 +1350,7 @@ namespace ezlogspace
 #define EZLOG_INTERNAL_CREATE_EZLOG_STREAM(lv)                                       \
 	[&]{ return	                                                                     \
 	((lv)>ezlogspace::EzLog::getDynamicLogLevel()?                                   \
-	ezlogspace::EzLogStream(ezlogspace::internal::EzLogStringEnum::DEFAULT):         \
+	ezlogspace::EzLogStream(ezlogspace::internal::EString::DEFAULT):         \
 	ezlogspace::EzLogStream(EZLOG_INTERNAL_GET_LEVEL(lv),                            \
 	EZLOG_INTERNAL_GET_FILE(),                                                     \
 	EZLOG_INTERNAL_GET_FILE_LEN(),                                                   \
@@ -1406,19 +1362,21 @@ namespace ezlogspace
 	ezlogspace::internal::EzLogStringExtend<ezlogspace::internal::EzLogBean, ezlogspace::internal::EzLogStreamHelper>
 	class EzLogStream : public EZLOG_INTERNAL_STRING_TYPE
 	{
-		EZLOG_MEMORY_MANAGER_FRIEND
+
 		friend struct ezlogspace::internal::EzLogStreamHelper;
 		using StringType = EZLOG_INTERNAL_STRING_TYPE;
 		using EzLogBean = ezlogspace::internal::EzLogBean;
-		using EzLogStringEnum = ezlogspace::internal::EzLogStringEnum;
+		using EString = ezlogspace::internal::EString;
 
 		using StringType::StringType;
+
+	public:
 		EzLogStream(const EzLogStream& rhs) = delete;
 		EzLogStream& operator=(const EzLogStream& rhs) = delete;
 
 	public:
 		// default constructor
-		explicit inline EzLogStream() : StringType(EzLogStringEnum::DEFAULT, EZLOG_SINGLE_LOG_RESERVE_LEN)
+		explicit inline EzLogStream() : StringType(EString::DEFAULT, EZLOG_SINGLE_LOG_RESERVE_LEN)
 		{
 			ext()->level = INVALID_LEVEL_CHAR;
 		}
@@ -1428,21 +1386,21 @@ namespace ezlogspace
 			rhs.bindToNoUseStream();
 		}
 		// make a empty stream
-		inline EzLogStream(EzLogNoneStream&& rhs) noexcept : StringType(EzLogStringEnum::DEFAULT)
+		inline explicit EzLogStream(EzLogNoneStream&& rhs) noexcept : StringType(EString::DEFAULT)
 		{
 			bindToNoUseStream();
 		}
-		inline EzLogStream(EzLogStringEnum) noexcept : StringType(EzLogStringEnum::DEFAULT)
+		inline explicit EzLogStream(EString) noexcept : StringType(EString::DEFAULT)
 		{
 			bindToNoUseStream();
 		}
 
 		// make a valid stream
 		inline EzLogStream(uint32_t lv, const char* file, uint16_t fileLen, uint16_t line)
-			: StringType(EzLogStringEnum::DEFAULT, EZLOG_SINGLE_LOG_RESERVE_LEN)
+			: StringType(EString::DEFAULT, EZLOG_SINGLE_LOG_RESERVE_LEN)
 		{
 			EzLogBean& bean = *ext();
-			PlacementNew(&bean.ezLogTime, ezlogspace::internal::ezlogtimespace::EzLogTimeEnum::NOW);
+			new (&bean.ezLogTime) EzLogBean::EzLogTime(ezlogspace::internal::ezlogtimespace::ELogTime::NOW);
 			bean.tid = ezlogspace::internal::GetThreadIDString();
 			bean.file = file;
 			bean.fileLen = fileLen;
@@ -1469,9 +1427,14 @@ namespace ezlogspace
 			}
 		}
 
+		inline static void DestroyPushedEzLogBean(EzLogBean* p)
+		{
+			EzLogBean::DestroyInstance(p);
+		}
+
 	private:
 		// special constructor for s_pNoUsedStream
-		inline EzLogStream(EzLogStringEnum, bool) : StringType()
+		inline EzLogStream(EString, bool) : StringType()
 		{
 			setAsNoUsedStream();
 		}
@@ -1494,7 +1457,7 @@ namespace ezlogspace
 			if (new_size > capacity())
 			{
 				StringType::ensureCap(new_size);
-				s_pNoUsedStream->pCore = this->pCore;	 // update the s_pNoUsedStream->pCore
+				s_pNoUsedStream->pCore = this->pCore;	// update the s_pNoUsedStream->pCore
 			}
 			pCore->size = 0;	// force set size=0
 			check();
@@ -1516,7 +1479,7 @@ namespace ezlogspace
 		}
 
 	public:
-		inline EzLogStream& operator()(EzLogStringEnum, const char* s, size_type length)
+		inline EzLogStream& operator()(EString, const char* s, size_type length)
 		{
 			this->append(s, length);
 			return *this;
@@ -1570,12 +1533,6 @@ namespace ezlogspace
 			return *this;
 		}
 
-		inline EzLogStream& operator<<(String&& s)
-		{
-			*this += std::move(s);
-			return *this;
-		}
-
 		template <typename T, typename = typename std::enable_if<std::is_arithmetic<T>::value, void>::type>
 		inline EzLogStream& operator<<(T val)
 		{
@@ -1609,11 +1566,11 @@ namespace ezlogspace
 			static void free_no_used_stream(EzLogStream* p)
 			{
 				p->ext()->level = EzLogStream::INVALID_LEVEL_CHAR;
-				Delete(p);
+				delete (p);
 			}
 		};
 
-	}	 // namespace internal
+	}	// namespace internal
 
 
 #define EZLOG_INTERNAL_CREATE_EZLOG_NONE_STREAM()                                                                                          \
@@ -1649,21 +1606,24 @@ namespace ezlogspace
 			return *this;
 		}
 	};
-}	 // namespace ezlogspace
+}	// namespace ezlogspace
 
 
-
-static_assert(EZLOG_GLOBAL_QUEUE_MAX_SIZE > 0, "fatal err!");
-static_assert(EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE > 0, "fatal err!");
-static_assert(EZLOG_GLOBAL_QUEUE_MAX_SIZE >= 2 * EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE,
-			  "fatal err!");	// see func moveLocalCacheToGlobal
+namespace ezlogspace
+{
+	static_assert(EZLOG_GLOBAL_QUEUE_MAX_SIZE > 0, "fatal err!");
+	static_assert(EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE > 0, "fatal err!");
+	static_assert(
+		EZLOG_GLOBAL_QUEUE_MAX_SIZE >= 2 * EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE,
+		"fatal err!");	// see func MoveLocalCacheToGlobal
+}	// namespace ezlogspace
 
 
 //------------------------------------------define micro for user------------------------------------------//
 #define EZLOG_CSTR(str)                                                                                                                    \
 	[]() {                                                                                                                                 \
 		static_assert(!std::is_pointer<decltype(str)>::value, "must be a c-style array");                                                  \
-		return ezlogspace::internal::EzLogStringEnum::DEFAULT;                                                                             \
+		return ezlogspace::internal::EString::DEFAULT;                                                                                     \
 	}(),                                                                                                                                   \
 		str, sizeof(str) - 1
 
@@ -1720,4 +1680,4 @@ static_assert(EZLOG_GLOBAL_QUEUE_MAX_SIZE >= 2 * EZLOG_SINGLE_THREAD_QUEUE_MAX_S
 //------------------------------------------end define micro for user------------------------------------------//
 
 
-#endif	  // EZLOG_EZLOG_H
+#endif	// EZLOG_EZLOG_H
