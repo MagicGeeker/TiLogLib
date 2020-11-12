@@ -79,7 +79,7 @@ namespace ezloghelperspace
 	{
 		static const uint32_t M = 2147483647L;	// 2^31-1
 		static const uint64_t A = 16385;		  // 2^14+1
-		static uint32_t _seed = 1;
+		static uint32_t _seed = 1;				// it is not thread safe,not I think it is no problem
 
 		// Computing _seed * A % M.
 		uint64_t p = _seed * A;
@@ -186,6 +186,7 @@ namespace ezlogspace
 			StringStream os;
 			os << (std::this_thread::get_id());
 			String id = os.str();
+			DEBUG_PRINT(EZLOG_LEVEL_INFO,"GetNewThreadIDString, tid %s ,cap %llu\n",id.c_str(),(long long unsigned)id.capacity());
 			if_constexpr(EZLOG_THREAD_ID_MAX_LEN != SIZE_MAX)
 			{
 				if (id.size() > EZLOG_THREAD_ID_MAX_LEN) { id.resize(EZLOG_THREAD_ID_MAX_LEN); }
@@ -779,7 +780,9 @@ namespace ezlogspace
 
 			size_t size() const
 			{
-				return normalized() ? pEnd - pFirst : ((pMemEnd - pFirst) + (pEnd - pMem));
+				size_t sz = normalized() ? pEnd - pFirst : ((pMemEnd - pFirst) + (pEnd - pMem));
+				DEBUG_ASSERT4(sz <= capacity(), pMem, pMemEnd, pFirst, pEnd);
+				return sz;
 			}
 
 			size_t capacity() const
@@ -916,7 +919,13 @@ namespace ezlogspace
 
 				if (_to == pMemEnd)
 				{
-					pFirst = pMem;
+					if (pEnd == pMemEnd)
+					{
+						pFirst = pEnd = pMem;
+					} else
+					{
+						pFirst = pMem;
+					}
 				} else
 				{
 					pFirst = _to;
@@ -1216,7 +1225,7 @@ namespace ezlogspace
 			std::thread s_threadDeleter = CreateGarbageCollectionThread();
 
 			atomic_int32_t s_existThreads{ 4 };
-			bool s_inited = DoFinalInit();
+			volatile bool s_inited = DoFinalInit();
 		};
 
 		class EzLogImpl : public EzLogObject
@@ -1603,7 +1612,7 @@ namespace ezlogspace
 
 				size_t vcachePreSize = vcache.size();
 				DEBUG_PRINT(
-					EZLOG_LEVEL_DEBUG, "MergeSortForGlobalQueue ptid %p , tid %s , vcachePreSize= %u\n", threadStru.tid,
+					EZLOG_LEVEL_DEBUG, "InsertEveryThreadCachedLogToSet ptid %p , tid %s , vcachePreSize= %u\n", threadStru.tid,
 					(threadStru.tid == nullptr ? "" : threadStru.tid->c_str()), (unsigned)vcachePreSize);
 				if (vcachePreSize == 0) { continue; }
 				if (bean.time() < (**vcache.first_sub_queue_begin()).time()) { continue; }
@@ -1723,9 +1732,8 @@ namespace ezlogspace
 			DEBUG_PRINT(EZLOG_LEVEL_INFO, "GetMergedLogs,prepare to merge s_globalCache to s_global_cache_string\n");
 			for (EzLogBean* pBean : s_globalCache.vcache)
 			{
-				DEBUG_ASSERT(pBean != nullptr);
+				DEBUG_RUN(EzLogBean::check(pBean));
 				EzLogBean& bean = *pBean;
-				DEBUG_ASSERT1(bean.file != nullptr, bean.file);
 
 				GetTimeStrFromSystemClock(ctimestr, len, bean, cpptime_pre);
 				{
@@ -1770,7 +1778,7 @@ namespace ezlogspace
 			logs.resize(0);
 			logs.append_unsafe('\n');												   // 1
 			logs.append_unsafe(bean.level);											   // 1
-			logs.append_unsafe(" tid: ", EZLOG_STRING_LEN_OF_CHAR_ARRAY(" tid: "));	// 6
+			logs.append_unsafe(" tid: ", EZLOG_STRING_LEN_OF_CHAR_ARRAY(" tid: "));	   // 6
 			logs.append_unsafe(bean.tid->c_str(), bean.tid->size());				   //----bean.tid->size()
 			logs.append_unsafe(" [", EZLOG_STRING_LEN_OF_CHAR_ARRAY(" ["));			   // 2
 			logs.append_unsafe(ctimestr, ctimestr_len);								   //----ctimestr_len
@@ -1780,7 +1788,7 @@ namespace ezlogspace
 			logs.append_unsafe(':');											   // 1
 			logs.append_unsafe(bean.line);										   // 5 see EZLOG_UINT16_MAX_CHAR_LEN
 			logs.append_unsafe("] ", EZLOG_STRING_LEN_OF_CHAR_ARRAY("] "));		   // 2
-			logs.append_unsafe(bean.str_view().data(), bean.str_view().size());	//----bean.str_view()->size()
+			logs.append_unsafe(bean.str_view().data(), bean.str_view().size());	   //----bean.str_view()->size()
 																				   // clang-format off
 			// static L1=1+1+6+2+3+1+5+2=21
 			// dynamic L2= bean.tid->size() + ctimestr_len + bean.fileLen + bean.str_view().size()

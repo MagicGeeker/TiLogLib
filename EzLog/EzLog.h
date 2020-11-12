@@ -150,7 +150,7 @@ namespace ezlogspace
 	{
 	};
 
-	constexpr char LOG_PREFIX[] = "EZ  FEWIDV";
+	constexpr char LOG_PREFIX[] = "FF  FEWIDVFFFF";	   // begin FF,and end FFFF is invalid
 	// reserve +1 for '\0'
 	constexpr size_t EZLOG_UINT16_MAX_CHAR_LEN = (5 + 1);
 	constexpr size_t EZLOG_INT16_MAX_CHAR_LEN = (6 + 1);
@@ -1253,14 +1253,25 @@ namespace ezlogspace
 			inline static void DestroyInstance(EzLogBean* p)
 			{
 				check(p);
+				DEBUG_RUN(p->file = nullptr, p->tid = nullptr);
 				DEBUG_RUN(p->line = 0, p->fileLen = 0);
+				DEBUG_RUN(p->level = 'X');
 				EZLOG_FREE_FUNCTION(p);
 			}
 
-			inline static void check(EzLogBean* p)
+			inline static void check(const EzLogBean* p)
 			{
-				DEBUG_ASSERT(p != nullptr);	// in this program,p is not null
-				DEBUG_RUN(DEBUG_ASSERT(!(p->line == 0 || p->fileLen == 0)););
+				DEBUG_ASSERT(p != nullptr);	   // in this program,p is not null
+				DEBUG_ASSERT(!(p->file == nullptr || p->tid == nullptr));
+				DEBUG_ASSERT(!(p->line == 0 || p->fileLen == 0));
+				auto checkLevelFunc = [p]() {
+					for (auto c : LOG_PREFIX)
+					{
+						if (c == p->level) { return; }
+					}
+					DEBUG_ASSERT(false);
+				};
+				DEBUG_RUN(checkLevelFunc());
 			}
 		};
 

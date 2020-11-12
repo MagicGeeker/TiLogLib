@@ -66,7 +66,12 @@ do{ if(!(what)){std::cerr<<"\n ERROR:\n"<< __FILE__ <<":"<< __LINE__ <<"\n"<<(#w
 
 #ifndef DEBUG_ASSERT3
 #define DEBUG_ASSERT3(what, X, Y, Z)   \
-do{ if(!(what)){std::cerr<<"\n ERROR:\n"<< __FILE__ <<":"<< __LINE__ <<"\n"<<(#what)<<"\n"<<(#X)<<": "<<(X)<<" "<<(#Y)<<": "<<Y<<" "<<(#Z)<<": "<<(Z); abort();  }  }while(0)
+do{ if(!(what)){std::cerr<<"\n ERROR:\n"<< __FILE__ <<":"<< __LINE__ <<"\n"<<(#what)<<"\n"<<(#X)<<": "<<(X)<<" "<<(#Y)<<": "<<(Y)<<" "<<(#Z)<<": "<<(Z); abort();  }  }while(0)
+#endif
+
+#ifndef DEBUG_ASSERT4
+#define DEBUG_ASSERT4(what, X, Y, Z,W)   \
+do{ if(!(what)){std::cerr<<"\n ERROR:\n"<< __FILE__ <<":"<< __LINE__ <<"\n"<<(#what)<<"\n"<<(#X)<<": "<<(X)<<" "<<(#Y)<<": "<<(Y)<<" "<<(#Z)<<": "<<(Z)<<(#W)<<": "<<(W); abort();  }  }while(0)
 #endif
 
 #else
@@ -74,6 +79,7 @@ do{ if(!(what)){std::cerr<<"\n ERROR:\n"<< __FILE__ <<":"<< __LINE__ <<"\n"<<(#w
 #define DEBUG_ASSERT1(what, X)           do{}while(0)
 #define DEBUG_ASSERT2(what, X, Y)       do{}while(0)
 #define DEBUG_ASSERT3(what, X, Y, Z)    do{}while(0)
+#define DEBUG_ASSERT4(what, X, Y, Z, W)    do{}while(0)
 #endif
 
 #ifndef IUILS_NDEBUG_WITHOUT_ASSERT
