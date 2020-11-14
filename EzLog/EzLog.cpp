@@ -55,7 +55,7 @@
 #define EZLOG_STRING_LEN_OF_CHAR_ARRAY(char_str) ((sizeof(char_str) - 1) / sizeof(char_str[0]))
 
 #define EZLOG_CTIME_MAX_LEN 30
-#define EZLOG_PREFIX_RESERVE_LEN 21	// reserve for prefix static c-strings;
+#define EZLOG_PREFIX_RESERVE_LEN 21	   // reserve for prefix static c-strings;
 
 using SystemTimePoint = std::chrono::system_clock::time_point;
 using SystemClock = std::chrono::system_clock;
@@ -70,16 +70,16 @@ using namespace ezlogspace;
 
 namespace ezloghelperspace
 {
-	static atomic_uint32_t& GetInternalLogFlag()
+	inline static atomic_uint32_t& GetInternalLogFlag()
 	{
 		static atomic_uint32_t s_internalLogFlag(0);
 		return s_internalLogFlag;
 	}
-	static uint32_t FastRand()
+	inline static uint32_t FastRand()
 	{
-		static const uint32_t M = 2147483647L;	// 2^31-1
+		static const uint32_t M = 2147483647L;	  // 2^31-1
 		static const uint64_t A = 16385;		  // 2^14+1
-		static uint32_t _seed = 1;				// it is not thread safe,not I think it is no problem
+		static uint32_t _seed = 1;				  // it is not thread safe,not I think it is no problem
 
 		// Computing _seed * A % M.
 		uint64_t p = _seed * A;
@@ -159,7 +159,7 @@ namespace ezloghelperspace
 			std::chrono::milliseconds milli = std::chrono::duration_cast<std::chrono::milliseconds>(since_epoch);
 			size_t n_with_zero = EZLOG_CTIME_MAX_LEN - len;
 			DEBUG_ASSERT((int32_t)n_with_zero > 0);
-			int len2 = snprintf(dst + len, n_with_zero, ".%03u", (unsigned)milli.count());	// len2 without zero
+			int len2 = snprintf(dst + len, n_with_zero, ".%03u", (unsigned)milli.count());	  // len2 without zero
 			DEBUG_ASSERT(len2 > 0);
 			len += std::min((size_t)len2, n_with_zero - 1);
 #endif
@@ -169,7 +169,7 @@ namespace ezloghelperspace
 		return 0;
 	}
 
-}	// namespace ezloghelperspace
+}	 // namespace ezloghelperspace
 
 using namespace ezloghelperspace;
 
@@ -177,7 +177,7 @@ using namespace ezloghelperspace;
 namespace ezlogspace
 {
 	class EzLogStream;
-	thread_local EzLogStream* EzLogStream::s_pNoUsedStream = new EzLogStream(EString::DEFAULT, false);
+	thread_local EzLogStream* EzLogStream::s_pNoUsedStream = new EzLogStream(EPlaceHolder::DEFAULT, false);
 
 	namespace internal
 	{
@@ -186,7 +186,7 @@ namespace ezlogspace
 			StringStream os;
 			os << (std::this_thread::get_id());
 			String id = os.str();
-			DEBUG_PRINT(EZLOG_LEVEL_INFO,"GetNewThreadIDString, tid %s ,cap %llu\n",id.c_str(),(long long unsigned)id.capacity());
+			DEBUG_PRINT(EZLOG_LEVEL_INFO, "GetNewThreadIDString, tid %s ,cap %llu\n", id.c_str(), (long long unsigned)id.capacity());
 			if_constexpr(EZLOG_THREAD_ID_MAX_LEN != SIZE_MAX)
 			{
 				if (id.size() > EZLOG_THREAD_ID_MAX_LEN) { id.resize(EZLOG_THREAD_ID_MAX_LEN); }
@@ -199,7 +199,7 @@ namespace ezlogspace
 			thread_local static const String* s_tid = GetNewThreadIDString();
 			return s_tid;
 		}
-	}	// namespace internal
+	}	 // namespace internal
 
 	namespace internal
 	{
@@ -212,7 +212,7 @@ namespace ezlogspace
 			friend class ezlogspace::EzLogStream;
 
 		public:
-			~EzLogString()
+			inline ~EzLogString()
 			{
 				DEBUG_ASSERT(m_front <= m_end);
 				DEBUG_ASSERT(m_end <= m_cap);
@@ -228,7 +228,7 @@ namespace ezlogspace
 			}
 
 			// init with capacity n
-			inline EzLogString(EString, positive_size_type n)
+			inline EzLogString(EPlaceHolder, positive_size_type n)
 			{
 				do_malloc(0, n);
 				ensureZero();
@@ -444,7 +444,7 @@ namespace ezlogspace
 
 			//*********  Warning!!!You must reserve enough capacity ,then append is safe ******************************//
 
-			__inline EzLogString& append_unsafe(char c)
+			inline EzLogString& append_unsafe(char c)
 			{
 				*m_end++ = c;
 				ensureZero();
@@ -653,7 +653,7 @@ namespace ezlogspace
 #ifndef NDEBUG
 				check();
 				if (m_end != nullptr) *m_end = '\0';
-#endif	// !NDEBUG
+#endif	  // !NDEBUG
 			}
 
 			inline void check() const
@@ -680,12 +680,12 @@ namespace ezlogspace
 				check();
 				size_t sz = this->size();
 				size_t cap = this->capacity();
-				size_t mem_size = new_cap + sizeof('\0');	// request extra 1 byte for '\0'
+				size_t mem_size = new_cap + sizeof('\0');	 // request extra 1 byte for '\0'
 				char* p = (char*)ezrealloc(this->m_front, mem_size);
 				DEBUG_ASSERT(p != NULL);
 				this->m_front = p;
 				this->m_end = this->m_front + sz;
-				this->m_cap = this->m_front + new_cap;	// capacity without '\0'
+				this->m_cap = this->m_front + new_cap;	  // capacity without '\0'
 				check();
 			}
 
@@ -699,7 +699,7 @@ namespace ezlogspace
 			constexpr static size_t DEFAULT_CAPACITY = 32;
 			constexpr static uint32_t RESERVE_RATE_DEFAULT = 16;
 			constexpr static uint32_t RESERVE_RATE_BASE = 3;
-			char* m_front;	// front of c-style str
+			char* m_front;	  // front of c-style str
 			char* m_end;	  // the next of the last char of c-style str,
 			char* m_cap;	  // the next of buf end,also the position of '\0'
 
@@ -739,7 +739,7 @@ namespace ezlogspace
 		}
 
 
-	}	// namespace internal
+	}	 // namespace internal
 
 	namespace internal
 	{
@@ -931,7 +931,7 @@ namespace ezlogspace
 					pFirst = _to;
 				}
 
-				DEBUG_ASSERT(_to != pMem);	// use pMemEnd instead of pMem
+				DEBUG_ASSERT(_to != pMem);	  // use pMemEnd instead of pMem
 			}
 
 		public:
@@ -992,7 +992,7 @@ namespace ezlogspace
 			std::atomic_flag locked_flag_ = ATOMIC_FLAG_INIT;
 
 		public:
-			void lock()
+			inline void lock()
 			{
 				while (locked_flag_.test_and_set())
 				{
@@ -1007,7 +1007,7 @@ namespace ezlogspace
 				}
 			}
 
-			void unlock()
+			inline void unlock()
 			{
 				locked_flag_.clear();
 			}
@@ -1056,7 +1056,7 @@ namespace ezlogspace
 		struct ThreadStru : public EzLogObject
 		{
 			EzLogBeanCircularQueue vcache;
-			ThreadLocalSpinMutex spinLock;	// protect cache
+			ThreadLocalSpinMutex spinLock;	  // protect cache
 
 			EzLogStream* noUseStream;
 			const String* tid;
@@ -1088,7 +1088,7 @@ namespace ezlogspace
 		struct ThreadStruQueue : public EzLogObject
 		{
 			List<ThreadStru*> availQueue;		 // thread is live
-			List<ThreadStru*> waitMergeQueue;	// thread is dead, but some logs have not merge to global print string
+			List<ThreadStru*> waitMergeQueue;	 // thread is dead, but some logs have not merge to global print string
 			List<ThreadStru*> toDelQueue;		 // thread is dead and no logs exist,need to delete by gc thread
 		};
 
@@ -1143,15 +1143,15 @@ namespace ezlogspace
 
 			inline void GetMergePermission(std::unique_lock<std::mutex>& lk);
 
-			bool TryGetMergePermission(std::unique_lock<std::mutex>& lk);
+			inline bool TryGetMergePermission(std::unique_lock<std::mutex>& lk);
 
-			void WaitForMerge(std::unique_lock<std::mutex>& lk);
+			inline void WaitForMerge(std::unique_lock<std::mutex>& lk);
 
 			inline void GetMoveGarbagePermission(std::unique_lock<std::mutex>& lk);
 
-			void WaitForGC(std::unique_lock<std::mutex>& lk);
+			inline void WaitForGC(std::unique_lock<std::mutex>& lk);
 
-			void ClearGlobalCacheQueueAndNotifyGC();
+			inline void ClearGlobalCacheQueueAndNotifyGC();
 
 			inline void
 			AtInternalThreadExit(bool& existVar, std::mutex& mtxNextToExit, bool& cvFlagNextToExit, std::condition_variable& cvNextToExit);
@@ -1284,8 +1284,8 @@ namespace ezlogspace
 			volatile ELevel m_level = VERBOSE;
 		};
 
-	}	// namespace internal
-}	// namespace ezlogspace
+	}	 // namespace internal
+}	 // namespace ezlogspace
 
 
 namespace ezlogspace
@@ -1396,7 +1396,7 @@ namespace ezlogspace
 
 		inline EzLogImpl& EzLogImpl::getInstance()
 		{
-			static EzLogImpl& ipml = *new EzLogImpl();	// do not delete
+			static EzLogImpl& ipml = *new EzLogImpl();	  // do not delete
 			return ipml;
 		}
 
@@ -1447,7 +1447,7 @@ namespace ezlogspace
 		}
 
 #endif
-	}	// namespace internal
+	}	 // namespace internal
 
 	namespace internal
 	{
@@ -1544,7 +1544,7 @@ namespace ezlogspace
 		void EzLogCore::AtExit()
 		{
 			DEBUG_PRINT(EZLOG_LEVEL_INFO, "wait poll and printer\n");
-			s_pollPeriodus = 1;	// make poll faster
+			s_pollPeriodus = 1;	   // make poll faster
 
 			DEBUG_PRINT(EZLOG_LEVEL_INFO, "prepare to exit\n");
 			s_to_exit = true;
@@ -1581,9 +1581,9 @@ namespace ezlogspace
 				s_pThreadLocalStru->spinLock.unlock();
 				if (isGlobalFull)
 				{
-					s_merging = true;	//此时本地缓存和全局缓存已满
+					s_merging = true;	 //此时本地缓存和全局缓存已满
 					lk.unlock();
-					s_cvMerge.notify_all();	//这个通知后，锁可能会被另一个工作线程拿到
+					s_cvMerge.notify_all();	   //这个通知后，锁可能会被另一个工作线程拿到
 				}
 			}
 		}
@@ -1593,7 +1593,7 @@ namespace ezlogspace
 			List<ThreadStru*>& thread_queue, MultiSet<EzLogBeanVector, EzLogCircularQueueComp>& s, EzLogBean& bean)
 		{
 			// use pointer(reference) to prevent delete before atexit.
-			static EzLogBeanVector& v = *new EzLogBeanVector();	// temp vector
+			static EzLogBeanVector& v = *new EzLogBeanVector();	   // temp vector
 
 			// v.clear();
 			for (auto it = thread_queue.begin(); it != thread_queue.end(); (void)((**it).spinLock.unlock()), (void)++it)
@@ -1662,7 +1662,7 @@ namespace ezlogspace
 					}
 				};
 				DEBUG_RUN(sorted_judge_func());
-				s.emplace(v);	// insert for every thread
+				s.emplace(v);	 // insert for every thread
 				DEBUG_ASSERT2(v.size() <= vcachePreSize, v.size(), vcachePreSize);
 			}
 		}
@@ -1670,7 +1670,7 @@ namespace ezlogspace
 		void EzLogCore::MergeSortForGlobalQueue()
 		{
 			// use pointer(reference) to prevent delete before atexit.
-			static EzLogBeanVector& v = *new EzLogBeanVector();	// temp vector
+			static EzLogBeanVector& v = *new EzLogBeanVector();	   // temp vector
 
 			v.clear();
 			MultiSet<EzLogBeanVector, EzLogCircularQueueComp> s;	// set of ThreadStru cache
@@ -1693,7 +1693,7 @@ namespace ezlogspace
 				InsertEveryThreadCachedLogToSet(s_threadStruQueue.waitMergeQueue, s, bean);
 			}
 
-			while (s.size() >= 2)	// merge sort and finally get one sorted vector
+			while (s.size() >= 2)	 // merge sort and finally get one sorted vector
 			{
 				auto it_fst_vec = s.begin();
 				auto it_sec_vec = std::next(s.begin());
@@ -1704,7 +1704,7 @@ namespace ezlogspace
 				s.erase(s.begin());
 				s.insert(v);
 			}
-			DEBUG_ASSERT(std::is_sorted(s.begin(), s.end()));	// size<=1 is sorted,too.
+			DEBUG_ASSERT(std::is_sorted(s.begin(), s.end()));	 // size<=1 is sorted,too.
 			DEBUG_ASSERT(s.size() == 1);
 			{
 				s_globalCache.vcache = *s.begin();
@@ -1818,7 +1818,7 @@ namespace ezlogspace
 		void EzLogCore::WaitForMerge(std::unique_lock<std::mutex>& lk)
 		{
 			DEBUG_ASSERT(lk.owns_lock());
-			while (s_merging)	//另外一个线程的本地缓存和全局缓存已满，本线程却拿到锁，应该需要等打印线程打印完
+			while (s_merging)	 //另外一个线程的本地缓存和全局缓存已满，本线程却拿到锁，应该需要等打印线程打印完
 			{
 				lk.unlock();
 				for (size_t us = EZLOG_GLOBAL_BUF_FULL_SLEEP_US; s_merging;)
@@ -1870,7 +1870,7 @@ namespace ezlogspace
 
 		void EzLogCore::thrdFuncMergeLogs()
 		{
-			InitInternalThreadBeforeRun();	// this thread is no need log
+			InitInternalThreadBeforeRun();	  // this thread is no need log
 			while (true)
 			{
 				std::unique_lock<std::mutex> lk_merge(s_mtxMerge);
@@ -1915,7 +1915,7 @@ namespace ezlogspace
 
 		void EzLogCore::thrdFuncPrintLogs()
 		{
-			InitInternalThreadBeforeRun();	// this thread is no need log
+			InitInternalThreadBeforeRun();	  // this thread is no need log
 			while (true)
 			{
 				std::unique_lock<std::mutex> lk_print(s_mtxPrinter);
@@ -1964,7 +1964,7 @@ namespace ezlogspace
 
 		void EzLogCore::thrdFuncGarbageCollection()
 		{
-			InitInternalThreadBeforeRun();	// this thread is no need log
+			InitInternalThreadBeforeRun();	  // this thread is no need log
 			while (true)
 			{
 				std::unique_lock<std::mutex> lk_del(s_mtxDeleter);
@@ -2017,7 +2017,7 @@ namespace ezlogspace
 
 		void EzLogCore::thrdFuncPoll()
 		{
-			InitInternalThreadBeforeRun();	// this thread is no need log
+			InitInternalThreadBeforeRun();	  // this thread is no need log
 			do
 			{
 				unique_lock<mutex> lk_merge;
@@ -2051,7 +2051,7 @@ namespace ezlogspace
 			DEBUG_ASSERT(s_to_exit);
 			{
 				lock_guard<mutex> lgd_merge(s_mtxMerge);
-				s_log_last_time = EzLogTime::max();	// make all logs to be merged
+				s_log_last_time = EzLogTime::max();	   // make all logs to be merged
 			}
 			DEBUG_PRINT(EZLOG_LEVEL_INFO, "thrd poll exit.\n");
 			AtInternalThreadExit(s_existThrdPoll, s_mtxMerge, s_merging, s_cvMerge);
@@ -2061,7 +2061,7 @@ namespace ezlogspace
 
 		void EzLogCore::InitInternalThreadBeforeRun()
 		{
-			while(!s_inited)//make sure all variables are inited
+			while (!s_inited)	 // make sure all variables are inited
 			{
 				this_thread::yield();
 			}
@@ -2071,7 +2071,7 @@ namespace ezlogspace
 			delete (s_pThreadLocalStru->tid);
 			s_pThreadLocalStru->tid = NULL;
 			EzLogBeanCircularQueue temp(0);
-			s_pThreadLocalStru->vcache.swap(temp);	// free memory
+			s_pThreadLocalStru->vcache.swap(temp);	  // free memory
 			{
 				lock_guard<mutex> lgd(s_mtxQueue);
 				auto it = std::find(s_threadStruQueue.availQueue.begin(), s_threadStruQueue.availQueue.end(), s_pThreadLocalStru);
@@ -2105,8 +2105,8 @@ namespace ezlogspace
 
 #endif
 
-	}	// namespace internal
-}	// namespace ezlogspace
+	}	 // namespace internal
+}	 // namespace ezlogspace
 using namespace ezlogspace::internal;
 
 
@@ -2160,4 +2160,4 @@ namespace ezlogspace
 #endif
 
 
-}	// namespace ezlogspace
+}	 // namespace ezlogspace

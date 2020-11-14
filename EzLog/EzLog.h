@@ -3,7 +3,7 @@
 
 #include <stdarg.h>
 #include <string.h>
-#include <assert.h>
+#include <stdlib.h>
 #include <atomic>
 #include <thread>
 #include <type_traits>
@@ -151,6 +151,18 @@ namespace ezlogspace
 	};
 
 	constexpr char LOG_PREFIX[] = "FF  FEWIDVFFFF";	   // begin FF,and end FFFF is invalid
+	enum class ELogLevelFlag : char
+	{
+		BLANK = ' ',
+		F = 'F',
+		E = 'E',
+		W = 'W',
+		I = 'I',
+		D = 'D',
+		V = 'V',
+		NO_USE = 'x',
+		INVALID = 'y',
+	};
 	// reserve +1 for '\0'
 	constexpr size_t EZLOG_UINT16_MAX_CHAR_LEN = (5 + 1);
 	constexpr size_t EZLOG_INT16_MAX_CHAR_LEN = (6 + 1);
@@ -158,12 +170,12 @@ namespace ezlogspace
 	constexpr size_t EZLOG_INT32_MAX_CHAR_LEN = (11 + 1);
 	constexpr size_t EZLOG_UINT64_MAX_CHAR_LEN = (20 + 1);
 	constexpr size_t EZLOG_INT64_MAX_CHAR_LEN = (20 + 1);
-	constexpr size_t EZLOG_DOUBLE_MAX_CHAR_LEN = (25 + 1);	// TODO
-	constexpr size_t EZLOG_FLOAT_MAX_CHAR_LEN = (25 + 1);	 // TODO
+	constexpr size_t EZLOG_DOUBLE_MAX_CHAR_LEN = (25 + 1);	  // TODO
+	constexpr size_t EZLOG_FLOAT_MAX_CHAR_LEN = (25 + 1);	  // TODO
 
 
 
-}	// namespace ezlogspace
+}	 // namespace ezlogspace
 
 namespace ezlogspace
 {
@@ -204,7 +216,7 @@ namespace ezlogspace
 		using positive_size_type = size_type;
 #endif
 
-		enum class EString
+		enum class EPlaceHolder
 		{
 			DEFAULT = 0
 		};
@@ -248,7 +260,7 @@ namespace ezlogspace
 		// you must call c_str() function before to ensure end with the '\0'
 		// see ensureZero
 		// EzLogStringExtend is a string which include a extend head before front()
-		template <typename ExtType, typename ReqNewSizeType = std::nullptr_t>
+		template <typename ExtType, typename FeatureHelperType = std::nullptr_t>
 		class EzLogStringExtend : public EzLogObject
 		{
 			static_assert(std::is_trivially_copy_assignable<ExtType>::value, "fatal error");
@@ -259,15 +271,15 @@ namespace ezlogspace
 			constexpr static size_type SIZE_OF_EXTEND = (size_type)sizeof(ExtType);
 
 		public:
-			using class_type = EzLogStringExtend<ExtType, ReqNewSizeType>;
-			using this_type = EzLogStringExtend<ExtType, ReqNewSizeType>*;
+			using class_type = EzLogStringExtend<ExtType, FeatureHelperType>;
+			using this_type = EzLogStringExtend<ExtType, FeatureHelperType>*;
 			using const_this_type = const this_type;
 
 		public:
 			struct Core
 			{
 				char ex[SIZE_OF_EXTEND];
-				size_type capacity;	// exclude '\0',it means Core can save capacity + 1 chars include '\0'
+				size_type capacity;	   // exclude '\0',it means Core can save capacity + 1 chars include '\0'
 				size_type size;		   // exclude '\0'
 				char buf[];
 			};
@@ -277,8 +289,8 @@ namespace ezlogspace
 		protected:
 			Core* pCore;
 
-		public:
-			~EzLogStringExtend()
+		protected:
+			inline void default_destructor()
 			{
 				if (pCore == nullptr) { return; }
 
@@ -288,16 +300,35 @@ namespace ezlogspace
 				DEBUG_RUN(pCore = (Core*)UINTPTR_MAX);
 			}
 
+		public:
+			template <typename T = FeatureHelperType, typename std::enable_if<!std::is_same<T, std::nullptr_t>::value, T>::type* = nullptr>
+			inline void do_destructor()
+			{
+				auto thiz = reinterpret_cast<typename FeatureHelperType::ObjectType*>(this);
+				thiz->do_overwrited_super_destructor();
+			}
+
+			template <typename T = FeatureHelperType, typename std::enable_if<std::is_same<T, std::nullptr_t>::value, T>::type* = nullptr>
+			inline void do_destructor()
+			{
+				default_destructor();
+			}
+
+			inline ~EzLogStringExtend()
+			{
+				do_destructor();
+			}
+
 			explicit inline EzLogStringExtend()
 			{
 				create();
 			}
 
 			// init a invalid string,only use internally
-			explicit inline EzLogStringExtend(EString) noexcept {};
+			explicit inline EzLogStringExtend(EPlaceHolder) noexcept {};
 
 			// init with capacity n
-			inline EzLogStringExtend(EString, positive_size_type n)
+			inline EzLogStringExtend(EPlaceHolder, positive_size_type n)
 			{
 				do_malloc(0, n);
 				ensureZero();
@@ -434,13 +465,13 @@ namespace ezlogspace
 
 			inline const ExtType* ext() const
 			{
-				DEBUG_ASSERT((void*)pCore == (void*)pCore->ex);
+				static_assert(offsetof(Core, ex) == 0, "ex is not first member of Core");
 				return reinterpret_cast<const ExtType*>(pCore->ex);
 			}
 
 			inline ExtType* ext()
 			{
-				DEBUG_ASSERT((void*)pCore == (void*)pCore->ex);
+				static_assert(offsetof(Core, ex) == 0, "ex is not first member of Core");
 				return reinterpret_cast<ExtType*>(pCore->ex);
 			}
 
@@ -733,13 +764,14 @@ namespace ezlogspace
 				return size() + sizeof('\0');
 			}
 
-			template <typename T = ReqNewSizeType, typename T2 = bool>
+			template <typename T = FeatureHelperType, typename std::enable_if<!std::is_same<T, std::nullptr_t>::value, T>::type* = nullptr>
 			inline void request_new_size(const size_type new_size)
 			{
-				ReqNewSizeType::request_new_size(reinterpret_cast<typename ReqNewSizeType::ObjectType*>(this), new_size);
+				auto thiz = reinterpret_cast<typename FeatureHelperType::ObjectType*>(this);
+				thiz->request_new_size(new_size);
 			}
 
-			template <typename T = ReqNewSizeType, typename std::enable_if<std::is_same<T, std::nullptr_t>::value, T>::type* = nullptr>
+			template <typename T = FeatureHelperType, typename std::enable_if<std::is_same<T, std::nullptr_t>::value, T>::type* = nullptr>
 			inline void request_new_size(const size_type new_size)
 			{
 				do_request_new_size(new_size);
@@ -772,7 +804,7 @@ namespace ezlogspace
 #ifndef NDEBUG
 				check();
 				if (pEnd() != nullptr) *pEnd() = '\0';
-#endif	// !NDEBUG
+#endif	  // !NDEBUG
 			}
 
 			inline void check() const
@@ -788,7 +820,7 @@ namespace ezlogspace
 			inline void do_malloc(const size_type size, const size_type cap)
 			{
 				DEBUG_ASSERT(size <= cap);
-				size_type mem_size = cap + (size_type)sizeof('\0') + size_head();	// request extra 1 byte for '\0'
+				size_type mem_size = cap + (size_type)sizeof('\0') + size_head();	 // request extra 1 byte for '\0'
 				Core* p = (Core*)EZLOG_MALLOC_FUNCTION(mem_size);
 				DEBUG_ASSERT(p != nullptr);
 				pCore = p;
@@ -801,7 +833,7 @@ namespace ezlogspace
 			{
 				check();
 				size_type cap = this->capacity();
-				size_type mem_size = new_cap + (size_type)sizeof('\0') + size_head();	// request extra 1 byte for '\0'
+				size_type mem_size = new_cap + (size_type)sizeof('\0') + size_head();	 // request extra 1 byte for '\0'
 				Core* p = (Core*)ezrealloc(this->pCore, mem_size);
 				DEBUG_ASSERT(p != nullptr);
 				pCore = p;
@@ -867,8 +899,7 @@ namespace ezlogspace
 				(RESERVE_RATE_DEFAULT >> RESERVE_RATE_BASE) >= 1, "fatal error, see constructor capacity must bigger than length");
 		};
 
-
-	}	// namespace internal
+	}	 // namespace internal
 
 	namespace internal
 	{
@@ -1112,7 +1143,10 @@ namespace ezlogspace
 				{
 					impl = TimeImplType::min();
 				}
-
+				inline EzLogTime(EPlaceHolder)
+				{
+					impl = TimeImplType::now();
+				}
 				inline EzLogTime(const TimeImplType& t)
 				{
 					impl = t;
@@ -1206,9 +1240,9 @@ namespace ezlogspace
 			{
 				using type = ezlogspace::internal::ezlogtimespace::SteadySystemClock;
 			};
-		};	// namespace ezlogtimespace
+		};	  // namespace ezlogtimespace
 
-	}	// namespace internal
+	}	 // namespace internal
 
 	namespace internal
 	{
@@ -1275,8 +1309,8 @@ namespace ezlogspace
 			}
 		};
 
-	}	// namespace internal
-}	// namespace ezlogspace
+	}	 // namespace internal
+}	 // namespace ezlogspace
 
 namespace ezlogspace
 {
@@ -1361,7 +1395,7 @@ namespace ezlogspace
 #define EZLOG_INTERNAL_CREATE_EZLOG_STREAM(lv)                                       \
 	[&]{ return	                                                                     \
 	((lv)>ezlogspace::EzLog::getDynamicLogLevel()?                                   \
-	ezlogspace::EzLogStream(ezlogspace::internal::EString::DEFAULT):         \
+	ezlogspace::EzLogStream(ezlogspace::internal::EPlaceHolder::DEFAULT):         \
 	ezlogspace::EzLogStream(EZLOG_INTERNAL_GET_LEVEL(lv),                            \
 	EZLOG_INTERNAL_GET_FILE(),                                                     \
 	EZLOG_INTERNAL_GET_FILE_LEN(),                                                   \
@@ -1373,11 +1407,11 @@ namespace ezlogspace
 	ezlogspace::internal::EzLogStringExtend<ezlogspace::internal::EzLogBean, ezlogspace::internal::EzLogStreamHelper>
 	class EzLogStream : public EZLOG_INTERNAL_STRING_TYPE
 	{
-
+		friend class EZLOG_INTERNAL_STRING_TYPE;
 		friend struct ezlogspace::internal::EzLogStreamHelper;
 		using StringType = EZLOG_INTERNAL_STRING_TYPE;
 		using EzLogBean = ezlogspace::internal::EzLogBean;
-		using EString = ezlogspace::internal::EString;
+		using EPlaceHolder = ezlogspace::internal::EPlaceHolder;
 
 		using StringType::StringType;
 
@@ -1387,9 +1421,9 @@ namespace ezlogspace
 
 	public:
 		// default constructor
-		explicit inline EzLogStream() : StringType(EString::DEFAULT, EZLOG_SINGLE_LOG_RESERVE_LEN)
+		explicit inline EzLogStream() : StringType(EPlaceHolder::DEFAULT, EZLOG_SINGLE_LOG_RESERVE_LEN)
 		{
-			ext()->level = INVALID_LEVEL_CHAR;
+			ext()->level = (char)ELogLevelFlag::INVALID;
 		}
 		// move constructor
 		inline EzLogStream(EzLogStream&& rhs) noexcept : StringType(std::move(rhs))
@@ -1397,21 +1431,21 @@ namespace ezlogspace
 			rhs.bindToNoUseStream();
 		}
 		// make a empty stream
-		inline explicit EzLogStream(EzLogNoneStream&& rhs) noexcept : StringType(EString::DEFAULT)
+		inline explicit EzLogStream(EzLogNoneStream&& rhs) noexcept : StringType(EPlaceHolder::DEFAULT)
 		{
 			bindToNoUseStream();
 		}
-		inline explicit EzLogStream(EString) noexcept : StringType(EString::DEFAULT)
+		inline explicit EzLogStream(EPlaceHolder) noexcept : StringType(EPlaceHolder::DEFAULT)
 		{
 			bindToNoUseStream();
 		}
 
 		// make a valid stream
 		inline EzLogStream(uint32_t lv, const char* file, uint16_t fileLen, uint16_t line)
-			: StringType(EString::DEFAULT, EZLOG_SINGLE_LOG_RESERVE_LEN)
+			: StringType(EPlaceHolder::DEFAULT, EZLOG_SINGLE_LOG_RESERVE_LEN)
 		{
 			EzLogBean& bean = *ext();
-			new (&bean.ezLogTime) EzLogBean::EzLogTime(ezlogspace::internal::ezlogtimespace::ELogTime::NOW);
+			new (&bean.ezLogTime) EzLogBean::EzLogTime(EPlaceHolder::DEFAULT);
 			bean.tid = ezlogspace::internal::GetThreadIDString();
 			bean.file = file;
 			bean.fileLen = fileLen;
@@ -1420,37 +1454,42 @@ namespace ezlogspace
 			bean.toTernimal = lv == EZLOG_LEVEL_COUT;
 		}
 
-		inline ~EzLogStream()
-		{
-			DEBUG_ASSERT(pCore != nullptr);
-			switch (ext()->level)
-			{
-			case INVALID_LEVEL_CHAR:
-				break;
-			case NO_USED_LEVEL_CHAR:
-				pCore = nullptr;	// prevent delete s_pNoUsedStream->pCore
-				break;
-			default:
-				DEBUG_RUN(EzLogBean::check(this->ext()));
-				EzLog::pushLog(this->ext());
-				pCore = nullptr;	// prevent delete this->pCore
-				break;
-			}
-		}
-
 		inline static void DestroyPushedEzLogBean(EzLogBean* p)
 		{
 			EzLogBean::DestroyInstance(p);
 		}
 
-	private:
-		// special constructor for s_pNoUsedStream
-		inline EzLogStream(EString, bool) : StringType()
+		inline ~EzLogStream()
 		{
-			setAsNoUsedStream();
+			DEBUG_ASSERT(pCore != nullptr);
+			switch ((ELogLevelFlag)ext()->level)
+			{
+			default:
+				DEBUG_ASSERT(false);	// do assert on debug mode.no break.
+			case ELogLevelFlag::BLANK:
+			case ELogLevelFlag::F:
+			case ELogLevelFlag::E:
+			case ELogLevelFlag::W:
+			case ELogLevelFlag::I:
+			case ELogLevelFlag::D:
+			case ELogLevelFlag::V:
+				DEBUG_RUN(EzLogBean::check(this->ext()));
+				EzLog::pushLog(this->ext());
+				// goto next case
+			case ELogLevelFlag::NO_USE:
+				// no need set pCore = nullptr,do nothing and shortly call do_overwrited_super_destructor
+				break;
+			case ELogLevelFlag::INVALID:
+				StringType::default_destructor();
+				break;
+			}
 		}
 
-		// over write super class
+	private:
+		// force overwrite super destructor,do nothing
+		inline void do_overwrited_super_destructor() {}
+
+		// force overwrite super class request_new_size
 		inline void request_new_size(size_type new_size)
 		{
 			if (!isNoUsedStream())
@@ -1468,20 +1507,26 @@ namespace ezlogspace
 			if (new_size > capacity())
 			{
 				StringType::ensureCap(new_size);
-				s_pNoUsedStream->pCore = this->pCore;	// update the s_pNoUsedStream->pCore
+				s_pNoUsedStream->pCore = this->pCore;	 // update the s_pNoUsedStream->pCore
 			}
 			pCore->size = 0;	// force set size=0
 			check();
 		}
 
+		// special constructor for s_pNoUsedStream
+		inline EzLogStream(EPlaceHolder, bool) : StringType()
+		{
+			setAsNoUsedStream();
+		}
+
 		inline bool isNoUsedStream()
 		{
-			return ext()->level == NO_USED_LEVEL_CHAR;
+			return ext()->level == (char)ELogLevelFlag::NO_USE;
 		}
 
 		inline void setAsNoUsedStream()
 		{
-			ext()->level = NO_USED_LEVEL_CHAR;
+			ext()->level = (char)ELogLevelFlag::NO_USE;
 		}
 
 		inline void bindToNoUseStream()
@@ -1490,7 +1535,7 @@ namespace ezlogspace
 		}
 
 	public:
-		inline EzLogStream& operator()(EString, const char* s, size_type length)
+		inline EzLogStream& operator()(EPlaceHolder, const char* s, size_type length)
 		{
 			this->append(s, length);
 			return *this;
@@ -1551,10 +1596,6 @@ namespace ezlogspace
 			return *this;
 		}
 
-	public:
-		constexpr static char NO_USED_LEVEL_CHAR = '~';
-		constexpr static char INVALID_LEVEL_CHAR = '!';
-
 	private:
 		thread_local static EzLogStream* s_pNoUsedStream;
 	};
@@ -1565,23 +1606,19 @@ namespace ezlogspace
 		struct EzLogStreamHelper : public EzLogObject
 		{
 			using ObjectType = EzLogStream;
-			static inline void request_new_size(EzLogStream* obj, const size_type new_size)
-			{
-				obj->request_new_size(new_size);
-			}
 
-			static EzLogStream* get_no_used_stream()
+			inline static EzLogStream* get_no_used_stream()
 			{
 				return EzLogStream::s_pNoUsedStream;
 			}
-			static void free_no_used_stream(EzLogStream* p)
+			inline static void free_no_used_stream(EzLogStream* p)
 			{
-				p->ext()->level = EzLogStream::INVALID_LEVEL_CHAR;
+				p->ext()->level = (char)ELogLevelFlag::INVALID;
 				delete (p);
 			}
 		};
 
-	}	// namespace internal
+	}	 // namespace internal
 
 
 #define EZLOG_INTERNAL_CREATE_EZLOG_NONE_STREAM()                                                                                          \
@@ -1611,13 +1648,16 @@ namespace ezlogspace
 		{
 			return *this;
 		}
-
+		inline EzLogNoneStream& operator()(ezlogspace::internal::EPlaceHolder, const char* s, size_type length) noexcept
+		{
+			return *this;
+		}
 		inline EzLogNoneStream& operator()(const char* fmt, ...) noexcept
 		{
 			return *this;
 		}
 	};
-}	// namespace ezlogspace
+}	 // namespace ezlogspace
 
 
 namespace ezlogspace
@@ -1626,15 +1666,15 @@ namespace ezlogspace
 	static_assert(EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE > 0, "fatal err!");
 	static_assert(
 		EZLOG_GLOBAL_QUEUE_MAX_SIZE >= 2 * EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE,
-		"fatal err!");	// see func MoveLocalCacheToGlobal
-}	// namespace ezlogspace
+		"fatal err!");	  // see func MoveLocalCacheToGlobal
+}	 // namespace ezlogspace
 
 
 //------------------------------------------define micro for user------------------------------------------//
 #define EZLOG_CSTR(str)                                                                                                                    \
 	[]() {                                                                                                                                 \
 		static_assert(!std::is_pointer<decltype(str)>::value, "must be a c-style array");                                                  \
-		return ezlogspace::internal::EString::DEFAULT;                                                                                     \
+		return ezlogspace::internal::EPlaceHolder::DEFAULT;                                                                                \
 	}(),                                                                                                                                   \
 		str, sizeof(str) - 1
 
@@ -1691,4 +1731,4 @@ namespace ezlogspace
 //------------------------------------------end define micro for user------------------------------------------//
 
 
-#endif	// EZLOG_EZLOG_H
+#endif	  // EZLOG_EZLOG_H

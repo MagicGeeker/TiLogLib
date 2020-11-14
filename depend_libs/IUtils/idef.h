@@ -2,8 +2,14 @@
 #ifndef _I_DEF_H_
 #define _I_DEF_H_
 
+#ifndef FALE
 #define FALSE 0
+#endif	  // !FALE
+
+#ifndef TRUE
 #define TRUE 1
+#endif	  // !TRUE
+
 
 #if __cplusplus>=201103L
 #include <stdint.h>
@@ -26,10 +32,19 @@ typedef unsigned long long          uint64_t;
 #define DO_NOTHING do{}while(0)
 #endif
 
-#define FORCE_DEBUG_PAUSE {volatile int _force_debug_pause =-1;}
+#ifndef DEBUG_FORCE_PAUSE
+#define DEBUG_FORCE_PAUSE {volatile int _force_debug_pause =-1;}
+#endif	  // !DEBUG_FORCE_PAUSE
 
+
+#ifndef THREAD_SAFE
 #define THREAD_SAFE
+#endif	  // !THREAD_SAFE
+
+#ifndef THREAD_UNSAFE
 #define THREAD_UNSAFE
+#endif	  // !THREAD_UNSAFE
+
 
 
 #if __cplusplus < 201701L

@@ -34,14 +34,14 @@ using namespace ezlogspace;
 
 
 //__________________________________________________other test__________________________________________________//
-//#define ezlog_string_test_____________________
-//#define ezlog_string_extend_test_____________________
+#define ezlog_string_extend_test_____________________
 
 
 
 
 //__________________________________________________special test__________________________________________________//
 //#define special_log_test_____________________
+//#define ezlog_string_test_____________________  //enable if define in header
 //#define static_log_level_multi_thread_benchmark_test_____________________
 //#define dynamic_log_level_multi_thread_benchmark_test_____________________
 
@@ -602,7 +602,7 @@ TEST_CASE("ezlog_string_test_____________________")
 {
 	EzLog::setPrinter(EzLog::getDefaultTerminalPrinter());
 	EZCOUT << "ezlog_string_test_____________________";
-	using String =ezlogspace::internal::EzLogString;
+	using String = ezlogspace::internal::EzLogString;
 	String str;
 	str.reserve(100);
 	str.resize(200);
@@ -618,7 +618,7 @@ TEST_CASE("ezlog_string_test_____________________")
 	String str3 ("asyindfafa");
 	str3 += str2;
 
-	String str4(ezlogspace::internal::EString::DEFAULT, 100 );
+	String str4(ezlogspace::internal::EPlaceHolder::DEFAULT, 100 );
 	str4 = "dascvda";
 
 	str3 = str4;
@@ -671,7 +671,7 @@ TEST_CASE( "ezlog_string_extend_test_____________________" )
 	String str3( "asyindfafa" );
 	str3 += str2;
 
-	String str4( ezlogspace::internal::EString::DEFAULT, 100 );
+	String str4( ezlogspace::internal::EPlaceHolder::DEFAULT, 100 );
 	str4 = "dascvda";
 
 	str3 = str4;
@@ -729,7 +729,7 @@ TEST_CASE("terminal_single_thread_long_string_log_test_____________________")
 		x << "\n";
 	}
 	{
-		auto s = EZLOGI<<"dsad";
+		auto s = std::move(EZLOGI<<"dsad");
 		auto s2 = std::move(s);
 	}
 
