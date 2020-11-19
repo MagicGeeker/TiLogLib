@@ -1136,8 +1136,7 @@ namespace ezlogspace
 
 			void GetMergedLogs();
 
-			void InsertEveryThreadCachedLogToSet(
-				List<ThreadStru*>& thread_queue, MultiSet<EzLogBeanVector, EzLogCircularQueueComp>& s, EzLogBean& bean);
+			void InsertEveryThreadCachedLogToSet(List<ThreadStru*>& thread_queue, EzLogBean& bean);
 
 			void MergeSortForGlobalQueue();
 
@@ -1196,6 +1195,9 @@ namespace ezlogspace
 
 			std::mutex s_mtxQueue;
 			ThreadStruQueue s_threadStruQueue;
+			EzLogBeanVector s_insertToSetVec{};	   // temp vector
+			EzLogBeanVector s_mergeSortVec{};	   // temp vector
+			MultiSet<EzLogBeanVector, EzLogCircularQueueComp> s_threadStruSet;	// set of ThreadStru cache
 
 			CacheStru s_globalCache{ GLOBAL_SIZE };
 			uint64_t s_printedLogsLength = 0;
@@ -1589,13 +1591,10 @@ namespace ezlogspace
 		}
 
 
-		void EzLogCore::InsertEveryThreadCachedLogToSet(
-			List<ThreadStru*>& thread_queue, MultiSet<EzLogBeanVector, EzLogCircularQueueComp>& s, EzLogBean& bean)
+		void EzLogCore::InsertEveryThreadCachedLogToSet(List<ThreadStru*>& thread_queue, EzLogBean& bean)
 		{
-			// use pointer(reference) to prevent delete before atexit.
-			static EzLogBeanVector& v = *new EzLogBeanVector();	   // temp vector
-
-			// v.clear();
+			// s_insertToSetVec.clear();
+			auto& v = s_insertToSetVec;
 			for (auto it = thread_queue.begin(); it != thread_queue.end(); (void)((**it).spinLock.unlock()), (void)++it)
 			{
 				ThreadStru& threadStru = **it;
@@ -1650,7 +1649,7 @@ namespace ezlogspace
 				}
 #endif
 
-				auto sorted_judge_func = []() {
+				auto sorted_judge_func = [&v]() {
 					if (!std::is_sorted(v.begin(), v.end(), EzLogBeanPtrComp()))
 					{
 						for (uint32_t index = 0; index != v.size(); index++)
@@ -1662,18 +1661,17 @@ namespace ezlogspace
 					}
 				};
 				DEBUG_RUN(sorted_judge_func());
-				s.emplace(v);	 // insert for every thread
+				s_threadStruSet.emplace(v);	 // insert for every thread
 				DEBUG_ASSERT2(v.size() <= vcachePreSize, v.size(), vcachePreSize);
 			}
 		}
 
 		void EzLogCore::MergeSortForGlobalQueue()
 		{
-			// use pointer(reference) to prevent delete before atexit.
-			static EzLogBeanVector& v = *new EzLogBeanVector();	   // temp vector
-
+			auto& v = s_mergeSortVec;
+			auto& s = s_threadStruSet;
 			v.clear();
-			MultiSet<EzLogBeanVector, EzLogCircularQueueComp> s;	// set of ThreadStru cache
+			s.clear();
 			EzLogBean bean;
 			bean.time() = s_log_last_time;
 			DEBUG_PRINT(
@@ -1686,11 +1684,11 @@ namespace ezlogspace
 				DEBUG_PRINT(
 					EZLOG_LEVEL_INFO, "InsertEveryThreadCachedLogToSet availQueue.size()= %u\n",
 					(unsigned)s_threadStruQueue.availQueue.size());
-				InsertEveryThreadCachedLogToSet(s_threadStruQueue.availQueue, s, bean);
+				InsertEveryThreadCachedLogToSet(s_threadStruQueue.availQueue, bean);
 				DEBUG_PRINT(
 					EZLOG_LEVEL_INFO, "InsertEveryThreadCachedLogToSet waitMergeQueue.size()= %u\n",
 					(unsigned)s_threadStruQueue.waitMergeQueue.size());
-				InsertEveryThreadCachedLogToSet(s_threadStruQueue.waitMergeQueue, s, bean);
+				InsertEveryThreadCachedLogToSet(s_threadStruQueue.waitMergeQueue, bean);
 			}
 
 			while (s.size() >= 2)	 // merge sort and finally get one sorted vector
