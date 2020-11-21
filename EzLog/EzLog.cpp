@@ -1139,6 +1139,8 @@ namespace ezlogspace
 		private:
 			inline static EzLogCore& getInstance();
 
+			EzLogCore();
+
 			void AtExit();
 
 			ThreadStru* InitForEveryThread();
@@ -1209,17 +1211,14 @@ namespace ezlogspace
 			bool s_existThrdMerge{};
 			bool s_existThrdPrint{};
 			bool s_existThrdGC{};
+			volatile bool s_inited{};
 
 			std::mutex s_mtxQueue;
 			ThreadStruQueue s_threadStruQueue;
+
 			EzLogBeanPtrVector s_insertToSetVec{};	   // temp vector
 			EzLogBeanPtrVector s_mergeSortVec{};	   // temp vector
 			MultiSet<EzLogBeanPtrVector, EzLogBeanPtrVectorComp> s_threadStruSet;	// set of ThreadStru cache
-
-			CacheStru s_globalCache{ GLOBAL_SIZE };
-			uint64_t s_printedLogsLength = 0;
-			uint64_t s_printedLogs = 0;
-			EzLogCoreString s_global_cache_string;
 
 			static constexpr uint32_t s_pollPeriodSplitNum = 100;
 			atomic_uint32_t s_pollPeriodus{ EZLOG_POLL_DEFAULT_THREAD_SLEEP_MS * 1000 / s_pollPeriodSplitNum };
@@ -1229,12 +1228,15 @@ namespace ezlogspace
 			std::mutex s_mtxMerge;
 			std::condition_variable s_cvMerge;
 			bool s_merging = true;
+			CacheStru s_globalCache{ GLOBAL_SIZE };
 			std::thread s_threadMerge = CreateMergeThread();
 
 			std::mutex s_mtxPrinter;
 			std::condition_variable s_cvPrinter;
 			bool s_printing = false;
-			bool s_isQueueEmpty = false;
+			uint64_t s_printedLogsLength = 0;
+			uint64_t s_printedLogs = 0;
+			EzLogCoreString s_global_cache_string;
 			std::thread s_threadPrinter = CreatePrintThread();
 
 			CacheStru s_garbages{ EZLOG_GARBAGE_COLLECTION_QUEUE_MAX_SIZE };
@@ -1244,7 +1246,6 @@ namespace ezlogspace
 			std::thread s_threadDeleter = CreateGarbageCollectionThread();
 
 			atomic_int32_t s_existThreads{ 4 };
-			volatile bool s_inited = DoFinalInit();
 		};
 
 		class EzLogImpl : public EzLogObject
@@ -1479,6 +1480,10 @@ namespace ezlogspace
 			return t;
 		}
 
+		EzLogCore::EzLogCore()
+		{
+			DoFinalInit();
+		}
 
 		inline bool EzLogCore::LocalCircularQueuePushBack(EzLogBean* obj)
 		{
@@ -1681,23 +1686,31 @@ namespace ezlogspace
 			auto& s = s_threadStruSet;
 			v.clear();
 			s.clear();
-			EzLogBean bean;
-			bean.time() = s_log_last_time;
 			DEBUG_PRINT(
 				EZLOG_LEVEL_INFO, "Begin of MergeSortForGlobalQueue s_globalCache.vcache size= %u\n",
 				(unsigned)s_globalCache.vcache.size());
 			std::stable_sort(s_globalCache.vcache.begin(), s_globalCache.vcache.end(), EzLogBeanPtrComp());
+			EzLogBean referenceBean;
+			if (!s_globalCache.vcache.empty())
+			{
+				EzLogTime& vcacheMaxTime = s_globalCache.vcache.back()->time();
+				referenceBean.time() = std::max(vcacheMaxTime, s_log_last_time);  //ensure all of EzLogBean before referenceBean will be merged and sorted
+			} else
+			{
+				referenceBean.time() = s_log_last_time;
+			}
+
 			s.emplace(s_globalCache.vcache);	// insert global cache first
 			{
 				lock_guard<mutex> lgd(s_mtxQueue);
 				DEBUG_PRINT(
 					EZLOG_LEVEL_INFO, "MergeThreadStruQueueToSet availQueue.size()= %u\n",
 					(unsigned)s_threadStruQueue.availQueue.size());
-				MergeThreadStruQueueToSet(s_threadStruQueue.availQueue, bean);
+				MergeThreadStruQueueToSet(s_threadStruQueue.availQueue, referenceBean);
 				DEBUG_PRINT(
 					EZLOG_LEVEL_INFO, "MergeThreadStruQueueToSet waitMergeQueue.size()= %u\n",
 					(unsigned)s_threadStruQueue.waitMergeQueue.size());
-				MergeThreadStruQueueToSet(s_threadStruQueue.waitMergeQueue, bean);
+				MergeThreadStruQueueToSet(s_threadStruQueue.waitMergeQueue, referenceBean);
 			}
 
 			while (s.size() >= 2)	 // merge sort and finally get one sorted vector
