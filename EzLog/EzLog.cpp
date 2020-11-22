@@ -746,7 +746,7 @@ namespace ezlogspace
 
 #ifdef __________________________________________________EzLogCircularQueue__________________________________________________
 
-		template <typename T>
+		template <typename T, size_t CAPACITY>
 		class PodCircularQueue : public EzLogObject
 		{
 			static_assert(std::is_pod<T>::value, "fatal error");
@@ -755,14 +755,12 @@ namespace ezlogspace
 			using iterator = T*;
 			using const_iterator = const T*;
 
-			explicit PodCircularQueue(size_t capacity)
+			explicit PodCircularQueue() : pMem((T*)ezmalloc((1 + CAPACITY) * sizeof(T))), pMemEnd(pMem + 1 + CAPACITY)
 			{
-				pMem = (T*)ezmalloc((1 + capacity) * sizeof(T));
-				pMemEnd = pMem + 1 + capacity;
 				pFirst = pEnd = pMem;
 			}
 
-			PodCircularQueue(const PodCircularQueue& rhs) : PodCircularQueue(rhs.capacity())
+			PodCircularQueue(const PodCircularQueue& rhs) : PodCircularQueue()
 			{
 				size_t sz1 = rhs.first_sub_queue_size();
 				size_t sz2 = rhs.second_sub_queue_size();
@@ -802,9 +800,9 @@ namespace ezlogspace
 				return sz;
 			}
 
-			size_t capacity() const
+			constexpr size_t capacity() const
 			{
-				return pMemEnd - pMem - 1;
+				return CAPACITY;
 			}
 
 			bool normalized() const
@@ -882,32 +880,6 @@ namespace ezlogspace
 			}
 			//------------------------------------------sub queue------------------------------------------//
 
-			void swap(PodCircularQueue& rhs)
-			{
-				std::swap(pMem, rhs.pMem);
-				std::swap(pMemEnd, rhs.pMemEnd);
-				std::swap(pFirst, rhs.pFirst);
-				std::swap(pEnd, rhs.pEnd);
-			}
-
-			void normalize()
-			{
-				if (normalized()) { return; }
-				size_t size_first_sub = pMemEnd - pFirst;
-				size_t size_second_sub = pEnd - pMem;
-				size_t sz0 = pFirst - pEnd;
-
-				// TODO can optimize
-				{
-					PodCircularQueue<T> q2(capacity());
-					memcpy(q2.pMem, pFirst, size_first_sub * sizeof(T));
-					memcpy(q2.pMem + size_first_sub, pMem, size_second_sub * sizeof(T));
-					q2.pEnd = q2.pMem + (size_first_sub + size_second_sub);
-					swap(q2);
-				}
-				DEBUG_ASSERT(normalized());
-			}
-
 			void clear()
 			{
 				pEnd = pFirst = pMem;
@@ -952,14 +924,14 @@ namespace ezlogspace
 			}
 
 		public:
-			static void to_vector(Vector<T>& v, const PodCircularQueue<T>& q)
+			static void to_vector(Vector<T>& v, const PodCircularQueue& q)
 			{
 				v.resize(0);
 				v.insert(v.end(), q.first_sub_queue_begin(), q.first_sub_queue_end());
 				v.insert(v.end(), q.second_sub_queue_begin(), q.second_sub_queue_end());
 			}
 
-			static void to_vector(Vector<T>& v, PodCircularQueue<T>::const_iterator _beg, PodCircularQueue<T>::const_iterator _end)
+			static void to_vector(Vector<T>& v, PodCircularQueue::const_iterator _beg, PodCircularQueue::const_iterator _end)
 			{
 				DEBUG_ASSERT2(_beg <= _end, _beg, _end);
 				v.resize(0);
@@ -993,13 +965,13 @@ namespace ezlogspace
 			}
 
 		private:
-			T* pFirst;
-			T* pEnd;
 			T* pMem;
 			T* pMemEnd;
+			T* pFirst;
+			T* pEnd;
 		};
 
-		using EzLogBeanPtrCircularQueue = PodCircularQueue<EzLogBean*>;
+		using EzLogBeanPtrCircularQueue = PodCircularQueue<EzLogBean*,EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE-1>;
 		using EzLogBeanPtrVector = Vector<EzLogBean*>;
 #endif
 
@@ -1081,7 +1053,7 @@ namespace ezlogspace
 			std::condition_variable thrdExistCV;
 
 			explicit ThreadStru(size_t cacheSize)
-				: vcache(cacheSize), spinMtx(), noUseStream(EzLogStreamHelper::get_no_used_stream()), tid(GetThreadIDString()),
+				: vcache(), spinMtx(), noUseStream(EzLogStreamHelper::get_no_used_stream()), tid(GetThreadIDString()),
 				  thrdExistMtx(), thrdExistCV(){};
 
 			~ThreadStru()
@@ -2099,8 +2071,6 @@ namespace ezlogspace
 			DEBUG_PRINT(EZLOG_LEVEL_INFO, "free mem tid: %s\n", s_pThreadLocalStru->tid->c_str());
 			delete (s_pThreadLocalStru->tid);
 			s_pThreadLocalStru->tid = NULL;
-			EzLogBeanPtrCircularQueue temp(0);
-			s_pThreadLocalStru->vcache.swap(temp);	  // free memory
 			{
 				lock_guard<mutex> lgd(s_mtxQueue);
 				auto it = std::find(s_threadStruQueue.availQueue.begin(), s_threadStruQueue.availQueue.end(), s_pThreadLocalStru);
