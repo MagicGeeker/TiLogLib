@@ -11,6 +11,7 @@
 
 #include <list>
 #include <vector>
+#include <deque>
 #include <map>
 #include <set>
 #include <unordered_set>
@@ -59,6 +60,8 @@ namespace ezlogspace
 	using List = std::list<T, Allocator<T>>;
 	template <typename T>
 	using Vector = std::vector<T, Allocator<T>>;
+	template <typename T>
+	using Deque = std::deque<T, Allocator<T>>;
 	template <typename K>
 	using Set = std::set<K, std::less<K>, Allocator<K>>;
 	template <typename K, typename Comp = std::less<K>>
@@ -93,7 +96,7 @@ namespace ezlogspace
 	constexpr static size_t EZLOG_GLOBAL_BUF_SIZE = ((size_t)1 << 20U);						 // global cache string reserve length
 	constexpr static size_t EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE = ((size_t)1 << 8U);			 // single thread cache queue max length
 	constexpr static size_t EZLOG_GLOBAL_QUEUE_MAX_SIZE = ((size_t)1 << 12U);				 // global cache queue max length
-	constexpr static size_t EZLOG_GARBAGE_COLLECTION_QUEUE_MAX_SIZE = ((size_t)4 << 12U);	// garbage collection queue max length
+	constexpr static size_t EZLOG_GARBAGE_COLLECTION_QUEUE_RATE = ((size_t)4);	// (garbage collection queue length)/(global cache queue max length)
 	constexpr static size_t EZLOG_SINGLE_LOG_RESERVE_LEN = 50;	// reserve for every log except for level,tid ...
 	constexpr static size_t EZLOG_THREAD_ID_MAX_LEN = SIZE_MAX;	// tid max len,SIZE_MAX means no limit,in popular system limit is EZLOG_UINT64_MAX_CHAR_LEN
 	constexpr static size_t EZLOG_MAX_LOG_NUM = SIZE_MAX;	// max log numbers

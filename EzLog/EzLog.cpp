@@ -1074,6 +1074,55 @@ namespace ezlogspace
 			~CacheStru() = default;
 		};
 
+		struct GCList {
+
+			explicit GCList()
+			{
+				gclist.resize(size());
+				it_next = gclist.begin();
+			}
+			bool insert(EzLogBeanPtrVector& v)
+			{
+				DEBUG_ASSERT(it_next != gclist.end());
+				std::swap(*it_next, v);
+				++it_next;
+				return it_next == gclist.end();
+			}
+
+			void gc()
+			{
+				for (auto it = gclist.begin(); it != it_next; ++it)
+				{
+					auto& v = *it;
+					for (EzLogBean* pBean : v)
+					{
+						EzLogStream::DestroyPushedEzLogBean(pBean);
+					}
+				}
+				clear();
+			}
+
+			constexpr static size_t size()
+			{
+				static_assert(EZLOG_GARBAGE_COLLECTION_QUEUE_RATE>=1,"fatal error");
+				return EZLOG_GARBAGE_COLLECTION_QUEUE_RATE;
+			}
+
+			void clear()
+			{
+				it_next = gclist.begin();
+			}
+
+			bool full()
+			{
+				return it_next == gclist.end();
+			}
+
+		private:
+			List<EzLogBeanPtrVector > gclist;
+			List<EzLogBeanPtrVector >::iterator it_next;
+		};
+
 		struct ThreadStruQueue : public EzLogObject
 		{
 			List<ThreadStru*> availQueue;		 // thread is live
@@ -1098,7 +1147,86 @@ namespace ezlogspace
 			}
 		};
 
+		using task_t = std::function<void()>;
+		class EzLogTaskQueue
+		{
+		public:
+			EzLogTaskQueue(const EzLogTaskQueue& rhs) = delete;
+			EzLogTaskQueue(EzLogTaskQueue&& rhs) = delete;
+
+			explicit EzLogTaskQueue(bool runAtOnce = true)
+			{
+				stat = RUN;
+				if (runAtOnce) { start(); }
+			}
+			~EzLogTaskQueue()
+			{
+				wait_stop();
+			}
+			void start()
+			{
+				loopThread = std::thread(&EzLogTaskQueue::loop, this);
+			}
+
+			void wait_stop()
+			{
+				stop();
+				if (loopThread.joinable()) { loopThread.join(); }
+			}
+
+			void stop()
+			{
+				unique_lock<Mutex> lk(mtx);
+				stat = TO_STOP;
+				lk.unlock();
+				cva.notify_one();
+			}
+
+			void pushTask(task_t p)
+			{
+				unique_lock<Mutex> lk(mtx);
+				taskDeque.push_back(p);
+				lk.unlock();
+				cva.notify_one();
+			}
+
+		private:
+			void loop()
+			{
+				unique_lock<Mutex> lk(mtx);
+				while (true)
+				{
+					if (!taskDeque.empty())
+					{
+						task_t p = taskDeque.front();
+						taskDeque.pop_front();
+						p();
+					} else
+					{
+						if (TO_STOP == stat) { break; }
+						cva.wait(lk);
+					}
+				}
+				stat = STOP;
+			}
+
+		private:
+			using Mutex = SpinMutex<>;
+
+			thread loopThread;
+			Deque<task_t> taskDeque;
+			Mutex mtx;
+			condition_variable_any cva;
+			enum
+			{
+				RUN,
+				TO_STOP,
+				STOP
+			} stat;
+		};
+
 		using EzLogCoreString = EzLogString;
+		using MiniSpinMutex =SpinMutex<>;
 		class EzLogCore : public EzLogObject
 		{
 		public:
@@ -1141,7 +1269,7 @@ namespace ezlogspace
 
 			inline void WaitForGC(std::unique_lock<std::mutex>& lk);
 
-			inline void ClearGlobalCacheQueueAndNotifyGC();
+			inline void NotifyGC();
 
 			inline void
 			AtInternalThreadExit(bool& existVar, std::mutex& mtxNextToExit, bool& cvFlagNextToExit, std::condition_variable& cvNextToExit);
@@ -1197,6 +1325,11 @@ namespace ezlogspace
 			EzLogTime s_log_last_time{ ezlogtimespace::ELogTime::MAX };
 			std::thread s_threadPoll = CreatePollThread();
 
+			//wait merge mutex
+			MiniSpinMutex s_mtxWaitMerge;
+			std::condition_variable_any s_cvWaitMerge;
+			bool s_merge_complete = false;
+			//merge mutex
 			std::mutex s_mtxMerge;
 			std::condition_variable s_cvMerge;
 			bool s_merging = true;
@@ -1211,7 +1344,12 @@ namespace ezlogspace
 			EzLogCoreString s_global_cache_string;
 			std::thread s_threadPrinter = CreatePrintThread();
 
-			CacheStru s_garbages{ EZLOG_GARBAGE_COLLECTION_QUEUE_MAX_SIZE };
+			// wait garbage collection mutex
+			MiniSpinMutex s_mtxWaitGC;
+			std::condition_variable_any s_cvWaitGC;
+			bool s_gc_complete = false;
+			// garbage collection mutex
+			GCList s_garbages;
 			std::mutex s_mtxDeleter;
 			std::condition_variable s_cvDeleter;
 			bool s_deleting = false;
@@ -1822,11 +1960,10 @@ namespace ezlogspace
 			while (s_merging)	 //另外一个线程的本地缓存和全局缓存已满，本线程却拿到锁，应该需要等打印线程打印完
 			{
 				lk.unlock();
-				for (size_t us = EZLOG_GLOBAL_BUF_FULL_SLEEP_US; s_merging;)
-				{
-					s_cvMerge.notify_all();
-					std::this_thread::sleep_for(std::chrono::microseconds(us + FastRand() % us));
-				}
+				s_cvMerge.notify_one();
+				unique_lock<MiniSpinMutex> lk_wait(s_mtxWaitMerge);
+				s_merge_complete = false;
+				s_cvWaitMerge.wait(lk_wait, [this] { return s_merge_complete; });
 				//等这个线程拿到锁的时候，可能全局缓存已经打印完，也可能又满了正在打印
 				lk.lock();
 			}
@@ -1836,7 +1973,7 @@ namespace ezlogspace
 		{
 			DEBUG_ASSERT(!lk.owns_lock());
 			lk = std::unique_lock<std::mutex>(s_mtxDeleter);
-			if (s_garbages.vcache.size() >= EZLOG_GARBAGE_COLLECTION_QUEUE_MAX_SIZE) { WaitForGC(lk); }
+			if (s_garbages.full()) { WaitForGC(lk); }
 		}
 
 		void EzLogCore::WaitForGC(std::unique_lock<std::mutex>& lk)
@@ -1845,23 +1982,22 @@ namespace ezlogspace
 			while (s_deleting)
 			{
 				lk.unlock();
-				for (; s_deleting;)
-				{
-					s_cvDeleter.notify_all();
-					std::this_thread::yield();
-				}
+				s_cvDeleter.notify_one();
+				unique_lock<MiniSpinMutex> lk_wait(s_mtxWaitGC);
+				s_gc_complete = false;
+				s_cvWaitGC.wait(lk_wait, [this] { return s_gc_complete; });
 				lk.lock();
 			}
 		}
 
-		void EzLogCore::ClearGlobalCacheQueueAndNotifyGC()
+		void EzLogCore::NotifyGC()
 		{
 			unique_lock<mutex> ulk;
 			GetMoveGarbagePermission(ulk);
 			DEBUG_PRINT(
-				EZLOG_LEVEL_INFO, "ClearGlobalCacheQueueAndNotifyGC s_garbages.vcache.size() %u,s_globalCache.vcache.size() %u\n",
-				(unsigned)s_garbages.vcache.size(), (unsigned)s_globalCache.vcache.size());
-			s_garbages.vcache.insert(s_garbages.vcache.end(), s_globalCache.vcache.begin(), s_globalCache.vcache.end());
+				EZLOG_LEVEL_INFO, "NotifyGC s_garbages.vcache.size() %u,s_globalCache.vcache.size() %u\n",
+				(unsigned)s_garbages.size(), (unsigned)s_globalCache.vcache.size());
+			s_garbages.insert(s_globalCache.vcache);
 			s_globalCache.vcache.resize(0);
 
 			s_deleting = true;
@@ -1879,9 +2015,16 @@ namespace ezlogspace
 
 				std::unique_lock<std::mutex> lk_print(s_mtxPrinter);
 				GetMergedLogs();
-				ClearGlobalCacheQueueAndNotifyGC();
+				NotifyGC();
 				s_merging = false;
 				lk_merge.unlock();
+
+				{
+					unique_lock<MiniSpinMutex> lk_wait(s_mtxWaitMerge);
+					s_merge_complete = true;
+					lk_wait.unlock();
+					s_cvWaitMerge.notify_one();
+				}
 
 				s_printing = true;
 				lk_print.unlock();
@@ -1971,14 +2114,16 @@ namespace ezlogspace
 				std::unique_lock<std::mutex> lk_del(s_mtxDeleter);
 				s_cvDeleter.wait(lk_del, [this]() -> bool { return (s_deleting && s_inited); });
 
-				for (EzLogBean* pBean : s_garbages.vcache)
-				{
-					EzLogStream::DestroyPushedEzLogBean(pBean);
-				}
-				s_garbages.vcache.resize(0);
-
+				s_garbages.gc();
 				s_deleting = false;
 				lk_del.unlock();
+
+				{
+					unique_lock<MiniSpinMutex> lk_wait(s_mtxWaitGC);
+					s_gc_complete = true;
+					lk_wait.unlock();
+					s_cvWaitGC.notify_one();
+				}
 
 				unique_lock<mutex> lk_queue(s_mtxQueue, std::try_to_lock);
 				if (lk_queue.owns_lock())
