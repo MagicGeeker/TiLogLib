@@ -1801,14 +1801,16 @@ namespace ezlogspace
 				(unsigned)s_globalCache.vcache.size());
 			std::stable_sort(s_globalCache.vcache.begin(), s_globalCache.vcache.end(), EzLogBeanPtrComp());
 			EzLogBean referenceBean;
+			referenceBean.time() = s_log_last_time = EzLogTime::now();
+#ifdef IUILS_DEBUG_WITH_ASSERT
 			if (!s_globalCache.vcache.empty())
 			{
 				EzLogTime& vcacheMaxTime = s_globalCache.vcache.back()->time();
-				referenceBean.time() = std::max(vcacheMaxTime, s_log_last_time);  //ensure all of EzLogBean before referenceBean will be merged and sorted
-			} else
-			{
-				referenceBean.time() = s_log_last_time;
+				// ensure all of EzLogBean before referenceBean will be merged and sorted
+				//because s_globalCache nomore increase when merging,and time is steady,so vcacheMaxTime <= s_log_last_time(this moment time)
+				DEBUG_ASSERT(vcacheMaxTime <= s_log_last_time);
 			}
+#endif
 
 			s.emplace(s_globalCache.vcache);	// insert global cache first
 			{
@@ -1842,7 +1844,6 @@ namespace ezlogspace
 			}
 			DEBUG_PRINT(
 				EZLOG_LEVEL_INFO, "End of MergeSortForGlobalQueue s_globalCache.vcache size= %u\n", (unsigned)s_globalCache.vcache.size());
-			s_log_last_time = EzLogTime::now();
 		}
 
 		// s_mtxMerge s_mtxPrinter must be owned
