@@ -53,9 +53,10 @@
 
 #define EZLOG_SIZE_OF_ARRAY(arr) (sizeof(arr) / sizeof(arr[0]))
 #define EZLOG_STRING_LEN_OF_CHAR_ARRAY(char_str) ((sizeof(char_str) - 1) / sizeof(char_str[0]))
+#define EZLOG_STRING_AND_LEN(char_str)   char_str,((sizeof(char_str) - 1) / sizeof(char_str[0]))
 
-#define EZLOG_CTIME_MAX_LEN 30
-#define EZLOG_PREFIX_RESERVE_LEN 21	   // reserve for prefix static c-strings;
+#define EZLOG_CTIME_MAX_LEN 32
+#define EZLOG_PREFIX_RESERVE_LEN_L1 16	   // reserve for prefix static c-strings;
 
 using SystemTimePoint = std::chrono::system_clock::time_point;
 using SystemClock = std::chrono::system_clock;
@@ -149,7 +150,7 @@ namespace ezloghelperspace
 		do
 		{
 			if (tmd == nullptr) { break; }
-			size_t len = strftime(dst, EZLOG_CTIME_MAX_LEN, "%Y-%m-%d %H:%M:%S", tmd);
+			size_t len = strftime(dst, EZLOG_CTIME_MAX_LEN, "%Y-%m-%d  %H:%M:%S", tmd); //24B
 			// len without zero '\0'
 			if (len == 0) { break; }
 #if EZLOG_WITH_MILLISECONDS == TRUE
@@ -167,6 +168,34 @@ namespace ezloghelperspace
 		} while (false);
 		dst[0] = '\0';
 		return 0;
+	}
+
+	template <size_t size>
+	static inline void memcpy_small(void* dst, const void* src)
+	{
+		char* dd = (char*)dst;
+		char* ss = (char*)src;
+		switch (size)
+		{
+		case 16:
+			*(uint64_t*)dd = *(uint64_t*)ss;
+			dd += 8, ss += 8;
+		case 8:
+			*(uint64_t*)dd = *(uint64_t*)ss;
+			break;
+		case 4:
+			*(uint32_t*)dd = *(uint32_t*)ss;
+			break;
+		case 2:
+			*(uint16_t*)dd = *(uint16_t*)ss;
+			break;
+		case 1:
+			*dd = *ss;
+			break;
+		default:
+			memcpy(dst, src, size);
+			break;
+		}
 	}
 
 }	 // namespace ezloghelperspace
@@ -468,6 +497,16 @@ namespace ezlogspace
 			inline EzLogString& append_unsafe(const char* cstr, size_t length)
 			{
 				memcpy(m_end, cstr, length);
+				m_end += length;
+				ensureZero();
+				return *this;
+			}
+
+			// length without '\0'
+			template <size_t length>
+			inline EzLogString& append_smallstr_unsafe(const char* cstr)
+			{
+				memcpy_small<length>(m_end, cstr);
 				m_end += length;
 				ensureZero();
 				return *this;
@@ -1930,26 +1969,27 @@ namespace ezlogspace
 			constexpr size_t L3 = 0;
 #endif	  // IUILS_DEBUG_WITH_ASSERT
 
-			logs.reserve(L3+bean.tid->size() + ctimestr_len + bean.fileLen + bean.str_view().size() + EZLOG_PREFIX_RESERVE_LEN);
+			logs.reserve(L3+bean.tid->size() + ctimestr_len + bean.fileLen + bean.str_view().size() + EZLOG_PREFIX_RESERVE_LEN_L1);
 
+#define _SL(S) EZLOG_STRING_LEN_OF_CHAR_ARRAY(S)
 			logs.resize(0);
-			logs.append_unsafe('\n');												   // 1
-			DEBUG_RUN(logs.append_unsafe(bean.time().toSteadyFlag()));				   // L3
-			DEBUG_RUN(logs.append_unsafe(' '));								 		  // L3
-			logs.append_unsafe(bean.level);											   // 1
-			logs.append_unsafe(" tid: ", EZLOG_STRING_LEN_OF_CHAR_ARRAY(" tid: "));	   // 6
-			logs.append_unsafe(bean.tid->c_str(), bean.tid->size());				   //----bean.tid->size()
-			logs.append_unsafe(" [", EZLOG_STRING_LEN_OF_CHAR_ARRAY(" ["));			   // 2
-			logs.append_unsafe(ctimestr, ctimestr_len);								   //----ctimestr_len
-			logs.append_unsafe("] [", EZLOG_STRING_LEN_OF_CHAR_ARRAY("] ["));		   // 3
+			logs.append_unsafe('\n');												  // 1
+			DEBUG_RUN(logs.append_unsafe(bean.time().toSteadyFlag()));				  // L3_1
+			DEBUG_RUN(logs.append_unsafe(' '));										  // L3_2
+			logs.append_unsafe(bean.level);											  // 1
+			logs.append_unsafe(bean.tid->c_str(), bean.tid->size());				  //----bean.tid->size()
+			logs.append_smallstr_unsafe<_SL(" [")>(" [");							  // 2
+			logs.append_unsafe(ctimestr, ctimestr_len);								  //----ctimestr_len
+			logs.append_smallstr_unsafe<_SL("]  [")>("]  [");						  // 4
 
 			logs.append_unsafe(bean.file, bean.fileLen);						   //----bean.fileLen
 			logs.append_unsafe(':');											   // 1
 			logs.append_unsafe(bean.line);										   // 5 see EZLOG_UINT16_MAX_CHAR_LEN
-			logs.append_unsafe("] ", EZLOG_STRING_LEN_OF_CHAR_ARRAY("] "));		   // 2
+			logs.append_smallstr_unsafe<_SL("] ")>("] ");						   // 2
 			logs.append_unsafe(bean.str_view().data(), bean.str_view().size());	   //----bean.str_view()->size()
+#undef _S
 																				   // clang-format off
-			// static L1=1+1+6+2+3+1+5+2=21
+			// static L1=1+1+2+4+1+5+2=16
 			// dynamic L2= bean.tid->size() + ctimestr_len + bean.fileLen + bean.str_view().size()
 			// dynamic L3= len of steady flag
 			// reserve L1+L2+L3 bytes
