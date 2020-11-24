@@ -153,6 +153,47 @@ namespace ezlogspace
 	{
 	};
 
+	template <typename Object, typename ReIniter>
+	class EzLogObjectPool : public EzLogObject
+	{
+	public:
+		using ObjectPtr = Object*;
+		~EzLogObjectPool() = default;
+
+		explicit EzLogObjectPool(size_t init_size = 32)
+		{
+			resize(init_size);
+			it_next = pool.begin();
+		}
+		void resize(size_t sz)
+		{
+			size_t preSize = pool.size();
+			if (preSize >= sz)
+			{
+				return;
+			} else
+			{
+				pool.resize(sz);
+			}
+		}
+		void release_all()
+		{
+			it_next = pool.begin();
+		}
+
+		ObjectPtr acquire()
+		{
+			Object& v = *it_next;
+			++it_next;
+			ReIniter()(v);
+			return &v;
+		}
+
+	private:
+		List<Object> pool;
+		typename List<Object>::iterator it_next;
+	};
+
 	constexpr char LOG_PREFIX[] = "FF  FEWIDVFFFF";	   // begin FF,and end FFFF is invalid
 	enum class ELogLevelFlag : char
 	{

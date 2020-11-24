@@ -973,6 +973,7 @@ namespace ezlogspace
 
 		using EzLogBeanPtrCircularQueue = PodCircularQueue<EzLogBean*,EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE-1>;
 		using EzLogBeanPtrVector = Vector<EzLogBean*>;
+		using EzLogBeanPtrVectorPtr = Vector<EzLogBean*>*;
 #endif
 
 		template <size_t _SleepWhenAcquireFailedInNanoSeconds = size_t(-1)>
@@ -1139,14 +1140,22 @@ namespace ezlogspace
 			}
 		};
 
-		struct EzLogBeanPtrVectorComp
+		struct EzLogBeanPtrVectorPtrComp
 		{
-			bool operator()(const EzLogBeanPtrVector& lhs, const EzLogBeanPtrVector& rhs) const
+			bool operator()(const EzLogBeanPtrVectorPtr lhs, const EzLogBeanPtrVectorPtr rhs) const
 			{
-				return lhs.size() < rhs.size();
+				return lhs->size() < rhs->size();
 			}
 		};
 
+		struct EzLogBeanPtrVectorReIniter
+		{
+			inline void operator()(EzLogBeanPtrVector& x)
+			{
+				x.clear();
+			}
+		};
+		using EzLogBeanPtrVectorPool = EzLogObjectPool<EzLogBeanPtrVector, EzLogBeanPtrVectorReIniter>;
 		using task_t = std::function<void()>;
 		class EzLogTaskQueue
 		{
@@ -1318,7 +1327,8 @@ namespace ezlogspace
 
 			EzLogBeanPtrVector s_insertToSetVec{};	   // temp vector
 			EzLogBeanPtrVector s_mergeSortVec{};	   // temp vector
-			MultiSet<EzLogBeanPtrVector, EzLogBeanPtrVectorComp> s_threadStruSet;	// set of ThreadStru cache
+			MultiSet<EzLogBeanPtrVectorPtr, EzLogBeanPtrVectorPtrComp> s_threadStruSet;	   // set of ThreadStru cache
+			EzLogBeanPtrVectorPool s_vecPool;
 
 			static constexpr uint32_t s_pollPeriodSplitNum = 100;
 			atomic_uint32_t s_pollPeriodus{ EZLOG_POLL_DEFAULT_THREAD_SLEEP_MS * 1000 / s_pollPeriodSplitNum };
@@ -1785,7 +1795,9 @@ namespace ezlogspace
 					}
 				};
 				DEBUG_RUN(sorted_judge_func());
-				s_threadStruSet.emplace(v);	 // insert for every thread
+				auto p = s_vecPool.acquire();
+				std::swap(*p, v);
+				s_threadStruSet.emplace(p);	   // insert for every thread
 				DEBUG_ASSERT2(v.size() <= vcachePreSize, v.size(), vcachePreSize);
 			}
 		}
@@ -1812,9 +1824,15 @@ namespace ezlogspace
 			}
 #endif
 
-			s.emplace(s_globalCache.vcache);	// insert global cache first
+			s_vecPool.release_all();
+			s_vecPool.resize(1);
+
+			EzLogBeanPtrVectorPtr p = s_vecPool.acquire();
+			std::swap(*p, s_globalCache.vcache);
+			s.emplace(p);	 // insert global cache first
 			{
 				lock_guard<mutex> lgd(s_mtxQueue);
+				s_vecPool.resize(1 + s_threadStruQueue.availQueue.size() + s_threadStruQueue.waitMergeQueue.size());
 				DEBUG_PRINT(
 					EZLOG_LEVEL_INFO, "MergeThreadStruQueueToSet availQueue.size()= %u\n",
 					(unsigned)s_threadStruQueue.availQueue.size());
@@ -1827,19 +1845,21 @@ namespace ezlogspace
 
 			while (s.size() >= 2)	 // merge sort and finally get one sorted vector
 			{
-				auto it_fst_vec = s.begin();
-				auto it_sec_vec = std::next(s.begin());
+				auto it_fst_vec = *s.begin();
+				auto it_sec_vec = *std::next(s.begin());
 				v.resize(it_fst_vec->size() + it_sec_vec->size());
 				std::merge(it_fst_vec->begin(), it_fst_vec->end(), it_sec_vec->begin(), it_sec_vec->end(), v.begin(), EzLogBeanPtrComp());
 
 				s.erase(s.begin());
 				s.erase(s.begin());
-				s.insert(v);
+				std::swap(*it_sec_vec, v);
+				s.insert(it_sec_vec);
 			}
 			DEBUG_ASSERT(std::is_sorted(s.begin(), s.end()));	 // size<=1 is sorted,too.
 			DEBUG_ASSERT(s.size() == 1);
 			{
-				s_globalCache.vcache = *s.begin();
+				p = *s.begin();
+				s_globalCache.vcache.swap(*p);
 				v.clear();
 			}
 			DEBUG_PRINT(
