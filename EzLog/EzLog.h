@@ -269,15 +269,20 @@ namespace ezlogspace
 		{
 			const char* m_front;
 			const char* m_end;
+			DEBUG_DECLARE(size_t max_size;)
 
 		public:
-			EzLogStringView() : m_front(nullptr), m_end(nullptr) {}
+			EzLogStringView() : m_front(nullptr), m_end(nullptr)
+			{
+				DEBUG_RUN(max_size = 0);
+			}
 			EzLogStringView(const char* front, const char* ed)
 			{
 				DEBUG_ASSERT(front != nullptr);
-				DEBUG_ASSERT(ed >= front);
+				DEBUG_ASSERT2(ed >= front, (uintptr_t)front, (uintptr_t)ed);
 				m_front = front;
 				m_end = ed;
+				DEBUG_RUN(max_size = m_end - m_front;);
 			}
 
 			EzLogStringView(const char* front, size_t sz)
@@ -285,6 +290,7 @@ namespace ezlogspace
 				DEBUG_ASSERT(front != nullptr);
 				m_front = front;
 				m_end = front + sz;
+				DEBUG_RUN(max_size = sz);
 			}
 
 			const char* data() const
@@ -295,6 +301,12 @@ namespace ezlogspace
 			size_t size() const
 			{
 				return m_end - m_front;
+			}
+
+			void resize(size_t sz)
+			{
+				DEBUG_ASSERT(sz <= max_size);
+				m_end = m_front + sz;
 			}
 		};
 
@@ -1363,31 +1375,41 @@ namespace ezlogspace
 	EZLOG_ABSTRACT class EzLogPrinter : public EzLogObject
 	{
 	public:
+		using EzLogBean = ezlogspace::internal::EzLogBean;
+		using EzLogTime = ezlogspace::internal::EzLogBean::EzLogTime;
+		union MetaData
+		{
+			struct buf_t
+			{
+				const char* logs;
+				size_t logs_size;
+				EzLogTime logTime;
+			} * buf;
+			EzLogBean* pBean;
+		};
+		static_assert(std::is_pod<MetaData>::value, "fatal error");
+		static_assert(sizeof(MetaData) <= 8, "fatal error,need optimization");
+
+	public:
 		// accept logs with size,logs and NOT end with '\0'
-		virtual void onAcceptLogs(const char* logs, size_t size) = 0;
+		virtual void onAcceptLogs(MetaData metaData) = 0;
+
+		// MetaData is a EzLogBean if true,or a buf_t if false when onAcceptLogs
+		virtual bool needSingleLog() = 0;
+
 		// sync with printer's dest
 		virtual void sync() = 0;
 
-		// if it is static,it will not be deleted
-		virtual bool isStatic()
-		{
-			return true;
-		}
-
 		virtual ~EzLogPrinter() = default;
-
-	protected:
-		size_t singleFilePrintedLogSize = 0;
 	};
 
 	class EzLog
 	{
 
 	public:
-		// p_ezLog_managed_Printer will be managed and deleted by EzLog,no need to free by user
-		// or p_ezLog_managed_Printer is static and will not be deleted
+		// printer must be static or always valid until set printer next time
 		// it will not be effective immediately
-		static void setPrinter(EzLogPrinter* p_ezLog_managed_Printer);
+		static void setPrinter(EzLogPrinter* printer);
 
 		static EzLogPrinter* getDefaultTerminalPrinter();
 

@@ -56,7 +56,7 @@
 #define EZLOG_STRING_AND_LEN(char_str)   char_str,((sizeof(char_str) - 1) / sizeof(char_str[0]))
 
 #define EZLOG_CTIME_MAX_LEN 32
-#define EZLOG_PREFIX_RESERVE_LEN_L1 16	   // reserve for prefix static c-strings;
+#define EZLOG_PREFIX_RESERVE_LEN_L1 15	   // reserve for prefix static c-strings;
 
 using SystemTimePoint = std::chrono::system_clock::time_point;
 using SystemClock = std::chrono::system_clock;
@@ -214,7 +214,7 @@ namespace ezlogspace
 		{
 			StringStream os;
 			os << (std::this_thread::get_id());
-			String id = os.str();
+			String id = " "+os.str()+" ";
 			DEBUG_PRINT(EZLOG_LEVEL_INFO, "GetNewThreadIDString, tid %s ,cap %llu\n", id.c_str(), (long long unsigned)id.capacity());
 			if_constexpr(EZLOG_THREAD_ID_MAX_LEN != SIZE_MAX)
 			{
@@ -320,6 +320,22 @@ namespace ezlogspace
 				return String(m_front, size());
 			}
 
+		public:
+			inline char* begin() {
+				return m_front;
+			}
+			inline const char* begin()const
+			{
+				return m_front;
+			}
+			inline char* end()
+			{
+				return m_end;
+			}
+			inline const char* end()const
+			{
+				return m_end;
+			}
 		public:
 			inline size_t size() const
 			{
@@ -1048,7 +1064,8 @@ namespace ezlogspace
 		public:
 			static EzLogTerminalPrinter* getInstance();
 
-			void onAcceptLogs(const char* logs, size_t size) override;
+			void onAcceptLogs(MetaData metaData) override;
+			bool needSingleLog() override;
 
 			void sync() override;
 
@@ -1062,7 +1079,8 @@ namespace ezlogspace
 		public:
 			static EzLogFilePrinter* getInstance();
 
-			void onAcceptLogs(const char* logs, size_t size) override;
+			void onAcceptLogs(MetaData metaData) override;
+			bool needSingleLog() override;
 
 			void sync() override;
 
@@ -1070,9 +1088,8 @@ namespace ezlogspace
 			EzLogFilePrinter();
 
 			~EzLogFilePrinter() override;
-
-			String tryToGetFileName(const char* logs, size_t size, uint32_t index);
-
+			void CreateNewFile(MetaData metaData);
+			size_t singleFilePrintedLogSize = SIZE_MAX;
 		protected:
 			const String folderPath = EZLOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER;
 			std::FILE* m_pFile = nullptr;
@@ -1289,15 +1306,15 @@ namespace ezlogspace
 
 			void IPushLog(EzLogBean* pBean);
 
-			inline void GetTimeStrFromSystemClock(char* dst, size_t& len, EzLogBean& bean, SystemTimePoint& cpptime_pre);
+			inline EzLogStringView& GetTimeStrFromSystemClock(EzLogBean& bean);
 
-			inline void GetSingleLogFromMetaData(EzLogCoreString& logs, const char* ctimestr, size_t ctimestr_len, const EzLogBean& bean);
-
-			void GetMergedLogs();
+			inline EzLogStringView GetSingleLogFromMetaData(const EzLogBean& bean);
 
 			void MergeThreadStruQueueToSet(List<ThreadStru*>& thread_queue, EzLogBean& bean);
 
 			void MergeSortForGlobalQueue();
+
+			void SwapMergeCacheAndPrintCache();
 
 			inline void GetMergePermission(std::unique_lock<std::mutex>& lk);
 
@@ -1306,6 +1323,8 @@ namespace ezlogspace
 			inline void WaitForMerge(std::unique_lock<std::mutex>& lk);
 
 			inline void GetMoveGarbagePermission(std::unique_lock<std::mutex>& lk);
+
+			inline void WaitForPrint(std::unique_lock<std::mutex>& lk);
 
 			inline void WaitForGC(std::unique_lock<std::mutex>& lk);
 
@@ -1316,13 +1335,15 @@ namespace ezlogspace
 
 			void thrdFuncMergeLogs();
 
-			void PrintLogs();
-
 			void thrdFuncPrintLogs();
 
 			void thrdFuncGarbageCollection();
 
 			void thrdFuncPoll();
+
+			EzLogTime mergeLogsToOneString();
+
+			void PrintLogs();
 
 			inline bool PollThreadSleep();
 
@@ -1377,11 +1398,21 @@ namespace ezlogspace
 			LogCaches s_mergeCache{ GLOBAL_SIZE };
 			std::thread s_threadMerge = CreateMergeThread();
 
+			// wait printer mutex
+			MiniSpinMutex s_mtxWaitPrinter;
+			std::condition_variable_any s_cvWaitPrinter;
+			bool s_print_complete = false;
+			// print mutex
 			std::mutex s_mtxPrinter;
 			std::condition_variable s_cvPrinter;
 			bool s_printing = false;
 			uint64_t s_printedLogsLength = 0;
 			uint64_t s_printedLogs = 0;
+			EzLogTime::origin_time_type s_preLogTime{};
+			char s_ctimestr[EZLOG_CTIME_MAX_LEN] = { 0 };
+			EzLogStringView s_logTimeStringView{ s_ctimestr, EZLOG_CTIME_MAX_LEN-1 };
+			LogCaches s_printCache{ GLOBAL_SIZE };
+			size_t s_bufSize = 0;
 			EzLogCoreString s_global_cache_string;
 			std::thread s_threadPrinter = CreatePrintThread();
 
@@ -1407,21 +1438,6 @@ namespace ezlogspace
 			friend class ezlogspace::EzLogStream;
 
 		public:
-			struct Deleter
-			{
-				constexpr Deleter() noexcept = default;
-
-				Deleter(const Deleter&) noexcept = default;
-
-				void operator()(EzLogPrinter* p) const
-				{
-					if (!p->isStatic()) delete p;
-				}
-			};
-
-			using UniquePtrPrinter = std::unique_ptr<EzLogPrinter, Deleter>;
-
-		public:
 			static EzLogImpl& getInstance();
 
 			static void pushLog(internal::EzLogBean* pBean);
@@ -1431,7 +1447,7 @@ namespace ezlogspace
 			static uint64_t getPrintedLogsLength();
 
 		public:
-			static bool setPrinter(UniquePtrPrinter p_ezLogPrinter);
+			static bool setPrinter(EzLogPrinter* p_ezLogPrinter);
 
 			static EzLogPrinter* getDefaultTermialPrinter();
 
@@ -1451,7 +1467,7 @@ namespace ezlogspace
 			~EzLogImpl() = default;
 
 		private:
-			UniquePtrPrinter m_printer{ EzLogFilePrinter::getInstance() };
+			atomic<EzLogPrinter*> m_printer{ EzLogFilePrinter::getInstance() };
 			volatile ELevel m_level = VERBOSE;
 		};
 
@@ -1476,10 +1492,13 @@ namespace ezlogspace
 		{
 			std::ios::sync_with_stdio(false);
 		};
-
-		void EzLogTerminalPrinter::onAcceptLogs(const char* logs, size_t size)
+		bool EzLogTerminalPrinter::needSingleLog()
 		{
-			std::cout.write(logs, size);
+			return false;
+		}
+		void EzLogTerminalPrinter::onAcceptLogs(MetaData metaData)
+		{
+			std::cout.write(metaData.buf->logs, metaData.buf->logs_size);
 		}
 
 		void EzLogTerminalPrinter::sync()
@@ -1505,16 +1524,13 @@ namespace ezlogspace
 			fflush(m_pFile);
 			if (m_pFile != nullptr) { fclose(m_pFile); }
 		}
-
-		void EzLogFilePrinter::onAcceptLogs(const char* logs, size_t size)
+		bool EzLogFilePrinter::needSingleLog()
 		{
-			if (index == 1)
-			{
-				String s = tryToGetFileName(logs, size, index);
-				index++;
-				m_pFile = fopen(s.data(), "w");
-			};
+			return false;
+		}
 
+		void EzLogFilePrinter::onAcceptLogs(MetaData metaData)
+		{
 			if (singleFilePrintedLogSize > EZLOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE)
 			{
 				singleFilePrintedLogSize = 0;
@@ -1525,35 +1541,32 @@ namespace ezlogspace
 					DEBUG_PRINT(EZLOG_LEVEL_VERBOSE, "sync and write index=%u \n", (unsigned)index);
 				}
 
-				String s = tryToGetFileName(logs, size, index);
-				index++;
-				m_pFile = fopen(s.data(), "w");
+				CreateNewFile(metaData);
 			}
 			if (m_pFile != nullptr)
 			{
-				fwrite(logs, sizeof(char), size, m_pFile);
-				singleFilePrintedLogSize += size;
+				fwrite(metaData.buf->logs, sizeof(char), metaData.buf->logs_size, m_pFile);
+				singleFilePrintedLogSize += metaData.buf->logs_size;
 			}
 		}
 
-		String EzLogFilePrinter::tryToGetFileName(const char* logs, size_t size, uint32_t index)
+		void EzLogFilePrinter::CreateNewFile(MetaData metaData)
 		{
+			char timeStr[EZLOG_CTIME_MAX_LEN];
+			size_t size = SystemTimePointToTimeCStr(timeStr, metaData.buf->logTime.get_origin_time());
 			String s;
 			char indexs[9];
 			snprintf(indexs, 9, "%07d ", index);
 			if (size != 0)
 			{
-				const char* p1 = strstr(logs, " [") + 2;
-				const char* p2 = strstr(logs, "] [");
-				if (p1 && p2 && p2 - p1 < EZLOG_CTIME_MAX_LEN)
-				{
-					char fileName[EZLOG_CTIME_MAX_LEN];
-					transformTimeStrToFileName(fileName, p1, p2 - p1);
-					s.append(folderPath).append(indexs, 8).append(fileName, p2 - p1).append(".log", 4);
-				}
+				char* fileName = timeStr;
+				transformTimeStrToFileName(fileName, timeStr, size);
+				s.append(folderPath).append(indexs, 8).append(fileName, size).append(".log", 4);
 			}
 			if (s.empty()) { s = folderPath + indexs; }
-			return s;
+
+			index++;
+			m_pFile = fopen(s.data(), "w");
 		}
 
 		void EzLogFilePrinter::sync()
@@ -1571,9 +1584,9 @@ namespace ezlogspace
 			return ipml;
 		}
 
-		bool EzLogImpl::setPrinter(UniquePtrPrinter p_ezLogPrinter)
+		bool EzLogImpl::setPrinter(EzLogPrinter* p_ezLogPrinter)
 		{
-			getInstance().m_printer = std::move(p_ezLogPrinter);
+			getInstance().m_printer = p_ezLogPrinter;
 			return true;
 		}
 
@@ -1614,7 +1627,7 @@ namespace ezlogspace
 
 		EzLogPrinter* EzLogImpl::getCurrentPrinter()
 		{
-			return getInstance().m_printer.get();
+			return getInstance().m_printer;
 		}
 
 #endif
@@ -1646,8 +1659,7 @@ namespace ezlogspace
 		inline bool EzLogCore::MoveLocalCacheToGlobal(ThreadStru& bean)
 		{
 			s_mergeCache.insert(s_mergeCache.end(), bean.vcache.first_sub_queue_begin(), bean.vcache.first_sub_queue_end());
-			s_mergeCache.insert(
-				s_mergeCache.end(), bean.vcache.second_sub_queue_begin(), bean.vcache.second_sub_queue_end());
+			s_mergeCache.insert(s_mergeCache.end(), bean.vcache.second_sub_queue_begin(), bean.vcache.second_sub_queue_end());
 			bean.vcache.clear();
 			// reserve EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE
 			bool isGlobalFull = s_mergeCache.size() >= EZLOG_GLOBAL_QUEUE_MAX_SIZE - EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE;
@@ -1708,6 +1720,8 @@ namespace ezlogspace
 			lock_guard<mutex> lgd_merge(s_mtxMerge);
 			lock_guard<mutex> lgd_print(s_mtxPrinter);
 			lock_guard<mutex> lgd_del(s_mtxDeleter);
+			s_mergeCache.clear();
+			s_printCache.clear();
 			s_global_cache_string.reserve((size_t)(EZLOG_GLOBAL_BUF_SIZE * 1.2));
 			atexit([] { getInstance().AtExit(); });
 			s_inited = true;
@@ -1833,6 +1847,7 @@ namespace ezlogspace
 			}
 		}
 
+		// s_mtxMerge s_mtxPrinter must be owned
 		void EzLogCore::MergeSortForGlobalQueue()
 		{
 			auto& v = s_mergeSortVec;
@@ -1897,95 +1912,80 @@ namespace ezlogspace
 				EZLOG_LEVEL_INFO, "End of MergeSortForGlobalQueue s_mergeCache size= %u\n", (unsigned)s_mergeCache.size());
 		}
 
-		// s_mtxMerge s_mtxPrinter must be owned
-		void EzLogCore::GetMergedLogs()
+		void EzLogCore::SwapMergeCacheAndPrintCache()
 		{
-			using namespace std::chrono;
+			std::unique_lock<std::mutex> lk_print(s_mtxPrinter);
 
-			EzLogCoreString& str = s_global_cache_string;
-			// std::stable_sort(s_mergeCache.begin(), s_mergeCache.end(), EzLogBeanPtrComp());
-			MergeSortForGlobalQueue();
-
-			char ctimestr[EZLOG_CTIME_MAX_LEN] = { 0 };
-			SystemTimePoint cpptime_pre = SystemTimePoint::min();
-			size_t len = 0;
-			EzLogCoreString logs;
-
-			DEBUG_PRINT(EZLOG_LEVEL_INFO, "GetMergedLogs,prepare to merge s_mergeCache to s_global_cache_string\n");
-			for (EzLogBean* pBean : s_mergeCache)
+			while (s_printing  && !s_printCache.empty())
 			{
-				DEBUG_RUN(EzLogBean::check(pBean));
-				EzLogBean& bean = *pBean;
-
-				GetTimeStrFromSystemClock(ctimestr, len, bean, cpptime_pre);
-				{
-					GetSingleLogFromMetaData(logs, ctimestr, len, bean);
-
-
-					str += logs;
-					if (bean.toTernimal) { std::cout << logs; }
-				}
-				s_printedLogs++;
+				WaitForPrint(lk_print);
 			}
+			std::swap(s_mergeCache, s_printCache);	  // move s_mergeCache-->s_printCache
 
-			DEBUG_PRINT(EZLOG_LEVEL_INFO, "End of GetMergedLogs,s_global_cache_string size= %u\n", (unsigned)str.size());
+			s_printing = true;
+			lk_print.unlock();
+			s_cvPrinter.notify_all();
+
+
 		}
 
-
-
-
-		inline void EzLogCore::GetTimeStrFromSystemClock(char* dst, size_t& len, EzLogBean& bean, SystemTimePoint& cpptime_pre)
+		inline EzLogStringView& EzLogCore::GetTimeStrFromSystemClock(EzLogBean& bean)
 		{
 #if EZLOG_WITH_MILLISECONDS == TRUE
 			bean.time().cast_to_ms();
 #else
 			bean.time().cast_to_sec();
 #endif
-			SystemTimePoint&& cpptime = bean.time().get_origin_time();
-			if (cpptime == cpptime_pre)
+			EzLogTime::origin_time_type oriTime = bean.time().get_origin_time();
+			if (oriTime == s_preLogTime)
 			{
 				// time is equal to pre,no need to update
 			} else
 			{
-				len = SystemTimePointToTimeCStr(dst, cpptime);
-				cpptime_pre = len == 0 ? SystemTimePoint::min() : cpptime;
+				size_t len = SystemTimePointToTimeCStr(s_ctimestr, oriTime);
+				s_preLogTime = len == 0 ? EzLogTime::origin_time_type() : oriTime;
+				s_logTimeStringView.resize(len);
 			}
+			return s_logTimeStringView;
 		}
 
-		inline void
-		EzLogCore::GetSingleLogFromMetaData(EzLogCoreString& logs, const char* ctimestr, size_t ctimestr_len, const EzLogBean& bean)
+		inline EzLogStringView
+		EzLogCore::GetSingleLogFromMetaData(const EzLogBean& bean)
 		{
 #ifdef IUILS_DEBUG_WITH_ASSERT
 			constexpr size_t L3 = sizeof(' ') + EZLOG_UINT64_MAX_CHAR_LEN;
 #else
 			constexpr size_t L3 = 0;
 #endif	  // IUILS_DEBUG_WITH_ASSERT
-
-			logs.reserve(L3+bean.tid->size() + ctimestr_len + bean.fileLen + bean.str_view().size() + EZLOG_PREFIX_RESERVE_LEN_L1);
+		  // clang-format off
+			auto& logs = s_global_cache_string;
+			size_t preSize = logs.size();
+			logs.reserve(
+				preSize + L3 + bean.tid->size() + s_logTimeStringView.size() + bean.fileLen + bean.str_view().size()
+				+ EZLOG_PREFIX_RESERVE_LEN_L1);
 
 #define _SL(S) EZLOG_STRING_LEN_OF_CHAR_ARRAY(S)
-			logs.resize(0);
 			logs.append_unsafe('\n');												  // 1
 			DEBUG_RUN(logs.append_unsafe(bean.time().toSteadyFlag()));				  // L3_1
 			DEBUG_RUN(logs.append_unsafe(' '));										  // L3_2
 			logs.append_unsafe(bean.level);											  // 1
 			logs.append_unsafe(bean.tid->c_str(), bean.tid->size());				  //----bean.tid->size()
-			logs.append_smallstr_unsafe<_SL(" [")>(" [");							  // 2
-			logs.append_unsafe(ctimestr, ctimestr_len);								  //----ctimestr_len
+			logs.append_unsafe('[');													   // 1
+			logs.append_unsafe(s_logTimeStringView.data(), s_logTimeStringView.size());	   //----s_logTimeStringView.size()
 			logs.append_smallstr_unsafe<_SL("]  [")>("]  [");						  // 4
 
 			logs.append_unsafe(bean.file, bean.fileLen);						   //----bean.fileLen
 			logs.append_unsafe(':');											   // 1
-			logs.append_unsafe(bean.line);										   // 5 see EZLOG_UINT16_MAX_CHAR_LEN
+			logs.append_unsafe((uint32_t)bean.line);							   // 5 see EZLOG_UINT16_MAX_CHAR_LEN
 			logs.append_smallstr_unsafe<_SL("] ")>("] ");						   // 2
 			logs.append_unsafe(bean.str_view().data(), bean.str_view().size());	   //----bean.str_view()->size()
-#undef _S
-																				   // clang-format off
-			// static L1=1+1+2+4+1+5+2=16
-			// dynamic L2= bean.tid->size() + ctimestr_len + bean.fileLen + bean.str_view().size()
+#undef _SL
+			// static L1=1+1+1+4+1+5+2=15
+			// dynamic L2= bean.tid->size() + s_logTimeStringView.size() + bean.fileLen + bean.str_view().size()
 			// dynamic L3= len of steady flag
 			// reserve L1+L2+L3 bytes
-																				   // clang-format on
+			// clang-format on
+			return EzLogStringView(&logs[preSize], logs.end());
 		}
 
 		inline void EzLogCore::GetMergePermission(std::unique_lock<std::mutex>& lk)
@@ -2022,6 +2022,20 @@ namespace ezlogspace
 			}
 		}
 
+		void EzLogCore::WaitForPrint(std::unique_lock<std::mutex>& lk)
+		{
+			DEBUG_ASSERT(lk.owns_lock());
+			while (s_printing)
+			{
+				lk.unlock();
+				s_cvPrinter.notify_one();
+				unique_lock<MiniSpinMutex> lk_wait(s_mtxWaitPrinter);
+				s_print_complete = false;
+				s_cvWaitPrinter.wait(lk_wait, [this] { return s_print_complete; });
+				lk.lock();
+			}
+		}
+
 		inline void EzLogCore::GetMoveGarbagePermission(std::unique_lock<std::mutex>& lk)
 		{
 			DEBUG_ASSERT(!lk.owns_lock());
@@ -2048,10 +2062,10 @@ namespace ezlogspace
 			unique_lock<mutex> ulk;
 			GetMoveGarbagePermission(ulk);
 			DEBUG_PRINT(
-				EZLOG_LEVEL_INFO, "NotifyGC s_garbages.vcache.size() %u,s_mergeCache.size() %u\n",
-				(unsigned)s_garbages.size(), (unsigned)s_mergeCache.size());
-			s_garbages.insert(s_mergeCache);
-			s_mergeCache.resize(0);
+				EZLOG_LEVEL_INFO, "NotifyGC s_garbages.vcache.size() %u,s_printCache.size() %u\n",
+				(unsigned)s_garbages.size(), (unsigned)s_printCache.size());
+			s_garbages.insert(s_printCache);
+			s_printCache.resize(0);
 
 			s_deleting = true;
 			ulk.unlock();
@@ -2065,10 +2079,8 @@ namespace ezlogspace
 			{
 				std::unique_lock<std::mutex> lk_merge(s_mtxMerge);
 				s_cvMerge.wait(lk_merge, [this]() -> bool { return (s_merging && s_inited); });
-
-				std::unique_lock<std::mutex> lk_print(s_mtxPrinter);
-				GetMergedLogs();
-				NotifyGC();
+				MergeSortForGlobalQueue();
+				SwapMergeCacheAndPrintCache();
 				s_merging = false;
 				lk_merge.unlock();
 
@@ -2078,11 +2090,6 @@ namespace ezlogspace
 					lk_wait.unlock();
 					s_cvWaitMerge.notify_one();
 				}
-
-				s_printing = true;
-				lk_print.unlock();
-				s_cvPrinter.notify_all();
-
 				this_thread::yield();
 				if (!s_existThrdPoll) { break; }
 			}
@@ -2092,22 +2099,62 @@ namespace ezlogspace
 			return;
 		}
 
+		EzLogTime EzLogCore::mergeLogsToOneString()
+		{
+			LogCaches& printCache = s_printCache;
+
+			DEBUG_PRINT(EZLOG_LEVEL_INFO, "mergeLogsToOneString,transform printCache to s_global_cache_string\n");
+			for (EzLogBean* pBean : printCache)
+			{
+				DEBUG_RUN(EzLogBean::check(pBean));
+				EzLogBean& bean = *pBean;
+
+				GetTimeStrFromSystemClock(bean);
+				{
+					EzLogStringView&& log = GetSingleLogFromMetaData(bean);
+
+					if (bean.toTernimal) { std::cout.write(log.data(), log.size()); }
+				}
+			}
+			s_printedLogs += printCache.size();
+
+			DEBUG_PRINT(
+				EZLOG_LEVEL_INFO, "End of mergeLogsToOneString,s_global_cache_string size= %u\n", (unsigned)s_global_cache_string.size());
+
+			DEBUG_ASSERT(!printCache.empty());
+			return printCache[0]->time();
+		}
 
 		void EzLogCore::PrintLogs()
 		{
-			static size_t bufSize = 0;
-			EzLogCoreString& mergedLogString = s_global_cache_string;
-			bufSize += mergedLogString.length();
-			s_printedLogsLength += mergedLogString.length();
-
+			if (s_printCache.empty()) { return; }
 			EzLogPrinter* printer = EzLogImpl::getCurrentPrinter();
-			DEBUG_PRINT(EZLOG_LEVEL_INFO, "prepare to print %u bytes\n", (unsigned)mergedLogString.size());
-			printer->onAcceptLogs(mergedLogString.data(), mergedLogString.size());
-			if (bufSize >= EZLOG_GLOBAL_BUF_SIZE)
+			if (!printer->needSingleLog())
+			{
+				EzLogTime firstLogTime = mergeLogsToOneString();
+				EzLogCoreString& logs = s_global_cache_string;
+				s_bufSize += logs.length();
+				s_printedLogsLength += logs.length();
+
+				DEBUG_PRINT(EZLOG_LEVEL_INFO, "prepare to print %u bytes\n", (unsigned)logs.size());
+				EzLogPrinter::MetaData::buf_t buf{ logs.data(), logs.size(), firstLogTime };
+				EzLogPrinter::MetaData metaData{ &buf };
+				printer->onAcceptLogs(metaData);
+			}
+
+			if (s_bufSize >= EZLOG_GLOBAL_BUF_SIZE)
 			{
 				printer->sync();
-				bufSize = 0;
+				s_bufSize = 0;
 			}
+			s_global_cache_string.resize(0);
+			{
+				unique_lock<MiniSpinMutex> lk_wait(s_mtxWaitPrinter);
+				s_print_complete = true;
+				lk_wait.unlock();
+				s_cvWaitPrinter.notify_one();
+			}
+			NotifyGC();
 		}
 
 		void EzLogCore::thrdFuncPrintLogs()
@@ -2119,7 +2166,6 @@ namespace ezlogspace
 				s_cvPrinter.wait(lk_print, [this]() -> bool { return (s_printing && s_inited); });
 
 				PrintLogs();
-				s_global_cache_string.resize(0);
 
 				s_printing = false;
 				lk_print.unlock();
@@ -2312,9 +2358,9 @@ namespace ezlogspace
 
 #ifdef __________________________________________________EzLog__________________________________________________
 
-	void EzLog::setPrinter(EzLogPrinter* p_ezLog_managed_Printer)
+	void EzLog::setPrinter(EzLogPrinter* printer)
 	{
-		EzLogImpl::setPrinter(EzLogImpl::UniquePtrPrinter(p_ezLog_managed_Printer));
+		EzLogImpl::setPrinter(printer);
 	}
 
 	void EzLog::pushLog(EzLogBean* pBean)
