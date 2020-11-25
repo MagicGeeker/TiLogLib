@@ -1202,6 +1202,11 @@ namespace ezlogspace
 				inline EzLogTime(EPlaceHolder)
 				{
 					impl = TimeImplType::now();
+#ifdef EZLOG_WITH_MILLISECONDS
+					cast_to_ms();
+#else
+					cast_to_sec();
+#endif
 				}
 				inline EzLogTime(const TimeImplType& t)
 				{
@@ -1421,8 +1426,6 @@ namespace ezlogspace
 		// these functions are not thread safe
 
 		static uint64_t getPrintedLogs();
-
-		static uint64_t getPrintedLogsLength();
 
 #if EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL == TRUE
 

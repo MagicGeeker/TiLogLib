@@ -502,8 +502,6 @@ TEST_CASE("file_single_thread_operator_test_____________________")
 	{
 		th.join();
 	}
-	uint64_t us = s1m.GetMicrosecondsUpToNOW();
-	EZCOUT << (1.0 * EzLog::getPrintedLogsLength() / us) << " length per microsecond\n";
 }
 
 #endif
