@@ -1218,11 +1218,11 @@ namespace ezlogspace
 			}
 		};
 
-		struct EzLogBeanPtrVectorPtrComp
+		struct EzLogBeanPtrVectorPtrLesser
 		{
 			bool operator()(const EzLogBeanPtrVectorPtr lhs, const EzLogBeanPtrVectorPtr rhs) const
 			{
-				return lhs->size() < rhs->size();
+				return rhs->size() < lhs->size();
 			}
 		};
 
@@ -1319,8 +1319,10 @@ namespace ezlogspace
 
 		using EzLogThreadPool = EzLogObjectPool<EzLogTaskQueue, EzLogTaskQueueReIniter>;
 
+
 		using EzLogCoreString = EzLogString;
 		using MiniSpinMutex =SpinMutex<>;
+		using EzLogBeanPtrVectorPtrPriorQueue=PriorQueue <EzLogBeanPtrVectorPtr,Vector<EzLogBeanPtrVectorPtr>, EzLogBeanPtrVectorPtrLesser>;
 		class EzLogCore : public EzLogObject
 		{
 		public:
@@ -1419,7 +1421,7 @@ namespace ezlogspace
 
 			EzLogBeanPtrVector s_insertToSetVec{};	   // temp vector
 			EzLogBeanPtrVector s_mergeSortVec{};	   // temp vector
-			MultiSet<EzLogBeanPtrVectorPtr, EzLogBeanPtrVectorPtrComp> s_threadStruSet;	   // set of ThreadStru cache
+			EzLogBeanPtrVectorPtrPriorQueue s_threadStruPriorQueue;	   // prior queue of ThreadStru cache
 			EzLogBeanPtrVectorPool s_vecPool;
 
 			static constexpr uint32_t s_pollPeriodSplitNum = 100;
@@ -1957,7 +1959,7 @@ namespace ezlogspace
 				DEBUG_RUN(sorted_judge_func());
 				auto p = s_vecPool.acquire();
 				std::swap(*p, v);
-				s_threadStruSet.emplace(p);	   // insert for every thread
+				s_threadStruPriorQueue.emplace(p);	   // insert for every thread
 				DEBUG_ASSERT2(v.size() <= vcachePreSize, v.size(), vcachePreSize);
 			}
 		}
@@ -1966,9 +1968,9 @@ namespace ezlogspace
 		void EzLogCore::MergeSortForGlobalQueue()
 		{
 			auto& v = s_mergeSortVec;
-			auto& s = s_threadStruSet;
+			auto& s = s_threadStruPriorQueue;
 			v.clear();
-			s.clear();
+			s = EzLogBeanPtrVectorPtrPriorQueue();
 			DEBUG_PRINT(
 				EZLOG_LEVEL_INFO, "Begin of MergeSortForGlobalQueue s_mergeCache size= %u\n",
 				(unsigned)s_mergeCache.size());
@@ -2006,19 +2008,19 @@ namespace ezlogspace
 
 			while (s.size() >= 2)	 // merge sort and finally get one sorted vector
 			{
-				auto it_fst_vec = *s.begin();
-				auto it_sec_vec = *std::next(s.begin());
+				EzLogBeanPtrVectorPtr it_fst_vec = s.top();
+				s.pop();
+				EzLogBeanPtrVectorPtr it_sec_vec = s.top();
+				s.pop();
 				v.resize(it_fst_vec->size() + it_sec_vec->size());
 				std::merge(it_fst_vec->begin(), it_fst_vec->end(), it_sec_vec->begin(), it_sec_vec->end(), v.begin(), EzLogBeanPtrComp());
 
-				s.erase(s.begin());
-				s.erase(s.begin());
 				std::swap(*it_sec_vec, v);
-				s.insert(it_sec_vec);
+				s.emplace(it_sec_vec);
 			}
 			DEBUG_ASSERT(s.size() == 1);
 			{
-				p = *s.begin();
+				p = s.top();
 				s_mergeCache.swap(*p);
 				v.clear();
 			}
