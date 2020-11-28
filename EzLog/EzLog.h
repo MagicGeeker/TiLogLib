@@ -49,7 +49,7 @@
 #define EZLOG_LEVEL_DEBUG 8
 #define EZLOG_LEVEL_VERBOSE 9
 
-/**************************************************STL FOR USER**************************************************/
+/**************************************************user-defined data structure**************************************************/
 namespace ezlogspace
 {
 	// user-defined stl,can customize allocator
@@ -79,7 +79,13 @@ namespace ezlogspace
 	template <typename K, typename Hash = std::hash<K>, typename EqualTo = std::equal_to<K>>
 	using UnorderedSet = std::unordered_set<K, Hash, EqualTo, Allocator<K>>;
 }	 // namespace ezlogspace
+namespace ezlogspace
+{
+	template <uint32_t NRetry = 5,size_t Nanosec = size_t(-1)>
+	class SpinMutex;
 
+	using OptimisticMutex = SpinMutex<>;
+}
 /**************************************************ENUMS AND CONSTEXPRS FOR USER**************************************************/
 namespace ezlogspace
 {
@@ -251,7 +257,34 @@ namespace ezlogspace
 	constexpr size_t EZLOG_DOUBLE_MAX_CHAR_LEN = (25 + 1);	  // TODO
 	constexpr size_t EZLOG_FLOAT_MAX_CHAR_LEN = (25 + 1);	  // TODO
 
+	template <uint32_t NRetry, size_t Nanosec>
+	class SpinMutex
+	{
+		std::atomic_flag locked_flag_ = ATOMIC_FLAG_INIT;
 
+	public:
+		inline void lock()
+		{
+			uint32_t n = 0;
+			while (locked_flag_.test_and_set())
+			{
+				if (n++ < NRetry) { continue; }
+				if_constexpr(Nanosec == size_t(-1))
+				{
+					std::this_thread::yield();
+				}
+				else if_constexpr(Nanosec != 0)
+				{
+					std::this_thread::sleep_for(std::chrono::nanoseconds(Nanosec));
+				}
+			}
+		}
+
+		inline void unlock()
+		{
+			locked_flag_.clear();
+		}
+	};
 
 }	 // namespace ezlogspace
 

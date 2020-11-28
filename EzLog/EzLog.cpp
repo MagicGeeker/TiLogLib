@@ -1036,32 +1036,6 @@ namespace ezlogspace
 		using EzLogBeanPtrVectorPtr = Vector<EzLogBean*>*;
 #endif
 
-		template <size_t _SleepWhenAcquireFailedInNanoSeconds = size_t(-1)>
-		class SpinMutex
-		{
-			std::atomic_flag locked_flag_ = ATOMIC_FLAG_INIT;
-
-		public:
-			inline void lock()
-			{
-				while (locked_flag_.test_and_set())
-				{
-					if_constexpr(_SleepWhenAcquireFailedInNanoSeconds == size_t(-1))
-					{
-						std::this_thread::yield();
-					}
-					else if_constexpr(_SleepWhenAcquireFailedInNanoSeconds != 0)
-					{
-						std::this_thread::sleep_for(std::chrono::nanoseconds(_SleepWhenAcquireFailedInNanoSeconds));
-					}
-				}
-			}
-
-			inline void unlock()
-			{
-				locked_flag_.clear();
-			}
-		};
 		class EzLogNonePrinter : public EzLogPrinter
 		{
 		public:
@@ -1127,7 +1101,7 @@ namespace ezlogspace
 		};
 
 
-		using ThreadLocalSpinMutex = SpinMutex<50>;
+		using ThreadLocalSpinMutex = OptimisticMutex;
 
 		struct ThreadStru : public EzLogObject
 		{
@@ -1298,7 +1272,7 @@ namespace ezlogspace
 			}
 
 		private:
-			using Mutex = SpinMutex<>;
+			using Mutex = OptimisticMutex;
 
 			thread loopThread;
 			Deque<task_t> taskDeque;
@@ -1321,7 +1295,7 @@ namespace ezlogspace
 
 
 		using EzLogCoreString = EzLogString;
-		using MiniSpinMutex =SpinMutex<>;
+		using MiniSpinMutex = OptimisticMutex;
 		using EzLogBeanPtrVectorPtrPriorQueue=PriorQueue <EzLogBeanPtrVectorPtr,Vector<EzLogBeanPtrVectorPtr>, EzLogBeanPtrVectorPtrLesser>;
 		class EzLogCore : public EzLogObject
 		{
