@@ -11,6 +11,7 @@
 
 #include <list>
 #include <vector>
+#include <queue>
 #include <deque>
 #include <map>
 #include <set>
@@ -62,6 +63,9 @@ namespace ezlogspace
 	using Vector = std::vector<T, Allocator<T>>;
 	template <typename T>
 	using Deque = std::deque<T, Allocator<T>>;
+	template<typename T, typename Seq = Vector<T>,
+		typename Comp  = std::less<typename Seq::value_type> >
+	using PriorQueue = std::priority_queue<T,Seq,Comp>;
 	template <typename K>
 	using Set = std::set<K, std::less<K>, Allocator<K>>;
 	template <typename K, typename Comp = std::less<K>>
@@ -92,7 +96,6 @@ namespace ezlogspace
 	};
 
 	constexpr static uint32_t EZLOG_POLL_DEFAULT_THREAD_SLEEP_MS = 1000;	// poll period to ensure print every logs for every thread
-	constexpr static uint32_t EZLOG_GLOBAL_BUF_FULL_SLEEP_US = 10;	// work thread sleep for period when global buf is full and logging
 	constexpr static size_t EZLOG_GLOBAL_BUF_SIZE = ((size_t)1 << 20U);						 // global cache string reserve length
 	constexpr static size_t EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE = ((size_t)1 << 8U);			 // single thread cache queue max length
 	constexpr static size_t EZLOG_GLOBAL_QUEUE_MAX_SIZE = ((size_t)1 << 12U);				 // global cache queue max length
@@ -113,14 +116,14 @@ namespace ezlogspace
         ezlogspace::internal::EzLogTerminalPrinter                             )
 
 	using printer_ids_t = uint8_t;
-	enum EzLogPrinterIDEnum : printer_ids_t
+	enum EPrinterID : printer_ids_t
 	{
 		PRINTER_ID_NONE = 0,				
 		PRINTER_ID_BEGIN = 1,				// begin from 1
 		PRINTER_EZLOG_FILE = 1 << 0,		// internal file printer
 		PRINTER_EZLOG_TERMINAL = 1 << 1,	// internal terminal printer
-											// user-defined printers
-											// user-defined printers
+											// user-defined printers,must be power of 2
+											// user-defined printers,must be power of 2
 		PRINTER_ID_MAX						// end with PRINTER_ID_MAX
 	};
 	constexpr static printer_ids_t DEFAULT_ENABLED_PRINTERS = PRINTER_EZLOG_FILE;								  // main printer
@@ -1436,7 +1439,7 @@ namespace ezlogspace
 		// sync with printer's dest
 		virtual void sync() = 0;
 
-		virtual EzLogPrinterIDEnum getUniqueID()const=0;
+		virtual EPrinterID getUniqueID()const=0;
 
 		virtual ~EzLogPrinter() = default;
 	};
@@ -1448,8 +1451,8 @@ namespace ezlogspace
 	public:
 		// printer must be static or always valid until set printer next time
 		// it will not be effective immediately
-		static void enablePrinter(EzLogPrinterIDEnum printer);
-		static void disablePrinter(EzLogPrinterIDEnum printer);
+		static void enablePrinter(EPrinterID printer);
+		static void disablePrinter(EPrinterID printer);
 		static void setPrinter(printer_ids_t printerIds);
 
 	public:
@@ -1768,11 +1771,13 @@ namespace ezlogspace
 
 namespace ezlogspace
 {
-	static_assert(EZLOG_GLOBAL_QUEUE_MAX_SIZE > 0, "fatal err!");
+	static_assert(EZLOG_POLL_DEFAULT_THREAD_SLEEP_MS > 0, "fatal err!");
 	static_assert(EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE > 0, "fatal err!");
-	static_assert(
-		EZLOG_GLOBAL_QUEUE_MAX_SIZE >= 2 * EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE,
-		"fatal err!");	  // see func MoveLocalCacheToGlobal
+	static_assert(EZLOG_GLOBAL_QUEUE_MAX_SIZE >= 2 * EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE, "fatal error!too small");
+	static_assert(EZLOG_GARBAGE_COLLECTION_QUEUE_RATE >= 2, "fatal error!too small");
+	static_assert(EZLOG_SINGLE_LOG_RESERVE_LEN > 0, "fatal err!");
+
+	static_assert(EZLOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE > 0, "fatal err!");
 }	 // namespace ezlogspace
 
 

@@ -93,7 +93,7 @@ TEST_CASE("multi_thread_log_test_____________________")
 
 TEST_CASE("file_multi_thread_log_test_____________________")
 {
-	EzLog::setPrinter(ezlogspace::EzLogPrinterIDEnum::PRINTER_EZLOG_FILE);
+	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_FILE);
 	EZCOUT << "file_multi_thread_log_test_____________________";
 	EZLOGI << "adcc";
 
@@ -148,7 +148,7 @@ TEST_CASE("terminal_many_thread_cout_test_____________________")
 
 TEST_CASE("terminal_many_thread_log_test_____________________")
 {
-	EzLog::setPrinter(ezlogspace::EzLogPrinterIDEnum::PRINTER_EZLOG_TERMINAL);
+	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_TERMINAL);
 
 	EZCOUT << "terminal_many_thread_log_test_____________________";
 
@@ -185,7 +185,7 @@ TEST_CASE("terminal_many_thread_log_test_____________________")
 
 TEST_CASE("file_many_thread_log_test_____________________")
 {
-	EzLog::setPrinter(ezlogspace::EzLogPrinterIDEnum::PRINTER_EZLOG_FILE);
+	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_FILE);
 
 	EZCOUT << "file_many_thread_log_test_____________________";
 
@@ -222,7 +222,7 @@ TEST_CASE("file_many_thread_log_test_____________________")
 
 TEST_CASE("file_time_many_thread_log_test_with_sleep_____________________")
 {
-	EzLog::setPrinter(ezlogspace::EzLogPrinterIDEnum::PRINTER_EZLOG_FILE);
+	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_FILE);
 
 	EZCOUT << "file_time_many_thread_log_test_with_sleep_____________________";
 
@@ -259,7 +259,7 @@ TEST_CASE("file_time_many_thread_log_test_with_sleep_____________________")
 
 TEST_CASE("file_time_multi_thread_simulation__log_test_____________________")
 {
-	EzLog::setPrinter(ezlogspace::EzLogPrinterIDEnum::PRINTER_EZLOG_FILE);
+	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_FILE);
 
 	EZCOUT << "file_time_multi_thread_simulation__log_test_____________________";
 	srand(0);
@@ -327,7 +327,7 @@ TEST_CASE("file_time_multi_thread_simulation__log_test_____________________")
 
 TEST_CASE("file_single_thread_benchmark_test_____________________")
 {
-	EzLog::setPrinter(ezlogspace::EzLogPrinterIDEnum::PRINTER_EZLOG_FILE);
+	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_FILE);
 	EZCOUT << "file_single_thread_benchmark_test_____________________";
 #ifdef NDEBUG
 	constexpr uint64_t loops = (1 << 22);
@@ -351,7 +351,7 @@ TEST_CASE("file_single_thread_benchmark_test_____________________")
 
 TEST_CASE("file_multi_thread_benchmark_test_____________________")
 {
-	EzLog::setPrinter(ezlogspace::EzLogPrinterIDEnum::PRINTER_EZLOG_FILE);
+	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_FILE);
 	EZCOUT << "file_multi_thread_benchmark_test_____________________";
 #ifdef NDEBUG
 	constexpr uint64_t loops = 10000 + 2*(1 << 20);
@@ -402,7 +402,7 @@ TEST_CASE("file_multi_thread_benchmark_test_____________________")
 TEST_CASE("file_multi_thread_close_print_benchmark_test_____________________")
 {
 	static_assert(EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL,"fatal error,enable it to begin test");
-	EzLog::setPrinter(ezlogspace::EzLogPrinterIDEnum::PRINTER_EZLOG_FILE);
+	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_FILE);
 	EzLog::clearPrintedLogs();
 	EZCOUT << "file_multi_thread_close_print_benchmark_test_____________________";
 #ifdef NDEBUG
@@ -461,7 +461,7 @@ TEST_CASE("file_multi_thread_close_print_benchmark_test_____________________")
 
 TEST_CASE("file_single_thread_operator_test_____________________")
 {
-	EzLog::setPrinter(ezlogspace::EzLogPrinterIDEnum::PRINTER_EZLOG_FILE);
+	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_FILE);
 	EZCOUT << "file_single_thread_operator_test_____________________";
 	constexpr uint64_t loops = 10000 + 1*(1 << 10);
 	constexpr int32_t threads = 1;
@@ -513,7 +513,7 @@ TEST_CASE("file_single_thread_operator_test_____________________")
 
 TEST_CASE("terminal_multi_thread_poll__log_test_____________________")
 {
-	EzLog::setPrinter(ezlogspace::EzLogPrinterIDEnum::PRINTER_EZLOG_TERMINAL);
+	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_TERMINAL);
 
 	EZCOUT << "file_multi_thread_benchmark_test_____________________";
 	constexpr uint64_t loops = 10000;
@@ -560,7 +560,7 @@ TEST_CASE("terminal_multi_thread_poll__log_test_____________________")
 
 TEST_CASE("file_multi_thread_memory_leak_stress_test_____________________")
 {
-	EzLog::setPrinter(ezlogspace::EzLogPrinterIDEnum::PRINTER_EZLOG_TERMINAL);
+	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_TERMINAL);
 	EZCOUT << "file_multi_thread_memory_leak_stress_test_____________________";
 #ifdef NDEBUG
 	constexpr int32_t threads = 20000;
@@ -600,7 +600,7 @@ TEST_CASE("file_multi_thread_memory_leak_stress_test_____________________")
 
 TEST_CASE("ezlog_string_test_____________________")
 {
-	EzLog::setPrinter(ezlogspace::EzLogPrinterIDEnum::PRINTER_EZLOG_TERMINAL);
+	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_TERMINAL);
 	EZCOUT << "ezlog_string_test_____________________";
 	using String = ezlogspace::internal::EzLogString;
 	String str;
@@ -649,7 +649,7 @@ TEST_CASE("ezlog_string_test_____________________")
 
 TEST_CASE( "ezlog_string_extend_test_____________________" )
 {
-	EzLog::setPrinter(ezlogspace::EzLogPrinterIDEnum::PRINTER_EZLOG_TERMINAL);
+	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_TERMINAL);
 	EZCOUT << "ezlog_string_extend_test_____________________";
 	struct ext_t
 	{
@@ -715,7 +715,7 @@ TEST_CASE( "ezlog_string_extend_test_____________________" )
 #ifdef terminal_single_thread_long_string_log_test_____________________
 TEST_CASE("terminal_single_thread_long_string_log_test_____________________")
 {
-	EzLog::setPrinter(ezlogspace::EzLogPrinterIDEnum::PRINTER_EZLOG_TERMINAL);
+	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_TERMINAL);
 	EZCOUT << "terminal_single_thread_long_string_log_test_____________________";
 	constexpr uint64_t loops = (1 << 8);
 	SimpleTimer s1m;
@@ -745,7 +745,7 @@ TEST_CASE("terminal_single_thread_long_string_log_test_____________________")
 TEST_CASE("file_multi_thread_print_level_test_____________________")
 {
 	static_assert(EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL,"fatal error,enable it to begin test");
-	EzLog::setPrinter(ezlogspace::EzLogPrinterIDEnum::PRINTER_EZLOG_FILE);
+	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_FILE);
 	EzLog::clearPrintedLogs();
 	EZCOUT << "file_multi_thread_print_level_test_____________________";
 #ifdef NDEBUG
@@ -800,7 +800,7 @@ TEST_CASE("file_multi_thread_print_level_test_____________________")
 
 #ifdef file_static_log_test_____________________
 static bool b0_file_static_log_test = []() {
-	EzLog::setPrinter(ezlogspace::EzLogPrinterIDEnum::PRINTER_EZLOG_TERMINAL);
+	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_TERMINAL);
 	EZCOUT << "Prepare file_static_log_test_____________________";
 
 	auto s= std::move( EZLOGD ("long string \n") );
@@ -824,7 +824,7 @@ TEST_CASE("special_log_test_____________________")
 {
 	static_assert(EZLOG_STATIC_LOG__LEVEL == EZLOG_LEVEL_WARN, "set warn to begin test");
 	EZCOUT << "special_log_test_____________________";
-	EzLog::setPrinter(ezlogspace::EzLogPrinterIDEnum::PRINTER_EZLOG_TERMINAL);
+	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_TERMINAL);
 	{
 		auto ezlogcout = EZCOUT;
 		ezlogcout << "ezlogcout test__";

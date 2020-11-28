@@ -1070,7 +1070,7 @@ namespace ezlogspace
 				static EzLogNonePrinter* printer = new EzLogNonePrinter();
 				return printer;
 			};
-			EzLogPrinterIDEnum getUniqueID() const override
+			EPrinterID getUniqueID() const override
 			{
 				return PRINTER_ID_NONE;
 			};
@@ -1095,7 +1095,7 @@ namespace ezlogspace
 			void onAcceptLogs(MetaData metaData) override;
 			bool oneLogPerAccept() const override;
 			void sync() override;
-			EzLogPrinterIDEnum getUniqueID() const override;
+			EPrinterID getUniqueID() const override;
 
 		protected:
 			EzLogTerminalPrinter();
@@ -1110,7 +1110,7 @@ namespace ezlogspace
 			void onAcceptLogs(MetaData metaData) override;
 			bool oneLogPerAccept() const override;
 			void sync() override;
-			EzLogPrinterIDEnum getUniqueID() const override;
+			EPrinterID getUniqueID() const override;
 
 		protected:
 			EzLogFilePrinter();
@@ -1470,7 +1470,7 @@ namespace ezlogspace
 		};
 
 		// clang-format off
-		static constexpr int32_t _ = 0;
+		static constexpr int32_t _ = -1;
 		static constexpr int32_t log2table[] = {
 			0,1,2,_,3,_,_,_,4,_,_,_,_,_,_,_,5,_,_,_,_,_,_,_,
 			_,_,_,_,_,_,_,_,6,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,
@@ -1490,8 +1490,8 @@ namespace ezlogspace
 		public:
 			static EzLogPrinterManager& getInstance();
 
-			static void enablePrinter(EzLogPrinterIDEnum printer);
-			static void disablePrinter(EzLogPrinterIDEnum printer);
+			static void enablePrinter(EPrinterID printer);
+			static void disablePrinter(EPrinterID printer);
 			static void setPrinter(printer_ids_t printerIds);
 
 		public:
@@ -1518,7 +1518,7 @@ namespace ezlogspace
 				return GetArgsNum<EZLOG_REGISTER_PRINTERS>();
 			}
 
-			constexpr static uint32_t GetIndexFromPUID(EzLogPrinterIDEnum e)
+			constexpr static uint32_t GetIndexFromPUID(EPrinterID e)
 			{
 				return log2table[(uint32_t)e];
 			}
@@ -1563,7 +1563,7 @@ namespace ezlogspace
 		{
 			std::cout.flush();
 		}
-		EzLogPrinterIDEnum EzLogTerminalPrinter::getUniqueID() const
+		EPrinterID EzLogTerminalPrinter::getUniqueID() const
 		{
 			return PRINTER_EZLOG_TERMINAL;
 		}
@@ -1636,7 +1636,7 @@ namespace ezlogspace
 		{
 			fflush(m_pFile);
 		}
-		EzLogPrinterIDEnum EzLogFilePrinter::getUniqueID() const
+		EPrinterID EzLogFilePrinter::getUniqueID() const
 		{
 			return PRINTER_EZLOG_FILE;
 		}
@@ -1683,12 +1683,12 @@ namespace ezlogspace
 			DoRegisterForPrinter<EZLOG_REGISTER_PRINTERS>(*this);
 		}
 
-		void EzLogPrinterManager::enablePrinter(EzLogPrinterIDEnum printer)
+		void EzLogPrinterManager::enablePrinter(EPrinterID printer)
 		{
 			auto& thiz = getInstance();
 			thiz.m_dest |= ((printer_ids_t)printer);
 		}
-		void EzLogPrinterManager::disablePrinter(EzLogPrinterIDEnum printer)
+		void EzLogPrinterManager::disablePrinter(EPrinterID printer)
 		{
 			auto& thiz = getInstance();
 			thiz.m_dest &= (~(printer_ids_t)printer);
@@ -1701,9 +1701,10 @@ namespace ezlogspace
 
 		void EzLogPrinterManager::addPrinter(EzLogPrinter* printer)
 		{
-			int32_t u = GetIndexFromPUID(printer->getUniqueID());
-			DEBUG_ASSERT1(u >= 0, u);
-			DEBUG_ASSERT1(u < PRINTER_ID_MAX, u);
+			EPrinterID e = printer->getUniqueID();
+			int32_t u = GetIndexFromPUID(e);
+			DEBUG_ASSERT2(u >= 0, e, u);
+			DEBUG_ASSERT2(u < PRINTER_ID_MAX, e, u);
 			m_printers[u] = printer;
 		}
 
@@ -2015,7 +2016,6 @@ namespace ezlogspace
 				std::swap(*it_sec_vec, v);
 				s.insert(it_sec_vec);
 			}
-			DEBUG_ASSERT(std::is_sorted(s.begin(), s.end()));	 // size<=1 is sorted,too.
 			DEBUG_ASSERT(s.size() == 1);
 			{
 				p = *s.begin();
@@ -2507,11 +2507,11 @@ namespace ezlogspace
 
 #ifdef __________________________________________________EzLog__________________________________________________
 
-	void EzLog::enablePrinter(EzLogPrinterIDEnum printer)
+	void EzLog::enablePrinter(EPrinterID printer)
 	{
 		EzLogPrinterManager::enablePrinter(printer);
 	}
-	void EzLog::disablePrinter(EzLogPrinterIDEnum printer)
+	void EzLog::disablePrinter(EPrinterID printer)
 	{
 		EzLogPrinterManager::disablePrinter(printer);
 	}
