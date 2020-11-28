@@ -22,6 +22,7 @@
 #include "../depend_libs/miloyip/dtoa_milo.h"
 #include "../depend_libs/ftoa-fast/ftoa.h"
 // clang-format off
+#define  EZLOG_INTERNAL_REGISTER_PRINTERS_MACRO(...)  __VA_ARGS__
 /**************************************************MACRO FOR USER**************************************************/
 #define EZLOG_USE_STD_SYSTEM_CLOCK
 #define EZLOG_WITH_MILLISECONDS TRUE
@@ -38,8 +39,7 @@
 #define EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL FALSE
 #define EZLOG_STATIC_LOG__LEVEL 9	 // set the static log level,dynamic log level will always <= static log level
 
-#define EZLOG_LEVEL_CLOSE 1
-#define EZLOG_LEVEL_COUT 2
+#define EZLOG_LEVEL_CLOSE 2
 #define EZLOG_LEVEL_ALWAYS 3
 #define EZLOG_LEVEL_FATAL 4
 #define EZLOG_LEVEL_ERROR 5
@@ -83,11 +83,11 @@ namespace ezlogspace
 	//writing from register to memory is atomic
 	enum ELevel:uint8_t
 	{
-		CLOSED = 1,
-		COUT, ALWAYS, FATAL, ERROR, WARN, INFO, DEBUG, VERBOSE,
+		CLOSED = 2,
+		ALWAYS, FATAL, ERROR, WARN, INFO, DEBUG, VERBOSE,
 		OPEN = VERBOSE,
 		STATIC_LOG_LEVEL = EZLOG_STATIC_LOG__LEVEL,
-		MIN = COUT,
+		MIN = ALWAYS,
 		MAX= VERBOSE
 	};
 
@@ -104,6 +104,37 @@ namespace ezlogspace
 	constexpr static size_t EZLOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE= (8U << 20U);	// log size per file,it is not accurate,especially EZLOG_GLOBAL_BUF_SIZE is bigger
 }	 // namespace ezlogspace
 // clang-format on
+
+namespace ezlogspace
+{
+#define EZLOG_REGISTER_PRINTERS   EZLOG_INTERNAL_REGISTER_PRINTERS_MACRO(      \
+        ezlogspace::internal::EzLogNonePrinter,                                \
+        ezlogspace::internal::EzLogFilePrinter,                                \
+        ezlogspace::internal::EzLogTerminalPrinter                             )
+
+	using printer_ids_t = uint8_t;
+	enum EzLogPrinterIDEnum : printer_ids_t
+	{
+		PRINTER_ID_NONE = 0,				
+		PRINTER_ID_BEGIN = 1,				// begin from 1
+		PRINTER_EZLOG_FILE = 1 << 0,		// internal file printer
+		PRINTER_EZLOG_TERMINAL = 1 << 1,	// internal terminal printer
+											// user-defined printers
+											// user-defined printers
+		PRINTER_ID_MAX						// end with PRINTER_ID_MAX
+	};
+	constexpr static printer_ids_t DEFAULT_ENABLED_PRINTERS = PRINTER_EZLOG_FILE;								  // main printer
+
+}	 // namespace ezlogspace
+
+
+
+
+
+/**************************************************ezlogspace codes**************************************************/
+#define H__________________________________________________EzLog__________________________________________________
+#define H__________________________________________________EzLogBean__________________________________________________
+#define H__________________________________________________EzLogStream__________________________________________________
 
 namespace ezlogspace
 {
@@ -1307,6 +1338,7 @@ namespace ezlogspace
 
 	namespace internal
 	{
+#ifdef H__________________________________________________EzLogBean__________________________________________________
 		class EzLogBean : public EzLogObject
 		{
 		public:
@@ -1327,7 +1359,6 @@ namespace ezlogspace
 			uint16_t line;
 			uint16_t fileLen;
 			char level;
-			bool toTernimal;
 			DEBUG_CANARY_UINT32(flag3)
 
 		public:
@@ -1369,7 +1400,7 @@ namespace ezlogspace
 				DEBUG_RUN(checkLevelFunc());
 			}
 		};
-
+#endif
 	}	 // namespace internal
 }	 // namespace ezlogspace
 
@@ -1384,13 +1415,13 @@ namespace ezlogspace
 		using EzLogTime = ezlogspace::internal::EzLogBean::EzLogTime;
 		union MetaData
 		{
-			struct buf_t
+			const struct buf_t
 			{
 				const char* logs;
 				size_t logs_size;
 				EzLogTime logTime;
 			} * buf;
-			EzLogBean* pBean;
+			const EzLogBean* pBean;
 		};
 		static_assert(std::is_pod<MetaData>::value, "fatal error");
 		static_assert(sizeof(MetaData) <= 8, "fatal error,need optimization");
@@ -1400,30 +1431,29 @@ namespace ezlogspace
 		virtual void onAcceptLogs(MetaData metaData) = 0;
 
 		// MetaData is a EzLogBean if true,or a buf_t if false when onAcceptLogs
-		virtual bool needSingleLog() = 0;
+		virtual bool oneLogPerAccept() const = 0;
 
 		// sync with printer's dest
 		virtual void sync() = 0;
 
+		virtual EzLogPrinterIDEnum getUniqueID()const=0;
+
 		virtual ~EzLogPrinter() = default;
 	};
 
+#ifdef H__________________________________________________EzLog__________________________________________________
 	class EzLog
 	{
 
 	public:
 		// printer must be static or always valid until set printer next time
 		// it will not be effective immediately
-		static void setPrinter(EzLogPrinter* printer);
-
-		static EzLogPrinter* getDefaultTerminalPrinter();
-
-		static EzLogPrinter* getDefaultFilePrinter();
-
+		static void enablePrinter(EzLogPrinterIDEnum printer);
+		static void disablePrinter(EzLogPrinterIDEnum printer);
+		static void setPrinter(printer_ids_t printerIds);
 		static void pushLog(internal::EzLogBean* pBean);
 
 	public:
-		// these functions are not thread safe
 
 		static uint64_t getPrintedLogs();
 
@@ -1448,6 +1478,8 @@ namespace ezlogspace
 		~EzLog() = delete;
 	};
 
+#endif
+
 	class EzLogNoneStream;
 	namespace internal
 	{
@@ -1471,6 +1503,9 @@ namespace ezlogspace
 	EZLOG_INTERNAL_GET_LINE()  ));}()
 
 	// clang-format on
+
+
+#ifdef H__________________________________________________EzLogStream__________________________________________________
 
 #define EZLOG_INTERNAL_STRING_TYPE                                                                                                         \
 	ezlogspace::internal::EzLogStringExtend<ezlogspace::internal::EzLogBean, ezlogspace::internal::EzLogStreamHelper>
@@ -1520,7 +1555,6 @@ namespace ezlogspace
 			bean.fileLen = fileLen;
 			bean.line = line;
 			bean.level = ezlogspace::LOG_PREFIX[lv];
-			bean.toTernimal = lv == EZLOG_LEVEL_COUT;
 		}
 
 		inline static void DestroyPushedEzLogBean(EzLogBean* p)
@@ -1669,6 +1703,7 @@ namespace ezlogspace
 		thread_local static EzLogStream* s_pNoUsedStream;
 	};
 #undef EZLOG_INTERNAL_STRING_TYPE
+#endif
 
 	namespace internal
 	{
@@ -1747,16 +1782,12 @@ namespace ezlogspace
 	}(),                                                                                                                                   \
 		str, sizeof(str) - 1
 
-#if EZLOG_STATIC_LOG__LEVEL >= EZLOG_LEVEL_COUT
-#define EZCOUT EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_COUT)
-#else
-#define EZCOUT EZLOG_INTERNAL_CREATE_EZLOG_NONE_STREAM()
-#endif
+#define EZCOUT std::cout
 
 #if EZLOG_STATIC_LOG__LEVEL >= EZLOG_LEVEL_ALWAYS
-#define EZLOGA EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_ALWAYS)
+#define EZLOG EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_ALWAYS)
 #else
-#define EZLOGA EZLOG_INTERNAL_CREATE_EZLOG_NONE_STREAM()
+#define EZLOG EZLOG_INTERNAL_CREATE_EZLOG_NONE_STREAM()
 #endif
 
 #if EZLOG_STATIC_LOG__LEVEL >= EZLOG_LEVEL_FATAL
@@ -1796,7 +1827,8 @@ namespace ezlogspace
 #endif
 
 // not recommend,use EZCOUT to EZLOGV for better performance
-#define EZLOG(lv) EZLOG_INTERNAL_CREATE_EZLOG_STREAM(lv)
+#define EZLOG_LV(lv) EZLOG_INTERNAL_CREATE_EZLOG_STREAM(lv)
+#define EZLOGS(lv,printers) EZLOG_INTERNAL_CREATE_EZLOG_STREAM_WITH_PRINTERS(lv,printers)
 //------------------------------------------end define micro for user------------------------------------------//
 
 
