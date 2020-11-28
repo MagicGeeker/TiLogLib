@@ -1451,11 +1451,13 @@ namespace ezlogspace
 		static void enablePrinter(EzLogPrinterIDEnum printer);
 		static void disablePrinter(EzLogPrinterIDEnum printer);
 		static void setPrinter(printer_ids_t printerIds);
-		static void pushLog(internal::EzLogBean* pBean);
 
 	public:
+		static void pushLog(internal::EzLogBean* pBean);
 
 		static uint64_t getPrintedLogs();
+
+		static void clearPrintedLogs();
 
 #if EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL == TRUE
 

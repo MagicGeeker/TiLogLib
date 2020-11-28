@@ -340,7 +340,7 @@ TEST_CASE("file_single_thread_benchmark_test_____________________")
 		EZLOGD << " i= " << i;
 	}
 	uint64_t ms = s1m.GetMillisecondsUpToNOW();
-	EZLOGI << (1000.0f * loops / ms) << " logs per second";
+	EZLOGI << (1000.0 * loops / ms) << " logs per second";
 	EZLOGI << 1.0 * ms / loops << " milliseconds per log";
 }
 
@@ -390,7 +390,7 @@ TEST_CASE("file_multi_thread_benchmark_test_____________________")
 		th.join();
 	}
 	uint64_t us = s1m.GetMicrosecondsUpToNOW();
-	EZCOUT << (1000.0f * threads * loops / us) << " logs per millisecond\n";
+	EZCOUT << (1000.0 * threads * loops / us) << " logs per millisecond\n";
 	EZCOUT << 1.0 * us / (loops * threads) << " us per log\n";
 }
 
@@ -403,6 +403,7 @@ TEST_CASE("file_multi_thread_close_print_benchmark_test_____________________")
 {
 	static_assert(EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL,"fatal error,enable it to begin test");
 	EzLog::setPrinter(ezlogspace::EzLogPrinterIDEnum::PRINTER_EZLOG_FILE);
+	EzLog::clearPrintedLogs();
 	EZCOUT << "file_multi_thread_close_print_benchmark_test_____________________";
 #ifdef NDEBUG
 	constexpr uint64_t loops = 10000 + 2*(1 << 20);
@@ -449,7 +450,7 @@ TEST_CASE("file_multi_thread_close_print_benchmark_test_____________________")
 		th.join();
 	}
 	uint64_t us = s1m.GetMicrosecondsUpToNOW();
-	EZCOUT << (1000.0f * EzLog::getPrintedLogs() / us) << " logs per millisecond\n";
+	EZCOUT << (1000.0 * EzLog::getPrintedLogs() / us) << " logs per millisecond\n";
 	EZCOUT << 1.0 * us / (EzLog::getPrintedLogs()) << " us per log\n";
 }
 
@@ -549,7 +550,7 @@ TEST_CASE("terminal_multi_thread_poll__log_test_____________________")
 		th.join();
 	}
 	uint64_t us = s1m.GetMicrosecondsUpToNOW();
-	EZCOUT << (1000.0f * threads * loops / us) << " logs per millisecond\n";
+	EZCOUT << (1000.0 * threads * loops / us) << " logs per millisecond\n";
 	EZCOUT << 1.0 * us / (loops * threads) << " us per log\n";
 }
 
@@ -745,6 +746,7 @@ TEST_CASE("file_multi_thread_print_level_test_____________________")
 {
 	static_assert(EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL,"fatal error,enable it to begin test");
 	EzLog::setPrinter(ezlogspace::EzLogPrinterIDEnum::PRINTER_EZLOG_FILE);
+	EzLog::clearPrintedLogs();
 	EZCOUT << "file_multi_thread_print_level_test_____________________";
 #ifdef NDEBUG
 	constexpr uint64_t loops = 10000 + 2 * (1 << 20);
@@ -788,7 +790,7 @@ TEST_CASE("file_multi_thread_print_level_test_____________________")
 	}
 	uint64_t us = s1m.GetMicrosecondsUpToNOW();
 	EzLog::setLogLevel(ezlogspace::ELevel::VERBOSE);
-	EZCOUT << (1000.0f * EzLog::getPrintedLogs() / us) << " logs per millisecond\n";
+	EZCOUT << (1000.0 * EzLog::getPrintedLogs() / us) << " logs per millisecond\n";
 	EZCOUT << 1.0 * us / (EzLog::getPrintedLogs()) << " us per log\n";
 	EZLOG_LV(ezlogspace::ELevel::VERBOSE) << "Complete!\n";
 }

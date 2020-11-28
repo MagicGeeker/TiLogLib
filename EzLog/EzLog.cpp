@@ -18,7 +18,7 @@
 #define __________________________________________________EzLogTerminalPrinter__________________________________________________
 #define __________________________________________________EzLogFilePrinter__________________________________________________
 #define __________________________________________________PrinterRegister__________________________________________________
-#define __________________________________________________EzLogImpl__________________________________________________
+#define __________________________________________________EzLogPrinterManager__________________________________________________
 #define __________________________________________________EzLogCore__________________________________________________
 
 #define __________________________________________________EzLog__________________________________________________
@@ -1328,6 +1328,7 @@ namespace ezlogspace
 
 			static uint64_t getPrintedLogs();
 
+			static void clearPrintedLogs();
 		private:
 			inline static EzLogCore& getInstance();
 
@@ -1479,7 +1480,7 @@ namespace ezlogspace
 			_,_,_,_,_,_,8
 		};
 		// clang-format on
-		class EzLogImpl : public EzLogObject
+		class EzLogPrinterManager : public EzLogObject
 		{
 
 			friend class EzLogCore;
@@ -1487,11 +1488,8 @@ namespace ezlogspace
 			friend class ezlogspace::EzLogStream;
 
 		public:
-			static EzLogImpl& getInstance();
+			static EzLogPrinterManager& getInstance();
 
-			static void pushLog(internal::EzLogBean* pBean);
-
-			static uint64_t getPrintedLogs();
 			static void enablePrinter(EzLogPrinterIDEnum printer);
 			static void disablePrinter(EzLogPrinterIDEnum printer);
 			static void setPrinter(printer_ids_t printerIds);
@@ -1500,9 +1498,7 @@ namespace ezlogspace
 			void addPrinter(EzLogPrinter* printer);
 
 		public:
-			// these functions are not thread safe
 			static void setLogLevel(ELevel level);
-
 			static ELevel getDynamicLogLevel();
 
 			static Vector<EzLogPrinter*> getAllValidPrinters();
@@ -1513,9 +1509,9 @@ namespace ezlogspace
 		private:
 
 		protected:
-			EzLogImpl();
+			EzLogPrinterManager();
 
-			~EzLogImpl() = default;
+			~EzLogPrinterManager() = default;
 
 			constexpr static uint32_t GetPrinterNum()
 			{
@@ -1650,7 +1646,7 @@ namespace ezlogspace
 		template <typename Args0, typename... Args>
 		struct PrinterRegister
 		{
-			static void RegisterForPrinter(EzLogImpl& impl)
+			static void RegisterForPrinter(EzLogPrinterManager& impl)
 			{
 				impl.addPrinter(Args0::getInstance());
 				PrinterRegister<Args...>::RegisterForPrinter(impl);
@@ -1659,26 +1655,26 @@ namespace ezlogspace
 		template <typename Args0>
 		struct PrinterRegister<Args0>
 		{
-			static void RegisterForPrinter(EzLogImpl& impl)
+			static void RegisterForPrinter(EzLogPrinterManager& impl)
 			{
 				impl.addPrinter(Args0::getInstance());
 			}
 		};
 		template <typename... Args>
-		void DoRegisterForPrinter(EzLogImpl& impl)
+		void DoRegisterForPrinter(EzLogPrinterManager& impl)
 		{
 			PrinterRegister<Args...>::RegisterForPrinter(impl);
 		}
 #endif
 
-#ifdef __________________________________________________EzLogImpl__________________________________________________
-		inline EzLogImpl& EzLogImpl::getInstance()
+#ifdef __________________________________________________EzLogPrinterManager__________________________________________________
+		inline EzLogPrinterManager& EzLogPrinterManager::getInstance()
 		{
-			static EzLogImpl& ipml = *new EzLogImpl();	  // do not delete
+			static EzLogPrinterManager& ipml = *new EzLogPrinterManager();	  // do not delete
 			return ipml;
 		}
 
-		EzLogImpl::EzLogImpl() : m_printers(GetPrinterNum()), m_dest(DEFAULT_ENABLED_PRINTERS), m_level(STATIC_LOG_LEVEL)
+		EzLogPrinterManager::EzLogPrinterManager() : m_printers(GetPrinterNum()), m_dest(DEFAULT_ENABLED_PRINTERS), m_level(STATIC_LOG_LEVEL)
 		{
 			for (EzLogPrinter*& x : m_printers)
 			{
@@ -1687,23 +1683,23 @@ namespace ezlogspace
 			DoRegisterForPrinter<EZLOG_REGISTER_PRINTERS>(*this);
 		}
 
-		void EzLogImpl::enablePrinter(EzLogPrinterIDEnum printer)
+		void EzLogPrinterManager::enablePrinter(EzLogPrinterIDEnum printer)
 		{
 			auto& thiz = getInstance();
 			thiz.m_dest |= ((printer_ids_t)printer);
 		}
-		void EzLogImpl::disablePrinter(EzLogPrinterIDEnum printer)
+		void EzLogPrinterManager::disablePrinter(EzLogPrinterIDEnum printer)
 		{
 			auto& thiz = getInstance();
 			thiz.m_dest &= (~(printer_ids_t)printer);
 		}
 
-		void EzLogImpl::setPrinter(printer_ids_t printerIds)
+		void EzLogPrinterManager::setPrinter(printer_ids_t printerIds)
 		{
 			getInstance().m_dest = printerIds;
 		}
 
-		void EzLogImpl::addPrinter(EzLogPrinter* printer)
+		void EzLogPrinterManager::addPrinter(EzLogPrinter* printer)
 		{
 			int32_t u = GetIndexFromPUID(printer->getUniqueID());
 			DEBUG_ASSERT1(u >= 0, u);
@@ -1711,33 +1707,23 @@ namespace ezlogspace
 			m_printers[u] = printer;
 		}
 
-		void EzLogImpl::pushLog(EzLogBean* pBean)
-		{
-			EzLogCore::pushLog(pBean);
-		}
-
-		uint64_t EzLogImpl::getPrintedLogs()
-		{
-			return EzLogCore::getPrintedLogs();
-		}
-
-		void EzLogImpl::setLogLevel(ELevel level)
+		void EzLogPrinterManager::setLogLevel(ELevel level)
 		{
 			getInstance().m_level = level;
 		}
 
-		ELevel EzLogImpl::getDynamicLogLevel()
+		ELevel EzLogPrinterManager::getDynamicLogLevel()
 		{
 			return getInstance().m_level;
 		}
 
-		Vector<EzLogPrinter*> EzLogImpl::getAllValidPrinters()
+		Vector<EzLogPrinter*> EzLogPrinterManager::getAllValidPrinters()
 		{
 			Vector<EzLogPrinter*>& v = getInstance().m_printers;
 			return Vector<EzLogPrinter*>(v.begin() + 1, v.end());
 		}
 
-		Vector<EzLogPrinter*> EzLogImpl::getCurrentPrinters(bool (*filter)(EzLogPrinter* pPrinter))
+		Vector<EzLogPrinter*> EzLogPrinterManager::getCurrentPrinters(bool (*filter)(EzLogPrinter* pPrinter))
 		{
 			printer_ids_t dest = getInstance().m_dest;
 			Vector<EzLogPrinter*>& arr = getInstance().m_printers;
@@ -1749,11 +1735,11 @@ namespace ezlogspace
 			return vec;	   // copy
 		}
 
-		Vector<EzLogPrinter*> EzLogImpl::getSingleLogPrinters()
+		Vector<EzLogPrinter*> EzLogPrinterManager::getSingleLogPrinters()
 		{
 			return getCurrentPrinters([](EzLogPrinter* p) { return p->oneLogPerAccept(); });
 		}
-		Vector<EzLogPrinter*> EzLogImpl::getMutiLogsPrinters()
+		Vector<EzLogPrinter*> EzLogPrinterManager::getMutiLogsPrinters()
 		{
 			return getCurrentPrinters([](EzLogPrinter* p) { return !p->oneLogPerAccept(); });
 		}
@@ -2244,7 +2230,7 @@ namespace ezlogspace
 
 		void EzLogCore::pushLogsToSingleLogPrinters()
 		{
-			Vector<EzLogPrinter*> printers = EzLogImpl::getSingleLogPrinters();
+			Vector<EzLogPrinter*> printers = EzLogPrinterManager::getSingleLogPrinters();
 			if (printers.empty()) { return; }
 
 			MiniSpinMutex mtx;
@@ -2273,7 +2259,7 @@ namespace ezlogspace
 
 		void EzLogCore::pushLogsToMultiLogsPrinters()
 		{
-			Vector<EzLogPrinter*> printers = EzLogImpl::getMutiLogsPrinters();
+			Vector<EzLogPrinter*> printers = EzLogPrinterManager::getMutiLogsPrinters();
 			if (printers.empty()) { return; }
 			EzLogTime firstLogTime = mergeLogsToOneString();
 			EzLogCoreString& logs = s_global_cache_string;
@@ -2354,7 +2340,7 @@ namespace ezlogspace
 				this_thread::yield();
 				if (!s_existThrdMerge)
 				{
-					Vector<EzLogPrinter*> printers = EzLogImpl::getAllValidPrinters();
+					Vector<EzLogPrinter*> printers = EzLogPrinterManager::getAllValidPrinters();
 					for (EzLogPrinter* printer : printers)
 					{
 						printer->sync();
@@ -2504,6 +2490,11 @@ namespace ezlogspace
 			return getInstance().s_printedLogs;
 		}
 
+		void EzLogCore::clearPrintedLogs()
+		{
+			getInstance().s_printedLogs = 0;
+		}
+
 #endif
 
 	}	 // namespace internal
@@ -2518,36 +2509,41 @@ namespace ezlogspace
 
 	void EzLog::enablePrinter(EzLogPrinterIDEnum printer)
 	{
-		EzLogImpl::enablePrinter(printer);
+		EzLogPrinterManager::enablePrinter(printer);
 	}
 	void EzLog::disablePrinter(EzLogPrinterIDEnum printer)
 	{
-		EzLogImpl::disablePrinter(printer);
+		EzLogPrinterManager::disablePrinter(printer);
 	}
 	void EzLog::setPrinter(printer_ids_t printerIds)
 	{
-		EzLogImpl::setPrinter(printerIds);
+		EzLogPrinterManager::setPrinter(printerIds);
 	}
 
 	void EzLog::pushLog(EzLogBean* pBean)
 	{
-		EzLogImpl::pushLog(pBean);
+		EzLogCore::pushLog(pBean);
 	}
 
 	uint64_t EzLog::getPrintedLogs()
 	{
-		return EzLogImpl::getPrintedLogs();
+		return EzLogCore::getPrintedLogs();
+	}
+
+	void EzLog::clearPrintedLogs()
+	{
+		EzLogCore::clearPrintedLogs();
 	}
 
 #if EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL == TRUE
 	void EzLog::setLogLevel(ELevel level)
 	{
-		EzLogImpl::setLogLevel(level);
+		EzLogPrinterManager::setLogLevel(level);
 	}
 
 	ELevel EzLog::getDynamicLogLevel()
 	{
-		return EzLogImpl::getDynamicLogLevel();
+		return EzLogPrinterManager::getDynamicLogLevel();
 	}
 #endif
 
