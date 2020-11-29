@@ -15,7 +15,7 @@ using namespace ezlogspace;
 //#define terminal_many_thread_log_test_____________________
 //#define file_many_thread_log_test_____________________
 //#define file_time_many_thread_log_test_with_sleep_____________________
-//#define file_time_multi_thread_simulation__log_test_____________________
+#define file_time_multi_thread_simulation__log_test_____________________
 //#define file_single_thread_benchmark_test_____________________
 //#define file_multi_thread_benchmark_test_____________________
 //#define file_single_thread_operator_test_____________________
@@ -32,7 +32,7 @@ using namespace ezlogspace;
 
 
 //__________________________________________________other test__________________________________________________//
-#define ezlog_string_extend_test_____________________
+//#define ezlog_string_extend_test_____________________
 
 
 
@@ -48,19 +48,68 @@ using namespace ezlogspace;
 
 
 
-uint64_t complexCalFunc(uint64_t x)
+template <size_t N = 50>
+static uint64_t ComplexCalFunc(uint64_t x)
 {
-	static int a = 0;
-
-	double m = 0;
-	for (int i = 1; i <= 100; i++)
+	int m = 0;
+	srand((unsigned)x);
+	for (int i = 1; i <= N; i++)
 	{
-		double m1 = sin(x+i);
-		double m2 = log10(x+i);
-		double m3 = rand() % 1000;
+		int m1 = rand();
+		int m2 = rand() % 10;
+		int m3 = rand() % 1000;
 		m += (m1 + m2 + m3);
 	}
 	return (uint64_t)m;
+}
+
+template <bool WITH_LOG, size_t N = 50>
+double SingleLoopTimeTestFunc()
+{
+	constexpr uint64_t LOOPS = (uint64_t)1e6;
+	constexpr uint64_t threads = 10;
+	uint64_t nano;
+	double ns;
+
+	static bool begin = false;
+	static condition_variable_any cva;
+	static shared_mutex smtx;
+	static uint64_t m = 0;
+	std::vector<std::thread> vec;
+
+	SimpleTimer s;
+	for (int i = 1; i <= threads; i++)
+	{
+		auto tdf = [&](int index) -> void {
+			int a = 0;
+			shared_lock<shared_mutex> slck(smtx);
+			cva.wait(slck, []() -> bool { return begin; });
+
+			for (uint64_t loops = LOOPS; loops; loops--)
+			{
+				m += ComplexCalFunc<N>(loops);
+				if_constexpr(WITH_LOG)
+				{
+					EZLOGD << "LOGD thr " << index << " loop " << loops << " " << &a;
+				}
+			}
+		};
+		thread td = thread(tdf, i);
+		vec.emplace_back(std::move(td));
+	}
+	unique_lock<shared_mutex> ulk(smtx);
+	begin = true;
+	ulk.unlock();
+	cva.notify_all();
+	for (auto& th : vec)
+	{
+		th.join();
+	}
+	nano = s.GetNanosecondsUpToNOW();
+
+	EZCOUT << "m= " << m << "\n";
+	ns = 1.0 * nano / (threads * LOOPS);
+	return ns;
 }
 
 
@@ -260,64 +309,15 @@ TEST_CASE("file_time_many_thread_log_test_with_sleep_____________________")
 TEST_CASE("file_time_multi_thread_simulation__log_test_____________________")
 {
 	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_FILE);
-
 	EZCOUT << "file_time_multi_thread_simulation__log_test_____________________";
-	srand(0);
 
-	const uint32_t LOOPS = 40000;
-	const uint32_t threads = 1;
-	uint64_t nano0;
-	uint64_t nano1;
-	double rate = 15;
-	{	
-		SimpleTimer s0;
-		uint64_t xxx=0;
-		for (int loops = LOOPS; loops; loops--)
-		{
-			//do something cost 20ms,and log once
-			//this_thread::sleep_for(std::chrono::milliseconds(1));
-			xxx += complexCalFunc(loops);
-		}
-		nano0 = s0.GetNanosecondsUpToNOW();
-		EZCOUT << "each " << 1.0*nano0 / LOOPS <<" ns\n";
-	}
+	double ns0 = SingleLoopTimeTestFunc<false>();
+	double ns1 = SingleLoopTimeTestFunc<true>();
 
-	SimpleTimer s;
-
-	static bool begin = false;
-	static condition_variable_any cva;
-	static shared_mutex smtx;
-	static uint64_t m=0;
-	std::vector<std::thread> vec;
-
-	for (int i = 1; i <= threads; i++)
-	{
-		vec.emplace_back(thread([&](int index) -> void {
-			int a = 0;
-			shared_lock<shared_mutex> slck(smtx);
-			cva.wait(slck, []() -> bool { return begin; });
-
-			for (uint64_t loops = (uint64_t)(rate * LOOPS); loops; loops--)
-			{
-				//do something cost 20ms,and log once
-				//this_thread::sleep_for(std::chrono::milliseconds(1));
-				m+=complexCalFunc(loops);
-				EZLOGD << "LOGD thr " << index << " loop " << loops << " " << &a;
-			}
-		}, i));
-	}
-	unique_lock<shared_mutex> ulk(smtx);
-	begin = true;
-	ulk.unlock();
-	cva.notify_all();
-	for (auto &th:vec)
-	{
-		th.join();
-	}
-	EZCOUT << "m= " << m<<"\n";
-
-	nano1 = s.GetNanosecondsUpToNOW();
-	EZCOUT << "nano1/nano0= " <<  nano1 /(rate*nano0) << "\n";
+	EZCOUT << "ns0 " << ns0 << " loop per ns\n";
+	EZCOUT << "ns1 " << ns1 << " loop per ns\n";
+	EZCOUT << "ns1/ns0= " << 100.0 * ns1 / ns0 << "%\n";
+	EZCOUT << "single log cost ns= " << (ns1 - ns0) << "\n";
 }
 
 #endif
