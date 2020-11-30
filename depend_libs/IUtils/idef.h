@@ -53,6 +53,21 @@ typedef unsigned long long          uint64_t;
 #define if_constexpr if constexpr
 #endif
 
+#if __cplusplus>=201103L
+#define synchronized_unique_lock   std::unique_lock
+
+#if __cplusplus >=201402L
+#define synchronized_shared_lock   std::shared_lock
+#endif
+
+#endif
+
+#define synchronized(mtx) for (synchronized_unique_lock<decltype(mtx)> lk_##mtx(mtx), *_lk_ = &(lk_##mtx); _lk_ != nullptr; _lk_ = nullptr)
+#define synchronized_u(lk,mtx) for (synchronized_unique_lock<decltype(mtx)> lk(mtx), *_lk_ = &lk; _lk_ != nullptr; _lk_ = nullptr)
+#define synchronized_s(slk,smtx) for (synchronized_shared_lock<decltype(smtx)> slk(smtx), *_slk_ = &slk; _slk_ != nullptr; _slk_ = nullptr)
+#define break_and_unlock break
+#define return_and_unlock return
+
 //#define IUILS_DEBUG_ENABLE_ASSERT_ON_RELEASE
 
 #if !defined(NDEBUG) || defined(IUILS_DEBUG_ENABLE_ASSERT_ON_RELEASE)
