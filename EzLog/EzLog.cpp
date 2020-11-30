@@ -1326,7 +1326,7 @@ namespace ezlogspace
 
 			void MergeSortForGlobalQueue();
 
-			void SwapMergeCacheAndPrintCache();
+			void SwapMergeCacheAndDeliverCache();
 
 			inline void GetMergePermission(std::unique_lock<std::mutex>& lk);
 
@@ -1336,7 +1336,7 @@ namespace ezlogspace
 
 			inline void GetMoveGarbagePermission(std::unique_lock<std::mutex>& lk);
 
-			inline void WaitForPrint(std::unique_lock<std::mutex>& lk);
+			inline void WaitForDeliver(std::unique_lock<std::mutex>& lk);
 
 			inline void WaitForGC(std::unique_lock<std::mutex>& lk);
 
@@ -1347,7 +1347,7 @@ namespace ezlogspace
 
 			void thrdFuncMergeLogs();
 
-			void thrdFuncPrintLogs();
+			void thrdFuncDeliverLogs();
 
 			void thrdFuncGarbageCollection();
 
@@ -1359,7 +1359,7 @@ namespace ezlogspace
 
 			void pushLogsToMultiLogsPrinters();
 
-			void PrintLogs();
+			void DeliverLogs();
 
 			inline bool PollThreadSleep();
 
@@ -1367,7 +1367,7 @@ namespace ezlogspace
 
 			std::thread CreateMergeThread();
 
-			std::thread CreatePrintThread();
+			std::thread CreateDeliverThread();
 
 			std::thread CreateGarbageCollectionThread();
 
@@ -1386,7 +1386,7 @@ namespace ezlogspace
 			bool s_to_exit{};
 			bool s_existThrdPoll{};
 			bool s_existThrdMerge{};
-			bool s_existThrdPrint{};
+			bool s_existThrdDeliver{};
 			bool s_existThrdGC{};
 			volatile bool s_inited{};
 
@@ -1414,22 +1414,22 @@ namespace ezlogspace
 			LogCaches s_mergeCache{ GLOBAL_SIZE };
 			std::thread s_threadMerge = CreateMergeThread();
 
-			// wait printer mutex
-			MiniSpinMutex s_mtxWaitPrinter;
-			std::condition_variable_any s_cvWaitPrinter;
-			bool s_print_complete = false;
-			// print mutex
-			std::mutex s_mtxPrinter;
-			std::condition_variable s_cvPrinter;
-			bool s_printing = false;
+			// wait deliver mutex
+			MiniSpinMutex s_mtxWaitDeliver;
+			std::condition_variable_any s_cvWaitDeliver;
+			bool s_deliver_complete = false;
+			// deliver mutex
+			std::mutex s_mtxDeliver;
+			std::condition_variable s_cvDeliver;
+			bool s_delivering = false;
 			atomic_uint64_t s_printedLogs{0};
 			EzLogTime::origin_time_type s_preLogTime{};
 			char s_ctimestr[EZLOG_CTIME_MAX_LEN] = { 0 };
 			EzLogStringView s_logTimeStringView{ s_ctimestr, EZLOG_CTIME_MAX_LEN-1 };
-			LogCaches s_printCache{ GLOBAL_SIZE };
-			EzLogCoreString s_global_cache_string;
+			LogCaches s_deliverCache{ GLOBAL_SIZE };
+			EzLogCoreString s_deliverCacheStr;
 			EzLogThreadPool s_printerPool{GetArgsNum<EZLOG_REGISTER_PRINTERS>()};
-			std::thread s_threadPrinter = CreatePrintThread();
+			std::thread s_threadDeliver = CreateDeliverThread();
 
 			// wait garbage collection mutex
 			MiniSpinMutex s_mtxWaitGC;
@@ -1773,10 +1773,10 @@ namespace ezlogspace
 			return th;
 		}
 
-		std::thread EzLogCore::CreatePrintThread()
+		std::thread EzLogCore::CreateDeliverThread()
 		{
-			s_existThrdPrint = true;
-			thread th(&EzLogCore::thrdFuncPrintLogs, this);
+			s_existThrdDeliver = true;
+			thread th(&EzLogCore::thrdFuncDeliverLogs, this);
 			th.detach();
 			return th;
 		}
@@ -1809,11 +1809,11 @@ namespace ezlogspace
 		bool EzLogCore::DoFinalInit()
 		{
 			lock_guard<mutex> lgd_merge(s_mtxMerge);
-			lock_guard<mutex> lgd_print(s_mtxPrinter);
+			lock_guard<mutex> lgd_deliver(s_mtxDeliver);
 			lock_guard<mutex> lgd_del(s_mtxDeleter);
 			s_mergeCache.clear();
-			s_printCache.clear();
-			s_global_cache_string.reserve((size_t)(EZLOG_GLOBAL_BUF_SIZE * 1.2));
+			s_deliverCache.clear();
+			s_deliverCacheStr.reserve((size_t)(EZLOG_GLOBAL_BUF_SIZE * 1.2));
 			atexit([] { getInstance().AtExit(); });
 			s_inited = true;
 			return true;
@@ -1824,7 +1824,7 @@ namespace ezlogspace
 		// 故用到全局变量需要在此函数前构造
 		void EzLogCore::AtExit()
 		{
-			DEBUG_PRINT(EZLOG_LEVEL_INFO, "wait poll and printer\n");
+			DEBUG_PRINT(EZLOG_LEVEL_INFO, "exit,wait poll\n");
 			s_pollPeriodus = 1;	   // make poll faster
 
 			DEBUG_PRINT(EZLOG_LEVEL_INFO, "prepare to exit\n");
@@ -1938,7 +1938,7 @@ namespace ezlogspace
 			}
 		}
 
-		// s_mtxMerge s_mtxPrinter must be owned
+		// s_mtxMerge s_mtxDeliver must be owned
 		void EzLogCore::MergeSortForGlobalQueue()
 		{
 			auto& v = s_mergeSortVec;
@@ -2002,19 +2002,19 @@ namespace ezlogspace
 				EZLOG_LEVEL_INFO, "End of MergeSortForGlobalQueue s_mergeCache size= %u\n", (unsigned)s_mergeCache.size());
 		}
 
-		void EzLogCore::SwapMergeCacheAndPrintCache()
+		void EzLogCore::SwapMergeCacheAndDeliverCache()
 		{
-			std::unique_lock<std::mutex> lk_print(s_mtxPrinter);
+			std::unique_lock<std::mutex> lk_deliver(s_mtxDeliver);
 
-			while (s_printing  && !s_printCache.empty())
+			while (s_deleting  && !s_deliverCache.empty())
 			{
-				WaitForPrint(lk_print);
+				WaitForDeliver(lk_deliver);
 			}
-			std::swap(s_mergeCache, s_printCache);	  // move s_mergeCache-->s_printCache
+			std::swap(s_mergeCache, s_deliverCache);	  // move s_mergeCache-->s_deliverCache
 
-			s_printing = true;
-			lk_print.unlock();
-			s_cvPrinter.notify_all();
+			s_delivering = true;
+			lk_deliver.unlock();
+			s_cvDeliver.notify_all();
 
 
 		}
@@ -2043,7 +2043,7 @@ namespace ezlogspace
 			constexpr size_t L3 = 0;
 #endif	  // IUILS_DEBUG_WITH_ASSERT
 		  // clang-format off
-			auto& logs = s_global_cache_string;
+			auto& logs = s_deliverCacheStr;
 			size_t preSize = logs.size();
 			logs.reserve(
 				preSize + L3 + bean.tid->size() + s_logTimeStringView.size() + bean.fileLen + bean.str_view().size()
@@ -2107,16 +2107,16 @@ namespace ezlogspace
 			}
 		}
 
-		void EzLogCore::WaitForPrint(std::unique_lock<std::mutex>& lk)
+		void EzLogCore::WaitForDeliver(std::unique_lock<std::mutex>& lk)
 		{
 			DEBUG_ASSERT(lk.owns_lock());
-			while (s_printing)
+			while (s_delivering)
 			{
 				lk.unlock();
-				s_cvPrinter.notify_one();
-				unique_lock<MiniSpinMutex> lk_wait(s_mtxWaitPrinter);
-				s_print_complete = false;
-				s_cvWaitPrinter.wait(lk_wait, [this] { return s_print_complete; });
+				s_cvDeliver.notify_one();
+				unique_lock<MiniSpinMutex> lk_wait(s_mtxWaitDeliver);
+				s_deliver_complete = false;
+				s_cvWaitDeliver.wait(lk_wait, [this] { return s_deliver_complete; });
 				lk.lock();
 			}
 		}
@@ -2147,10 +2147,10 @@ namespace ezlogspace
 			unique_lock<mutex> ulk;
 			GetMoveGarbagePermission(ulk);
 			DEBUG_PRINT(
-				EZLOG_LEVEL_INFO, "NotifyGC s_garbages.vcache.size() %u,s_printCache.size() %u\n",
-				(unsigned)s_garbages.size(), (unsigned)s_printCache.size());
-			s_garbages.insert(s_printCache);
-			s_printCache.resize(0);
+				EZLOG_LEVEL_INFO, "NotifyGC s_garbages.vcache.size() %u,s_deliverCache.size() %u\n",
+				(unsigned)s_garbages.size(), (unsigned)s_deliverCache.size());
+			s_garbages.insert(s_deliverCache);
+			s_deliverCache.resize(0);
 
 			s_deleting = true;
 			ulk.unlock();
@@ -2165,7 +2165,7 @@ namespace ezlogspace
 				std::unique_lock<std::mutex> lk_merge(s_mtxMerge);
 				s_cvMerge.wait(lk_merge, [this]() -> bool { return (s_merging && s_inited); });
 				MergeSortForGlobalQueue();
-				SwapMergeCacheAndPrintCache();
+				SwapMergeCacheAndDeliverCache();
 				s_merging = false;
 				lk_merge.unlock();
 
@@ -2179,18 +2179,18 @@ namespace ezlogspace
 				if (!s_existThrdPoll) { break; }
 			}
 			DEBUG_PRINT(EZLOG_LEVEL_INFO, "thrd merge exit.\n");
-			AtInternalThreadExit(s_existThrdMerge, s_mtxPrinter, s_printing, s_cvPrinter);
+			AtInternalThreadExit(s_existThrdMerge, s_mtxDeliver, s_delivering, s_cvDeliver);
 			s_existThreads--;
 			return;
 		}
 
 		EzLogTime EzLogCore::mergeLogsToOneString()
 		{
-			LogCaches& printCache = s_printCache;
-			DEBUG_ASSERT(!printCache.empty());
+			LogCaches& deliverCache = s_deliverCache;
+			DEBUG_ASSERT(!deliverCache.empty());
 
-			DEBUG_PRINT(EZLOG_LEVEL_INFO, "mergeLogsToOneString,transform printCache to s_global_cache_string\n");
-			for (EzLogBean* pBean : printCache)
+			DEBUG_PRINT(EZLOG_LEVEL_INFO, "mergeLogsToOneString,transform deliverCache to s_deliverCacheStr\n");
+			for (EzLogBean* pBean : deliverCache)
 			{
 				DEBUG_RUN(EzLogBean::check(pBean));
 				EzLogBean& bean = *pBean;
@@ -2198,10 +2198,10 @@ namespace ezlogspace
 				GetTimeStrFromSystemClock(bean);
 				EzLogStringView&& log = AppendToMergeCacheByMetaData(bean);
 			}
-			s_printedLogs += printCache.size();
+			s_printedLogs += deliverCache.size();
 			DEBUG_PRINT(
-				EZLOG_LEVEL_INFO, "End of mergeLogsToOneString,s_global_cache_string size= %u\n", (unsigned)s_global_cache_string.size());
-			return printCache[0]->time();
+				EZLOG_LEVEL_INFO, "End of mergeLogsToOneString,s_deliverCacheStr size= %u\n", (unsigned)s_deliverCacheStr.size());
+			return deliverCache[0]->time();
 		}
 
 		void EzLogCore::pushLogsToSingleLogPrinters()
@@ -2216,7 +2216,7 @@ namespace ezlogspace
 			for (EzLogPrinter* printer : printers)
 			{
 				s_printerPool.acquire()->pushTask([printer, &mtx, &count, &cv, this]() {
-					for (EzLogBean* pBean : s_printCache)
+					for (EzLogBean* pBean : s_deliverCache)
 					{
 						EzLogPrinter::MetaData metaData{};
 						metaData.pBean = pBean;
@@ -2238,8 +2238,8 @@ namespace ezlogspace
 			Vector<EzLogPrinter*> printers = EzLogPrinterManager::getMutiLogsPrinters();
 			if (printers.empty()) { return; }
 			EzLogTime firstLogTime = mergeLogsToOneString();
-			EzLogCoreString& logs = s_global_cache_string;
-			DEBUG_PRINT(EZLOG_LEVEL_INFO, "prepare to print %u bytes\n", (unsigned)logs.size());
+			EzLogCoreString& logs = s_deliverCacheStr;
+			DEBUG_PRINT(EZLOG_LEVEL_INFO, "prepare to deliver %u bytes\n", (unsigned)logs.size());
 			if (logs.size() == 0) { return; }
 			EzLogPrinter::MetaData::buf_t buf{ logs.data(), logs.size(), firstLogTime };
 			EzLogPrinter::MetaData metaData{ &buf };
@@ -2263,34 +2263,34 @@ namespace ezlogspace
 			s_printerPool.release_all();
 		}
 
-		void EzLogCore::PrintLogs()
+		void EzLogCore::DeliverLogs()
 		{
-			if (s_printCache.empty()) { return; }
+			if (s_deliverCache.empty()) { return; }
 			pushLogsToSingleLogPrinters();
 			pushLogsToMultiLogsPrinters();
 
-			s_global_cache_string.resize(0);
+			s_deliverCacheStr.resize(0);
 			{
-				unique_lock<MiniSpinMutex> lk_wait(s_mtxWaitPrinter);
-				s_print_complete = true;
+				unique_lock<MiniSpinMutex> lk_wait(s_mtxWaitDeliver);
+				s_deliver_complete = true;
 				lk_wait.unlock();
-				s_cvWaitPrinter.notify_one();
+				s_cvWaitDeliver.notify_one();
 			}
 			NotifyGC();
 		}
 
-		void EzLogCore::thrdFuncPrintLogs()
+		void EzLogCore::thrdFuncDeliverLogs()
 		{
 			InitInternalThreadBeforeRun();	  // this thread is no need log
 			while (true)
 			{
-				std::unique_lock<std::mutex> lk_print(s_mtxPrinter);
-				s_cvPrinter.wait(lk_print, [this]() -> bool { return (s_printing && s_inited); });
+				std::unique_lock<std::mutex> lk_deliver(s_mtxDeliver);
+				s_cvDeliver.wait(lk_deliver, [this]() -> bool { return (s_delivering && s_inited); });
 
-				PrintLogs();
+				DeliverLogs();
 
-				s_printing = false;
-				lk_print.unlock();
+				s_delivering = false;
+				lk_deliver.unlock();
 
 				std::unique_lock<std::mutex> lk_queue(s_mtxQueue, std::try_to_lock);
 				if (lk_queue.owns_lock())
@@ -2324,8 +2324,8 @@ namespace ezlogspace
 					break;
 				}
 			}
-			DEBUG_PRINT(EZLOG_LEVEL_INFO, "thrd printer exit.\n");
-			AtInternalThreadExit(s_existThrdPrint, s_mtxDeleter, s_deleting, s_cvDeleter);
+			DEBUG_PRINT(EZLOG_LEVEL_INFO, "thrd deliver exit.\n");
+			AtInternalThreadExit(s_existThrdDeliver, s_mtxDeleter, s_deleting, s_cvDeleter);
 			s_existThreads--;
 			return;
 		}
@@ -2362,7 +2362,7 @@ namespace ezlogspace
 				}
 
 				this_thread::yield();
-				if (!s_existThrdPrint) { break; }
+				if (!s_existThrdDeliver) { break; }
 			}
 			DEBUG_PRINT(EZLOG_LEVEL_INFO, "thrd gc exit.\n");
 			s_existThrdGC = false;
