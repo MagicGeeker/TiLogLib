@@ -618,7 +618,7 @@ TEST_CASE("ezlog_string_test_____________________")
 	String str3 ("asyindfafa");
 	str3 += str2;
 
-	String str4(ezlogspace::internal::EPlaceHolder::DEFAULT, 100 );
+	String str4(ezlogspace::internal::EPlaceHolder{}, 100 );
 	str4 = "dascvda";
 
 	str3 = str4;
@@ -671,7 +671,7 @@ TEST_CASE( "ezlog_string_extend_test_____________________" )
 	String str3( "asyindfafa" );
 	str3 += str2;
 
-	String str4( ezlogspace::internal::EPlaceHolder::DEFAULT, 100 );
+	String str4( ezlogspace::internal::EPlaceHolder{}, 100 );
 	str4 = "dascvda";
 
 	str3 = str4;

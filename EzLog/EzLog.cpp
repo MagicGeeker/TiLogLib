@@ -211,7 +211,7 @@ using namespace ezloghelperspace;
 namespace ezlogspace
 {
 	class EzLogStream;
-	thread_local EzLogStream* EzLogStream::s_pNoUsedStream = new EzLogStream(EPlaceHolder::DEFAULT, false);
+	thread_local EzLogStream* EzLogStream::s_pNoUsedStream = new EzLogStream(EPlaceHolder{}, false);
 
 	namespace internal
 	{

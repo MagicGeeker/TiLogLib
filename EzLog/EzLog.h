@@ -5,6 +5,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <atomic>
+#include <functional>
 #include <thread>
 #include <type_traits>
 #include <ostream>
@@ -327,10 +328,7 @@ namespace ezlogspace
 		using positive_size_type = size_type;
 #endif
 
-		enum class EPlaceHolder
-		{
-			DEFAULT = 0
-		};
+		using EPlaceHolder=decltype(std::placeholders::_1);
 
 		class EzLogStringView
 		{
@@ -1534,7 +1532,7 @@ namespace ezlogspace
 #define EZLOG_INTERNAL_CREATE_EZLOG_STREAM(lv)                                       \
 	[&]{ return	                                                                     \
 	((lv)>ezlogspace::EzLog::getDynamicLogLevel()?                                   \
-	ezlogspace::EzLogStream(ezlogspace::internal::EPlaceHolder::DEFAULT):         \
+	ezlogspace::EzLogStream(ezlogspace::internal::EPlaceHolder{}):         \
 	ezlogspace::EzLogStream(EZLOG_INTERNAL_GET_LEVEL(lv),                            \
 	EZLOG_INTERNAL_GET_FILE(),                                                     \
 	EZLOG_INTERNAL_GET_FILE_LEN(),                                                   \
@@ -1563,7 +1561,7 @@ namespace ezlogspace
 
 	public:
 		// default constructor
-		explicit inline EzLogStream() : StringType(EPlaceHolder::DEFAULT, EZLOG_SINGLE_LOG_RESERVE_LEN)
+		explicit inline EzLogStream() : StringType(EPlaceHolder{}, EZLOG_SINGLE_LOG_RESERVE_LEN)
 		{
 			ext()->level = (char)ELogLevelFlag::INVALID;
 		}
@@ -1573,21 +1571,21 @@ namespace ezlogspace
 			rhs.bindToNoUseStream();
 		}
 		// make a empty stream
-		inline explicit EzLogStream(EzLogNoneStream&& rhs) noexcept : StringType(EPlaceHolder::DEFAULT)
+		inline explicit EzLogStream(EzLogNoneStream&& rhs) noexcept : StringType(EPlaceHolder{})
 		{
 			bindToNoUseStream();
 		}
-		inline explicit EzLogStream(EPlaceHolder) noexcept : StringType(EPlaceHolder::DEFAULT)
+		inline explicit EzLogStream(EPlaceHolder) noexcept : StringType(EPlaceHolder{})
 		{
 			bindToNoUseStream();
 		}
 
 		// make a valid stream
 		inline EzLogStream(uint32_t lv, const char* file, uint16_t fileLen, uint16_t line)
-			: StringType(EPlaceHolder::DEFAULT, EZLOG_SINGLE_LOG_RESERVE_LEN)
+			: StringType(EPlaceHolder{}, EZLOG_SINGLE_LOG_RESERVE_LEN)
 		{
 			EzLogBean& bean = *ext();
-			new (&bean.ezLogTime) EzLogBean::EzLogTime(EPlaceHolder::DEFAULT);
+			new (&bean.ezLogTime) EzLogBean::EzLogTime(EPlaceHolder{});
 			bean.tid = ezlogspace::internal::GetThreadIDString();
 			bean.file = file;
 			bean.fileLen = fileLen;
@@ -1818,7 +1816,7 @@ namespace ezlogspace
 #define EZLOG_CSTR(str)                                                                                                                    \
 	[]() {                                                                                                                                 \
 		static_assert(!std::is_pointer<decltype(str)>::value, "must be a c-style array");                                                  \
-		return ezlogspace::internal::EPlaceHolder::DEFAULT;                                                                                \
+		return ezlogspace::internal::EPlaceHolder{};                                                                                \
 	}(),                                                                                                                                   \
 		str, sizeof(str) - 1
 
