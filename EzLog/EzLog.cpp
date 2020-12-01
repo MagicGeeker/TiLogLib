@@ -1330,8 +1330,6 @@ namespace ezlogspace
 
 			inline void GetMergePermission(std::unique_lock<std::mutex>& lk);
 
-			inline bool TryGetMergePermission(std::unique_lock<std::mutex>& lk);
-
 			inline void WaitForMerge(std::unique_lock<std::mutex>& lk);
 
 			inline void GetMoveGarbagePermission(std::unique_lock<std::mutex>& lk);
@@ -2006,7 +2004,7 @@ namespace ezlogspace
 		{
 			std::unique_lock<std::mutex> lk_deliver(s_mtxDeliver);
 
-			while (s_deleting  && !s_deliverCache.empty())
+			while (s_delivering  && !s_deliverCache.empty())
 			{
 				WaitForDeliver(lk_deliver);
 			}
@@ -2080,28 +2078,17 @@ namespace ezlogspace
 			WaitForMerge(lk);
 		}
 
-		bool EzLogCore::TryGetMergePermission(std::unique_lock<std::mutex>& lk)
-		{
-			DEBUG_ASSERT(!lk.owns_lock());
-			lk = std::unique_lock<std::mutex>(s_mtxMerge, std::try_to_lock);
-			if (lk.owns_lock())
-			{
-				WaitForMerge(lk);
-				return true;
-			}
-			return false;
-		}
-
 		void EzLogCore::WaitForMerge(std::unique_lock<std::mutex>& lk)
 		{
 			DEBUG_ASSERT(lk.owns_lock());
 			while (s_merging)	 //另外一个线程的本地缓存和全局缓存已满，本线程却拿到锁，应该需要等打印线程打印完
 			{
 				lk.unlock();
-				s_cvMerge.notify_one();
-				unique_lock<MiniSpinMutex> lk_wait(s_mtxWaitMerge);
-				s_merge_complete = false;
-				s_cvWaitMerge.wait(lk_wait, [this] { return s_merge_complete; });
+				s_cvMerge.notify_one();  //maybe thread merge merge complete at this moment
+				synchronized_u(lk_wait, s_mtxWaitMerge)
+				{
+					s_cvWaitMerge.wait(lk_wait, [this] { return s_merge_complete; });
+				}
 				//等这个线程拿到锁的时候，可能全局缓存已经打印完，也可能又满了正在打印
 				lk.lock();
 			}
@@ -2114,9 +2101,10 @@ namespace ezlogspace
 			{
 				lk.unlock();
 				s_cvDeliver.notify_one();
-				unique_lock<MiniSpinMutex> lk_wait(s_mtxWaitDeliver);
-				s_deliver_complete = false;
-				s_cvWaitDeliver.wait(lk_wait, [this] { return s_deliver_complete; });
+				synchronized_u(lk_wait, s_mtxWaitDeliver)
+				{
+					s_cvWaitDeliver.wait(lk_wait, [this] { return s_deliver_complete; });
+				}
 				lk.lock();
 			}
 		}
@@ -2135,9 +2123,10 @@ namespace ezlogspace
 			{
 				lk.unlock();
 				s_cvDeleter.notify_one();
-				unique_lock<MiniSpinMutex> lk_wait(s_mtxWaitGC);
-				s_gc_complete = false;
-				s_cvWaitGC.wait(lk_wait, [this] { return s_gc_complete; });
+				synchronized_u(lk_wait, s_mtxWaitGC)
+				{
+					s_cvWaitGC.wait(lk_wait, [this] { return s_gc_complete; });
+				}
 				lk.lock();
 			}
 		}
@@ -2173,7 +2162,7 @@ namespace ezlogspace
 					unique_lock<MiniSpinMutex> lk_wait(s_mtxWaitMerge);
 					s_merge_complete = true;
 					lk_wait.unlock();
-					s_cvWaitMerge.notify_one();
+					s_cvWaitMerge.notify_all();
 				}
 				this_thread::yield();
 				if (!s_existThrdPoll) { break; }
@@ -2274,7 +2263,7 @@ namespace ezlogspace
 				unique_lock<MiniSpinMutex> lk_wait(s_mtxWaitDeliver);
 				s_deliver_complete = true;
 				lk_wait.unlock();
-				s_cvWaitDeliver.notify_one();
+				s_cvWaitDeliver.notify_all();
 			}
 			NotifyGC();
 		}
@@ -2346,7 +2335,7 @@ namespace ezlogspace
 					unique_lock<MiniSpinMutex> lk_wait(s_mtxWaitGC);
 					s_gc_complete = true;
 					lk_wait.unlock();
-					s_cvWaitGC.notify_one();
+					s_cvWaitGC.notify_all();
 				}
 
 				unique_lock<mutex> lk_queue(s_mtxQueue, std::try_to_lock);
@@ -2391,8 +2380,17 @@ namespace ezlogspace
 			do
 			{
 				unique_lock<mutex> lk_merge;
+				bool own_lk = tryLocks(lk_merge,s_mtxMerge);
+				DEBUG_PRINT(EZLOG_LEVEL_DEBUG, "thrdFuncPoll own lock? %d\n", (int)own_lk);
+				if (own_lk)
+				{
+					s_merging = true;
+					lk_merge.unlock();
+					s_cvMerge.notify_one();
+				}
+				
 				unique_lock<mutex> lk_queue;
-				if (!TryGetMergePermission(lk_merge) || !tryLocks(lk_queue, s_mtxQueue)) { continue; }
+				if (!tryLocks(lk_queue, s_mtxQueue)) { continue; }
 
 				for (auto it = s_threadStruQueue.availQueue.begin(); it != s_threadStruQueue.availQueue.end();)
 				{
@@ -2411,10 +2409,6 @@ namespace ezlogspace
 					}
 				}
 				lk_queue.unlock();
-
-				s_merging = true;
-				lk_merge.unlock();
-				s_cvMerge.notify_one();
 
 			} while (PollThreadSleep());
 
