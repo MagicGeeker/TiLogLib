@@ -1447,18 +1447,13 @@ namespace ezlogspace
 	public:
 		using EzLogBean = ezlogspace::internal::EzLogBean;
 		using EzLogTime = ezlogspace::internal::EzLogBean::EzLogTime;
-		union MetaData
+		struct buf_t
 		{
-			const struct buf_t
-			{
-				const char* logs;
-				size_t logs_size;
-				EzLogTime logTime;
-			} * buf;
-			const EzLogBean* pBean;
+			const char* logs;
+			size_t logs_size;
+			EzLogTime logTime;
 		};
-		static_assert(std::is_pod<MetaData>::value, "fatal error");
-		static_assert(sizeof(MetaData) <= 8, "fatal error,need optimization");
+		using MetaData = const struct buf_t*;
 
 	public:
 		// accept logs with size,logs and NOT end with '\0'

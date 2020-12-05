@@ -1374,9 +1374,7 @@ namespace ezlogspace
 
 			EzLogTime mergeLogsToOneString();
 
-			void pushLogsToSingleLogPrinters();
-
-			void pushLogsToMultiLogsPrinters();
+			void pushLogsToPrinters();
 
 			void DeliverLogs();
 
@@ -1497,9 +1495,7 @@ namespace ezlogspace
 			static ELevel getDynamicLogLevel();
 
 			static Vector<EzLogPrinter*> getAllValidPrinters();
-			static Vector<EzLogPrinter*> getCurrentPrinters(bool (*filter)(EzLogPrinter* pPrinter) = [](EzLogPrinter*) { return true; });
-			static Vector<EzLogPrinter*> getSingleLogPrinters();
-			static Vector<EzLogPrinter*> getMutiLogsPrinters();
+			static Vector<EzLogPrinter*> getCurrentPrinters();
 
 		private:
 
@@ -1551,7 +1547,7 @@ namespace ezlogspace
 		}
 		void EzLogTerminalPrinter::onAcceptLogs(MetaData metaData)
 		{
-			std::cout.write(metaData.buf->logs, metaData.buf->logs_size);
+			std::cout.write(metaData->logs, metaData->logs_size);
 		}
 
 		void EzLogTerminalPrinter::sync()
@@ -1603,15 +1599,15 @@ namespace ezlogspace
 			}
 			if (m_pFile != nullptr)
 			{
-				fwrite(metaData.buf->logs, sizeof(char), metaData.buf->logs_size, m_pFile);
-				singleFilePrintedLogSize += metaData.buf->logs_size;
+				fwrite(metaData->logs, sizeof(char), metaData->logs_size, m_pFile);
+				singleFilePrintedLogSize += metaData->logs_size;
 			}
 		}
 
 		void EzLogFilePrinter::CreateNewFile(MetaData metaData)
 		{
 			char timeStr[EZLOG_CTIME_MAX_LEN];
-			size_t size = SystemTimePointToTimeCStr(timeStr, metaData.buf->logTime.get_origin_time());
+			size_t size = SystemTimePointToTimeCStr(timeStr, metaData->logTime.get_origin_time());
 			String s;
 			char indexs[9];
 			snprintf(indexs, 9, "%07d ", index);
@@ -1719,25 +1715,16 @@ namespace ezlogspace
 			return Vector<EzLogPrinter*>(v.begin() + 1, v.end());
 		}
 
-		Vector<EzLogPrinter*> EzLogPrinterManager::getCurrentPrinters(bool (*filter)(EzLogPrinter* pPrinter))
+		Vector<EzLogPrinter*> EzLogPrinterManager::getCurrentPrinters()
 		{
 			printer_ids_t dest = getInstance().m_dest;
 			Vector<EzLogPrinter*>& arr = getInstance().m_printers;
 			Vector<EzLogPrinter*> vec;
 			for (uint32_t i = 1, x = PRINTER_ID_BEGIN; x < PRINTER_ID_MAX; ++i, x <<= 1U)
 			{
-				if ((dest & x) && filter(arr[i])) { vec.push_back(arr[i]); }
+				if ((dest & x)) { vec.push_back(arr[i]); }
 			}
 			return vec;	   // copy
-		}
-
-		Vector<EzLogPrinter*> EzLogPrinterManager::getSingleLogPrinters()
-		{
-			return getCurrentPrinters([](EzLogPrinter* p) { return p->oneLogPerAccept(); });
-		}
-		Vector<EzLogPrinter*> EzLogPrinterManager::getMutiLogsPrinters()
-		{
-			return getCurrentPrinters([](EzLogPrinter* p) { return !p->oneLogPerAccept(); });
 		}
 
 #endif
@@ -2211,44 +2198,15 @@ namespace ezlogspace
 			return deliverCache[0]->time();
 		}
 
-		void EzLogCore::pushLogsToSingleLogPrinters()
+		void EzLogCore::pushLogsToPrinters()
 		{
-			Vector<EzLogPrinter*> printers = EzLogPrinterManager::getSingleLogPrinters();
-			if (printers.empty()) { return; }
-
-			MiniSpinMutex mtx;
-			unique_lock<MiniSpinMutex> lk(mtx);
-			condition_variable_any cv;
-			uint32_t count = printers.size();
-			for (EzLogPrinter* printer : printers)
-			{
-				s_printerPool.acquire()->pushTask([printer, &mtx, &count, &cv, this]() {
-					for (EzLogBean* pBean : s_deliverCache)
-					{
-						EzLogPrinter::MetaData metaData{};
-						metaData.pBean = pBean;
-						printer->onAcceptLogs(metaData);
-					}
-					mtx.lock();
-					count--;
-					mtx.unlock();
-					cv.notify_one();
-				});
-			}
-
-			cv.wait(lk, [&] { return count == 0; });
-			s_printerPool.release_all();
-		}
-
-		void EzLogCore::pushLogsToMultiLogsPrinters()
-		{
-			Vector<EzLogPrinter*> printers = EzLogPrinterManager::getMutiLogsPrinters();
+			Vector<EzLogPrinter*> printers = EzLogPrinterManager::getCurrentPrinters();
 			if (printers.empty()) { return; }
 			EzLogTime firstLogTime = mergeLogsToOneString();
 			EzLogCoreString& logs = s_deliverCacheStr;
 			DEBUG_PRINT(EZLOG_LEVEL_INFO, "prepare to deliver %u bytes\n", (unsigned)logs.size());
 			if (logs.size() == 0) { return; }
-			EzLogPrinter::MetaData::buf_t buf{ logs.data(), logs.size(), firstLogTime };
+			EzLogPrinter::buf_t buf{ logs.data(), logs.size(), firstLogTime };
 			EzLogPrinter::MetaData metaData{ &buf };
 
 			MiniSpinMutex mtx;
@@ -2273,8 +2231,7 @@ namespace ezlogspace
 		void EzLogCore::DeliverLogs()
 		{
 			if (s_deliverCache.empty()) { return; }
-			pushLogsToSingleLogPrinters();
-			pushLogsToMultiLogsPrinters();
+			pushLogsToPrinters();
 
 			s_deliverCacheStr.resize(0);
 			{
