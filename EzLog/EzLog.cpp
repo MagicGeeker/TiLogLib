@@ -1127,24 +1127,65 @@ namespace ezlogspace
 
 		using LogCaches =EzLogBeanPtrVector;
 
-		struct GCList {
+		template <typename Container, size_t CAPACITY = 4>
+		struct ContainerList : public EzLogLockAble<OptimisticMutex>
+		{
+			static_assert(CAPACITY >= 1, "fatal error");
+			using iterator = typename List<Container>::iterator;
 
-			explicit GCList()
+			explicit ContainerList()
 			{
-				gclist.resize(size());
-				it_next = gclist.begin();
+				mlist.resize(size());
+				it_next = mlist.begin();
 			}
-			bool insert(EzLogBeanPtrVector& v)
+			bool swap_insert(Container& v)
 			{
-				DEBUG_ASSERT(it_next != gclist.end());
+				DEBUG_ASSERT(it_next != mlist.end());
 				std::swap(*it_next, v);
 				++it_next;
-				return it_next == gclist.end();
+				return it_next == mlist.end();
 			}
 
+			constexpr static size_t size()
+			{
+				return CAPACITY;
+			}
+
+			void clear()
+			{
+				it_next = mlist.begin();
+			}
+			bool empty()
+			{
+				return it_next == mlist.begin();
+			}
+			bool full()
+			{
+				return it_next == mlist.end();
+			}
+			iterator begin()
+			{
+				return mlist.begin();
+			};
+			iterator end()
+			{
+				return it_next;
+			}
+
+		protected:
+			List<Container> mlist;
+			iterator it_next;
+		};
+
+		struct MergeList : public ContainerList<EzLogBeanPtrVector, EZLOG_MERGE_QUEUE_RATE>
+		{
+		};
+
+		struct GCList : public ContainerList<EzLogBeanPtrVector, EZLOG_GARBAGE_COLLECTION_QUEUE_RATE>
+		{
 			void gc()
 			{
-				for (auto it = gclist.begin(); it != it_next; ++it)
+				for (auto it = mlist.begin(); it != it_next; ++it)
 				{
 					auto& v = *it;
 					for (EzLogBean* pBean : v)
@@ -1154,26 +1195,6 @@ namespace ezlogspace
 				}
 				clear();
 			}
-
-			constexpr static size_t size()
-			{
-				static_assert(EZLOG_GARBAGE_COLLECTION_QUEUE_RATE>=1,"fatal error");
-				return EZLOG_GARBAGE_COLLECTION_QUEUE_RATE;
-			}
-
-			void clear()
-			{
-				it_next = gclist.begin();
-			}
-
-			bool full()
-			{
-				return it_next == gclist.end();
-			}
-
-		private:
-			List<EzLogBeanPtrVector > gclist;
-			List<EzLogBeanPtrVector >::iterator it_next;
 		};
 
 		struct ThreadStruQueue : public EzLogObject
@@ -1376,8 +1397,7 @@ namespace ezlogspace
 			inline bool MoveLocalCacheToGlobal(ThreadStru& bean);
 
 		private:
-			// static constexpr size_t LOCAL_SIZE = EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE;  //gcc bug?link failed on debug,but ok on release
-			static constexpr size_t GLOBAL_SIZE = EZLOG_GLOBAL_QUEUE_MAX_SIZE;
+			static constexpr size_t GLOBAL_SIZE = EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE * EZLOG_MERGE_QUEUE_RATE;
 
 			thread_local static ThreadStru* s_pThreadLocalStru;
 
@@ -1410,6 +1430,7 @@ namespace ezlogspace
 			std::condition_variable s_cvMerge;
 			bool s_merging = true;
 			LogCaches s_mergeCache{ GLOBAL_SIZE };
+			MergeList s_mergeList;
 			std::thread s_threadMerge = CreateMergeThread();
 
 			// wait deliver mutex
@@ -1747,12 +1768,10 @@ namespace ezlogspace
 
 		inline bool EzLogCore::MoveLocalCacheToGlobal(ThreadStru& bean)
 		{
-			s_mergeCache.insert(s_mergeCache.end(), bean.vcache.first_sub_queue_begin(), bean.vcache.first_sub_queue_end());
-			s_mergeCache.insert(s_mergeCache.end(), bean.vcache.second_sub_queue_begin(), bean.vcache.second_sub_queue_end());
+			EzLogBeanPtrCircularQueue::to_vector(s_mergeCache, bean.vcache);
 			bean.vcache.clear();
-			// reserve EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE
-			bool isGlobalFull = s_mergeCache.size() >= EZLOG_GLOBAL_QUEUE_MAX_SIZE - EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE;
-			return isGlobalFull;
+			s_mergeList.swap_insert(s_mergeCache);
+			return s_mergeList.full();
 		}
 
 		std::thread EzLogCore::CreatePollThread()
@@ -1942,32 +1961,14 @@ namespace ezlogspace
 			auto& v = s_mergeSortVec;
 			auto& s = s_threadStruPriorQueue;
 			v.clear();
-			s = EzLogBeanPtrVectorPtrPriorQueue();
-			DEBUG_PRINT(
-				EZLOG_LEVEL_INFO, "Begin of MergeSortForGlobalQueue s_mergeCache size= %u\n",
-				(unsigned)s_mergeCache.size());
-			std::stable_sort(s_mergeCache.begin(), s_mergeCache.end(), EzLogBeanPtrComp());
+			DEBUG_PRINT(EZLOG_LEVEL_INFO, "Begin of MergeSortForGlobalQueue\n");
 			EzLogBean referenceBean;
-			referenceBean.time() = s_log_last_time = EzLogTime::now();
-#ifdef IUILS_DEBUG_WITH_ASSERT
-			if (!s_mergeCache.empty())
-			{
-				EzLogTime& vcacheMaxTime = s_mergeCache.back()->time();
-				// ensure all of EzLogBean before referenceBean will be merged and sorted
-				//because s_mergeCache nomore increase when merging,and time is steady,so vcacheMaxTime <= s_log_last_time(this moment time)
-				DEBUG_ASSERT(vcacheMaxTime <= s_log_last_time);
-			}
-#endif
+			referenceBean.time() = s_log_last_time = EzLogTime::now();  //referenceBean's time is the biggest up to now
 
 			s_vecPool.release_all();
-			s_vecPool.resize(1);
-
-			EzLogBeanPtrVectorPtr p = s_vecPool.acquire();
-			std::swap(*p, s_mergeCache);
-			s.emplace(p);	 // insert global cache first
 			{
 				lock_guard<mutex> lgd(s_mtxQueue);
-				s_vecPool.resize(1 + s_threadStruQueue.availQueue.size() + s_threadStruQueue.waitMergeQueue.size());
+				s_vecPool.resize(s_threadStruQueue.availQueue.size() + s_threadStruQueue.waitMergeQueue.size());
 				DEBUG_PRINT(
 					EZLOG_LEVEL_INFO, "MergeThreadStruQueueToSet availQueue.size()= %u\n",
 					(unsigned)s_threadStruQueue.availQueue.size());
@@ -1990,11 +1991,16 @@ namespace ezlogspace
 				std::swap(*it_sec_vec, v);
 				s.emplace(it_sec_vec);
 			}
-			DEBUG_ASSERT(s.size() == 1);
+			DEBUG_ASSERT(s.size() <= 1);
 			{
-				p = s.top();
-				s_mergeCache.swap(*p);
-				v.clear();
+				if (s.empty())
+				{
+					s_mergeCache.clear();
+				} else
+				{
+					EzLogBeanPtrVectorPtr p = s.top();
+					s_mergeCache.swap(*p);
+				}
 			}
 			DEBUG_PRINT(
 				EZLOG_LEVEL_INFO, "End of MergeSortForGlobalQueue s_mergeCache size= %u\n", (unsigned)s_mergeCache.size());
@@ -2075,6 +2081,7 @@ namespace ezlogspace
 		{
 			DEBUG_ASSERT(!lk.owns_lock());
 			lk = std::unique_lock<std::mutex>(s_mtxMerge);
+			if (!s_mergeList.full()) { return; }
 			WaitForMerge(lk);
 		}
 
@@ -2138,7 +2145,7 @@ namespace ezlogspace
 			DEBUG_PRINT(
 				EZLOG_LEVEL_INFO, "NotifyGC s_garbages.vcache.size() %u,s_deliverCache.size() %u\n",
 				(unsigned)s_garbages.size(), (unsigned)s_deliverCache.size());
-			s_garbages.insert(s_deliverCache);
+			s_garbages.swap_insert(s_deliverCache);
 			s_deliverCache.resize(0);
 
 			s_deleting = true;
@@ -2153,7 +2160,18 @@ namespace ezlogspace
 			{
 				std::unique_lock<std::mutex> lk_merge(s_mtxMerge);
 				s_cvMerge.wait(lk_merge, [this]() -> bool { return (s_merging && s_inited); });
-				MergeSortForGlobalQueue();
+
+				{
+					s_threadStruPriorQueue = {};
+					for (auto it = s_mergeList.begin(); it != s_mergeList.end(); ++it)
+					{
+						LogCaches& caches = *it;
+						s_threadStruPriorQueue.emplace(&caches);
+					}
+					MergeSortForGlobalQueue();
+					s_mergeList.clear();
+				}
+
 				SwapMergeCacheAndDeliverCache();
 				s_merging = false;
 				lk_merge.unlock();
