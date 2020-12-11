@@ -1221,14 +1221,14 @@ namespace ezlogspace
 			}
 		};
 
-		struct EzLogBeanPtrVectorReIniter
+		struct EzLogBeanPtrVectorFeat : EzLogObjectPoolFeat
 		{
 			inline void operator()(EzLogBeanPtrVector& x)
 			{
 				x.clear();
 			}
 		};
-		using EzLogBeanPtrVectorPool = EzLogObjectPool<EzLogBeanPtrVector, EzLogBeanPtrVectorReIniter>;
+		using EzLogBeanPtrVectorPool = EzLogObjectPool<EzLogBeanPtrVector, EzLogBeanPtrVectorFeat>;
 		using task_t = std::function<void()>;
 		class EzLogTaskQueue
 		{
@@ -1307,12 +1307,12 @@ namespace ezlogspace
 			} stat;
 		};
 
-		struct EzLogTaskQueueReIniter
+		struct EzLogTaskQueueReFeat : EzLogObjectPoolFeat
 		{
 			void operator()(EzLogTaskQueue& q) {}
 		};
 
-		using EzLogThreadPool = EzLogObjectPool<EzLogTaskQueue, EzLogTaskQueueReIniter>;
+		using EzLogThreadPool = EzLogObjectPool<EzLogTaskQueue, EzLogTaskQueueReFeat>;
 
 
 		using EzLogCoreString = EzLogString;

@@ -194,16 +194,27 @@ namespace ezlogspace
 	{
 	};
 
-	template <typename Object, typename ReIniter>
+	struct EzLogObjectPoolFeat
+	{
+		constexpr static size_t INIT_SIZE = 32;
+		constexpr static size_t MAX_SIZE = 128;
+	};
+
+	template <typename Object, typename FeatType = EzLogObjectPoolFeat>
 	class EzLogObjectPool : public EzLogObject
 	{
+		static_assert(FeatType::INIT_SIZE > 0, "fatal error");
+		static_assert(FeatType::MAX_SIZE > FeatType::INIT_SIZE, "fatal error");
+
 	public:
 		using ObjectPtr = Object*;
 		~EzLogObjectPool() = default;
 
-		explicit EzLogObjectPool(size_t init_size = 32)
+		explicit EzLogObjectPool(size_t init_size = FeatType::INIT_SIZE, size_t max_size = FeatType::MAX_SIZE)
 		{
 			resize(init_size);
+			this->init_size = init_size;
+			this->max_size = max_size;
 			it_next = pool.begin();
 		}
 		void resize(size_t sz)
@@ -219,6 +230,7 @@ namespace ezlogspace
 		}
 		void release_all()
 		{
+			if (pool.size() >= max_size) { pool.resize(init_size); }
 			it_next = pool.begin();
 		}
 
@@ -226,12 +238,14 @@ namespace ezlogspace
 		{
 			Object& v = *it_next;
 			++it_next;
-			ReIniter()(v);
+			FeatType()(v);
 			return &v;
 		}
 
 	private:
 		List<Object> pool;
+		size_t init_size;
+		size_t max_size;
 		typename List<Object>::iterator it_next;
 	};
 
