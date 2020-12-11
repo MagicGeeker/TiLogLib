@@ -2256,26 +2256,6 @@ namespace ezlogspace
 				s_delivering = false;
 				lk_deliver.unlock();
 
-				std::unique_lock<std::mutex> lk_queue(s_mtxQueue, std::try_to_lock);
-				if (lk_queue.owns_lock())
-				{
-					for (auto it = s_threadStruQueue.waitMergeQueue.begin(); it != s_threadStruQueue.waitMergeQueue.end();)
-					{
-						ThreadStru& threadStru = *(*it);
-						// to need to lock threadStru.spinMtx here
-						if (threadStru.vcache.empty())
-						{
-							DEBUG_PRINT(
-								EZLOG_LEVEL_VERBOSE, "thrd %s exit and has been merged.move to toDelQueue\n", threadStru.tid->c_str());
-							s_threadStruQueue.toDelQueue.emplace_back(*it);
-							it = s_threadStruQueue.waitMergeQueue.erase(it);
-						} else
-						{
-							++it;
-						}
-					}
-					lk_queue.unlock();
-				}
 
 				this_thread::yield();
 				if (!s_existThrdMerge)
@@ -2383,6 +2363,23 @@ namespace ezlogspace
 						++it;
 					}
 				}
+
+				for (auto it = s_threadStruQueue.waitMergeQueue.begin(); it != s_threadStruQueue.waitMergeQueue.end();)
+				{
+					ThreadStru& threadStru = *(*it);
+					// to need to lock threadStru.spinMtx here
+					if (threadStru.vcache.empty())
+					{
+						DEBUG_PRINT(
+							EZLOG_LEVEL_VERBOSE, "thrd %s exit and has been merged.move to toDelQueue\n", threadStru.tid->c_str());
+						s_threadStruQueue.toDelQueue.emplace_back(*it);
+						it = s_threadStruQueue.waitMergeQueue.erase(it);
+					} else
+					{
+						++it;
+					}
+				}
+
 				lk_queue.unlock();
 
 			} while (PollThreadSleep());
