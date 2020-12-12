@@ -23,7 +23,7 @@ AllowShortBlocksOnASingleLine:	true
 
 AllowShortCaseLabelsOnASingleLine:	false
 
-AllowShortFunctionsOnASingleLine:	Empty
+AllowShortFunctionsOnASingleLine:	InlineOnly
 
 AllowShortIfStatementsOnASingleLine:	true
 
