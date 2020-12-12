@@ -106,6 +106,7 @@ namespace ezlogspace
 	constexpr static size_t EZLOG_GLOBAL_BUF_SIZE = ((size_t)1 << 20U);						 // global cache string reserve length
 	constexpr static size_t EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE = ((size_t)1 << 8U);			 // single thread cache queue max length
 	constexpr static size_t EZLOG_MERGE_QUEUE_RATE = ((size_t)24);	// (global cache queue max length)/(single thread cache queue max length)
+	constexpr static size_t EZLOG_DELIVER_QUEUE_SIZE = ((size_t)4);	// deliver queue max length
 	constexpr static size_t EZLOG_GARBAGE_COLLECTION_QUEUE_RATE = ((size_t)4);	// (garbage collection queue length)/(global cache queue max length)
 	constexpr static size_t EZLOG_SINGLE_LOG_RESERVE_LEN = 50;	// reserve for every log except for level,tid ...
 	constexpr static size_t EZLOG_THREAD_ID_MAX_LEN = SIZE_MAX;	// tid max len,SIZE_MAX means no limit,in popular system limit is EZLOG_UINT64_MAX_CHAR_LEN

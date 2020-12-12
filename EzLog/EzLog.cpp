@@ -1181,6 +1181,10 @@ namespace ezlogspace
 		{
 		};
 
+		struct DeliverList : public ContainerList<EzLogBeanPtrVector, EZLOG_DELIVER_QUEUE_SIZE>
+		{
+		};
+
 		struct GCList : public ContainerList<EzLogBeanPtrVector, EZLOG_GARBAGE_COLLECTION_QUEUE_RATE>
 		{
 			void gc()
@@ -1372,9 +1376,9 @@ namespace ezlogspace
 
 			void thrdFuncPoll();
 
-			EzLogTime mergeLogsToOneString();
+			EzLogTime mergeLogsToOneString(LogCaches& deliverCache);
 
-			void pushLogsToPrinters();
+			void pushLogsToPrinters(const Vector<EzLogPrinter*>& printers, LogCaches& deliverCache);
 
 			void DeliverLogs();
 
@@ -1443,7 +1447,7 @@ namespace ezlogspace
 			EzLogTime::origin_time_type s_preLogTime{};
 			char s_ctimestr[EZLOG_CTIME_MAX_LEN] = { 0 };
 			EzLogStringView s_logTimeStringView{ s_ctimestr, EZLOG_CTIME_MAX_LEN-1 };
-			LogCaches s_deliverCache{ GLOBAL_SIZE };
+			DeliverList s_deliverCache;
 			EzLogCoreString s_deliverCacheStr;
 			EzLogThreadPool s_printerPool{GetArgsNum<EZLOG_REGISTER_PRINTERS>()};
 			std::thread s_threadDeliver = CreateDeliverThread();
@@ -1997,11 +2001,11 @@ namespace ezlogspace
 		{
 			std::unique_lock<std::mutex> lk_deliver(s_mtxDeliver);
 
-			while (s_delivering  && !s_deliverCache.empty())
+			while (s_delivering  && s_deliverCache.full())
 			{
 				WaitForDeliver(lk_deliver);
 			}
-			std::swap(s_mergeCache, s_deliverCache);	  // move s_mergeCache-->s_deliverCache
+			s_deliverCache.swap_insert(s_mergeCache);
 
 			s_delivering = true;
 			lk_deliver.unlock();
@@ -2129,11 +2133,13 @@ namespace ezlogspace
 		{
 			unique_lock<mutex> ulk;
 			GetMoveGarbagePermission(ulk);
-			DEBUG_PRINT(
-				EZLOG_LEVEL_INFO, "NotifyGC s_garbages.vcache.size() %u,s_deliverCache.size() %u\n",
-				(unsigned)s_garbages.size(), (unsigned)s_deliverCache.size());
-			s_garbages.swap_insert(s_deliverCache);
-			s_deliverCache.resize(0);
+			DEBUG_PRINT(EZLOG_LEVEL_INFO, "NotifyGC \n");
+			for (LogCaches& c : s_deliverCache)
+			{
+				s_garbages.swap_insert(c);
+				c.clear();
+			}
+			s_deliverCache.clear();
 
 			s_deleting = true;
 			ulk.unlock();
@@ -2178,9 +2184,8 @@ namespace ezlogspace
 			return;
 		}
 
-		EzLogTime EzLogCore::mergeLogsToOneString()
+		EzLogTime EzLogCore::mergeLogsToOneString(LogCaches& deliverCache)
 		{
-			LogCaches& deliverCache = s_deliverCache;
 			DEBUG_ASSERT(!deliverCache.empty());
 
 			DEBUG_PRINT(EZLOG_LEVEL_INFO, "mergeLogsToOneString,transform deliverCache to s_deliverCacheStr\n");
@@ -2198,12 +2203,12 @@ namespace ezlogspace
 			return deliverCache[0]->time();
 		}
 
-		void EzLogCore::pushLogsToPrinters()
+		void EzLogCore::pushLogsToPrinters(const Vector<EzLogPrinter*> &printers,LogCaches& deliverCache)
 		{
-			Vector<EzLogPrinter*> printers = EzLogPrinterManager::getCurrentPrinters();
-			if (printers.empty()) { return; }
-			EzLogTime firstLogTime = mergeLogsToOneString();
+			if (deliverCache.empty()) { return; }
 			EzLogCoreString& logs = s_deliverCacheStr;
+			logs.resize(0);
+			EzLogTime firstLogTime = mergeLogsToOneString(deliverCache);
 			DEBUG_PRINT(EZLOG_LEVEL_INFO, "prepare to deliver %u bytes\n", (unsigned)logs.size());
 			if (logs.size() == 0) { return; }
 			EzLogPrinter::buf_t buf{ logs.data(), logs.size(), firstLogTime };
@@ -2230,10 +2235,17 @@ namespace ezlogspace
 
 		void EzLogCore::DeliverLogs()
 		{
-			if (s_deliverCache.empty()) { return; }
-			pushLogsToPrinters();
+			do
+			{
+				Vector<EzLogPrinter*> printers = EzLogPrinterManager::getCurrentPrinters();
+				if (printers.empty()) { break; }
+				if (s_deliverCache.empty()) { break; }
+				for (LogCaches& c : s_deliverCache)
+				{
+					pushLogsToPrinters(printers, c);
+				}
+			} while (false);
 
-			s_deliverCacheStr.resize(0);
 			{
 				unique_lock<MiniSpinMutex> lk_wait(s_mtxWaitDeliver);
 				s_deliver_complete = true;
