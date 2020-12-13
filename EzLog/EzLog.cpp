@@ -211,6 +211,8 @@ using namespace ezloghelperspace;
 namespace ezlogspace
 {
 	class EzLogStream;
+	using MiniSpinMutex = OptimisticMutex;
+
 	thread_local EzLogStream* EzLogStream::s_pNoUsedStream = new EzLogStream(EPlaceHolder{}, false);
 
 	namespace internal
@@ -1324,14 +1326,14 @@ namespace ezlogspace
 		using EzLogThreadPool = EzLogObjectPool<EzLogTaskQueue, EzLogTaskQueueReFeat>;
 
 
-		using EzLogCoreString = EzLogString;
-		using MiniSpinMutex = OptimisticMutex;
-		using EzLogBeanPtrVectorPtrPriorQueue=PriorQueue <EzLogBeanPtrVectorPtr,Vector<EzLogBeanPtrVectorPtr>, EzLogBeanPtrVectorPtrLesser>;
+		class EzLogCore;
+		using CoreThrdEntryFuncType = void (EzLogCore::*)();
 		struct CoreThrdStruBase : public EzLogObject
 		{
 			bool mExist = false;
 			virtual ~CoreThrdStruBase()= default;;
 			virtual const char* GetName() = 0;
+			virtual CoreThrdEntryFuncType GetThrdEntryFunc() = 0;
 			virtual bool IsBusy(){ return false; };
 		};
 		struct CoreThrdStru : CoreThrdStruBase
@@ -1347,6 +1349,10 @@ namespace ezlogspace
 			bool mDoing = false;
 			bool mCompleted = false;
 		};
+
+		using EzLogCoreString = EzLogString;
+		using EzLogBeanPtrVectorPtrPriorQueue=PriorQueue <EzLogBeanPtrVectorPtr,Vector<EzLogBeanPtrVectorPtr>, EzLogBeanPtrVectorPtrLesser>;
+
 		class EzLogCore : public EzLogObject
 		{
 		public:
@@ -1359,6 +1365,8 @@ namespace ezlogspace
 			inline static EzLogCore& getInstance();
 
 			EzLogCore();
+
+			void CreateCoreThread(CoreThrdStruBase& thrd);
 
 			void AtExit();
 
@@ -1403,14 +1411,6 @@ namespace ezlogspace
 
 			void InitInternalThreadBeforeRun();
 
-			std::thread CreateMergeThread();
-
-			std::thread CreateDeliverThread();
-
-			std::thread CreateGarbageCollectionThread();
-
-			std::thread CreatePollThread();
-
 			inline bool LocalCircularQueuePushBack(EzLogBean* obj);
 
 			inline bool MoveLocalCacheToGlobal(ThreadStru& bean);
@@ -1435,6 +1435,7 @@ namespace ezlogspace
 				atomic_uint32_t s_pollPeriodus{ EZLOG_POLL_DEFAULT_THREAD_SLEEP_MS * 1000 / s_pollPeriodSplitNum };
 				EzLogTime s_log_last_time{ ezlogtimespace::ELogTime::MAX };
 				const char* GetName() override { return "poll"; }
+				CoreThrdEntryFuncType GetThrdEntryFunc() override { return &EzLogCore::thrdFuncPoll; }
 			} mPoll;
 
 			struct MergeStru : public CoreThrdStru
@@ -1447,6 +1448,7 @@ namespace ezlogspace
 				EzLogBeanPtrVectorPtrPriorQueue mThreadStruPriorQueue;	   // prior queue of ThreadStru cache
 				EzLogBeanPtrVectorPool mVecPool;
 				const char* GetName() override { return "merge"; }
+				CoreThrdEntryFuncType GetThrdEntryFunc() override { return &EzLogCore::thrdFuncMergeLogs; }
 				bool IsBusy() override { return mList.full(); }
 			} mMerge;
 
@@ -1461,6 +1463,7 @@ namespace ezlogspace
 				EzLogCoreString mDeliverCacheStr;
 				EzLogThreadPool mPrinterPool{ GetArgsNum<EZLOG_REGISTER_PRINTERS>() };
 				const char* GetName() override { return "deliver"; }
+				CoreThrdEntryFuncType GetThrdEntryFunc() override { return &EzLogCore::thrdFuncDeliverLogs; }
 				bool IsBusy() override { return mDeliverCache.full(); }
 			} mDeliver;
 
@@ -1469,6 +1472,7 @@ namespace ezlogspace
 				GCList mGCList;	   // input
 
 				const char* GetName() override { return "gc"; }
+				CoreThrdEntryFuncType GetThrdEntryFunc() override { return &EzLogCore::thrdFuncGarbageCollection; }
 				bool IsBusy() override { return mGCList.full(); }
 			} mGC;
 
@@ -1755,13 +1759,20 @@ namespace ezlogspace
 
 		EzLogCore::EzLogCore()
 		{
-			std::thread s_threadPoll = CreatePollThread();
-			std::thread s_threadMerge = CreateMergeThread();
-			std::thread s_threadDeliver = CreateDeliverThread();
-			std::thread s_threadDeleter = CreateGarbageCollectionThread();
+			CreateCoreThread(mPoll);
+			CreateCoreThread(mMerge);
+			CreateCoreThread(mDeliver);
+			CreateCoreThread(mGC);
+
 			mExistThreads = 4;
 			atexit([] { getInstance().AtExit(); });
 			mInited = true;
+		}
+
+		void EzLogCore::CreateCoreThread(CoreThrdStruBase& thrd) {
+			thrd.mExist=true;
+			thread th(thrd.GetThrdEntryFunc(), this);
+			th.detach();
 		}
 
 		inline bool EzLogCore::LocalCircularQueuePushBack(EzLogBean* obj)
@@ -1778,40 +1789,6 @@ namespace ezlogspace
 			mMerge.mList.swap_insert(mMerge.mMergeCaches);
 			return mMerge.mList.full();
 		}
-
-		std::thread EzLogCore::CreatePollThread()
-		{
-			mPoll.mExist = true;
-			thread th(&EzLogCore::thrdFuncPoll, this);
-			th.detach();
-			return th;
-		}
-
-		std::thread EzLogCore::CreateMergeThread()
-		{
-			mMerge.mExist = true;
-			thread th(&EzLogCore::thrdFuncMergeLogs, this);
-			th.detach();
-			return th;
-		}
-
-		std::thread EzLogCore::CreateDeliverThread()
-		{
-			mDeliver.mExist = true;
-			thread th(&EzLogCore::thrdFuncDeliverLogs, this);
-			th.detach();
-			return th;
-		}
-
-		std::thread EzLogCore::CreateGarbageCollectionThread()
-		{
-			mGC.mExist = true;
-			thread th(&EzLogCore::thrdFuncGarbageCollection, this);
-			th.detach();
-			return th;
-		}
-
-
 
 		ThreadStru* EzLogCore::InitForEveryThread()
 		{
