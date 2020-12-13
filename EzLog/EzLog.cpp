@@ -2196,15 +2196,6 @@ namespace ezlogspace
 				}
 			} while (false);
 
-			mDeliver.mDeliverCache.swap(mDeliver.mNeedGCCache);
-			mDeliver.mDeliverCache.clear();
-			{
-				unique_lock<MiniSpinMutex> lk_wait(mDeliver.mMtxWait);
-				mDeliver.mCompleted = true;
-				lk_wait.unlock();
-				mDeliver.mCvWait.notify_all();
-			}
-			NotifyGC();
 		}
 
 		void EzLogCore::thrdFuncDeliverLogs()
@@ -2216,12 +2207,18 @@ namespace ezlogspace
 				mDeliver.mCV.wait(lk_deliver, [this]() -> bool { return (mDeliver.mDoing && mInited); });
 
 				DeliverLogs();
-
+				mDeliver.mDeliverCache.swap(mDeliver.mNeedGCCache);
+				mDeliver.mDeliverCache.clear();
+				NotifyGC();
 				mDeliver.mDoing = false;
 				lk_deliver.unlock();
 
-
-				this_thread::yield();
+				{
+					unique_lock<MiniSpinMutex> lk_wait(mDeliver.mMtxWait);
+					mDeliver.mCompleted = true;
+					lk_wait.unlock();
+					mDeliver.mCvWait.notify_all();
+				}
 				if (!mMerge.mExist)
 				{
 					Vector<EzLogPrinter*> printers = EzLogPrinterManager::getAllValidPrinters();
