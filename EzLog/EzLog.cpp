@@ -1130,28 +1130,25 @@ namespace ezlogspace
 		using LogCaches =EzLogBeanPtrVector;
 
 		template <typename Container, size_t CAPACITY = 4>
-		struct ContainerList : public EzLogLockAble<OptimisticMutex>
+		struct ContainerList : public EzLogObject
 		{
 			static_assert(CAPACITY >= 1, "fatal error");
 			using iterator = typename List<Container>::iterator;
 
 			explicit ContainerList()
 			{
-				mlist.resize(size());
+				mlist.resize(CAPACITY);
 				it_next = mlist.begin();
 			}
 			bool swap_insert(Container& v)
 			{
-				DEBUG_ASSERT(it_next != mlist.end());
+				DEBUG_ASSERT2(it_next != mlist.end(), CAPACITY, size());
 				std::swap(*it_next, v);
 				++it_next;
 				return it_next == mlist.end();
 			}
 
-			constexpr static size_t size()
-			{
-				return CAPACITY;
-			}
+			size_t size() { return std::distance(mlist.begin(), it_next); }
 
 			void clear()
 			{
@@ -1784,6 +1781,8 @@ namespace ezlogspace
 
 		inline bool EzLogCore::MoveLocalCacheToGlobal(ThreadStru& bean)
 		{
+			static_assert(EZLOG_MERGE_QUEUE_RATE >= 1, "fatal error!too small");
+
 			EzLogBeanPtrCircularQueue::to_vector(mMerge.mMergeCaches, bean.vcache);
 			bean.vcache.clear();
 			mMerge.mList.swap_insert(mMerge.mMergeCaches);
@@ -1975,6 +1974,8 @@ namespace ezlogspace
 
 		void EzLogCore::SwapMergeCacheAndDeliverCache()
 		{
+			static_assert(EZLOG_DELIVER_QUEUE_SIZE >= 1, "fatal error!too small");
+
 			std::unique_lock<std::mutex> lk_deliver = GetDeliverLock();
 			mDeliver.mDeliverCache.swap_insert(mMerge.mMergeCaches);
 
@@ -2042,8 +2043,9 @@ namespace ezlogspace
 		inline std::unique_lock<std::mutex> EzLogCore::GetCoreThrdLock(CoreThrdStru& thrd)
 		{
 			std::unique_lock<std::mutex> lk(thrd.mMtx);
-			while (thrd.mDoing && thrd.IsBusy())
+			while (thrd.mDoing || thrd.IsBusy())
 			{
+				thrd.mCompleted = false;
 				lk.unlock();
 				thrd.mCV.notify_one();
 				synchronized_u(lk_wait, thrd.mMtxWait)
@@ -2061,8 +2063,11 @@ namespace ezlogspace
 
 		void EzLogCore::NotifyGC()
 		{
+			static_assert(EZLOG_GARBAGE_COLLECTION_QUEUE_RATE >= EZLOG_DELIVER_QUEUE_SIZE, "fatal error!too small");
+
 			unique_lock<mutex> ulk = GetGCLock();
 			DEBUG_PRINT(EZLOG_LEVEL_INFO, "NotifyGC \n");
+			DEBUG_ASSERT1(mGC.mGCList.empty(), mGC.mGCList.size());
 			for (LogCaches& c : mDeliver.mNeedGCCache)
 			{
 				mGC.mGCList.swap_insert(c);

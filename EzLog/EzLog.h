@@ -1814,7 +1814,6 @@ namespace ezlogspace
 {
 	static_assert(EZLOG_POLL_DEFAULT_THREAD_SLEEP_MS > 0, "fatal err!");
 	static_assert(EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE > 0, "fatal err!");
-	static_assert(EZLOG_GARBAGE_COLLECTION_QUEUE_RATE >= 2, "fatal error!too small");
 	static_assert(EZLOG_SINGLE_LOG_RESERVE_LEN > 0, "fatal err!");
 
 	static_assert(EZLOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE > 0, "fatal err!");
