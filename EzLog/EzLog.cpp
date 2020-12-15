@@ -1051,10 +1051,6 @@ namespace ezlogspace
 				return PRINTER_ID_NONE;
 			};
 			void onAcceptLogs(MetaData metaData) override {}
-			bool oneLogPerAccept() const override
-			{
-				return false;
-			}
 			void sync() override{};
 
 		protected:
@@ -1069,7 +1065,6 @@ namespace ezlogspace
 			static EzLogTerminalPrinter* getInstance();
 
 			void onAcceptLogs(MetaData metaData) override;
-			bool oneLogPerAccept() const override;
 			void sync() override;
 			EPrinterID getUniqueID() const override;
 
@@ -1084,7 +1079,6 @@ namespace ezlogspace
 			static EzLogFilePrinter* getInstance();
 
 			void onAcceptLogs(MetaData metaData) override;
-			bool oneLogPerAccept() const override;
 			void sync() override;
 			EPrinterID getUniqueID() const override;
 
@@ -1554,10 +1548,6 @@ namespace ezlogspace
 		{
 			std::ios::sync_with_stdio(false);
 		};
-		bool EzLogTerminalPrinter::oneLogPerAccept() const
-		{
-			return false;
-		}
 		void EzLogTerminalPrinter::onAcceptLogs(MetaData metaData)
 		{
 			std::cout.write(metaData->logs, metaData->logs_size);
@@ -1589,10 +1579,6 @@ namespace ezlogspace
 		{
 			fflush(m_pFile);
 			if (m_pFile != nullptr) { fclose(m_pFile); }
-		}
-		bool EzLogFilePrinter::oneLogPerAccept() const
-		{
-			return false;
 		}
 
 		void EzLogFilePrinter::onAcceptLogs(MetaData metaData)

@@ -1474,9 +1474,6 @@ namespace ezlogspace
 		// accept logs with size,logs and NOT end with '\0'
 		virtual void onAcceptLogs(MetaData metaData) = 0;
 
-		// MetaData is a EzLogBean if true,or a buf_t if false when onAcceptLogs
-		virtual bool oneLogPerAccept() const = 0;
-
 		// sync with printer's dest
 		virtual void sync() = 0;
 
