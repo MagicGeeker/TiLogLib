@@ -8,7 +8,7 @@
 #include <functional>
 #include <thread>
 #include <type_traits>
-#include <ostream>
+#include <iostream>
 
 #include <list>
 #include <vector>
@@ -26,6 +26,8 @@
 // clang-format off
 #define  EZLOG_INTERNAL_REGISTER_PRINTERS_MACRO(...)  __VA_ARGS__
 /**************************************************MACRO FOR USER**************************************************/
+#define EZLOG_AUTO_INIT 0
+
 #define EZLOG_USE_STD_SYSTEM_CLOCK
 #define EZLOG_WITH_MILLISECONDS TRUE
 
@@ -194,6 +196,32 @@ namespace ezlogspace
 	class EzLogObject : public EzLogMemoryManager
 	{
 	};
+
+#define EZLOG_AUTO_SINGLE_INSTANCE_DECLARE(CLASS_NAME, ...)                                                                                \
+	inline static CLASS_NAME* getInstance()                                                                                                \
+	{                                                                                                                                      \
+		static CLASS_NAME* obj = new CLASS_NAME(__VA_ARGS__);                                                                              \
+		return obj;                                                                                                                        \
+	};                                                                                                                                     \
+	inline static CLASS_NAME& getRInstance() { return *getInstance(); };
+
+#if EZLOG_AUTO_INIT
+#define EZLOG_SINGLE_INSTANCE_DECLARE_OUTER(CLASS_NAME)
+#define EZLOG_SINGLE_INSTANCE_DECLARE(CLASS_NAME, ...)                                                                                     \
+	EZLOG_AUTO_SINGLE_INSTANCE_DECLARE(CLASS_NAME)                                                                                         \
+	static inline void init() {}
+#else
+#define EZLOG_SINGLE_INSTANCE_DECLARE_OUTER(CLASS_NAME) CLASS_NAME* CLASS_NAME::s_instance;
+#define EZLOG_SINGLE_INSTANCE_DECLARE(CLASS_NAME, ...)                                                                                     \
+	inline static CLASS_NAME* getInstance() { return CLASS_NAME::s_instance; };                                                            \
+	inline static CLASS_NAME& getRInstance() { return *CLASS_NAME::s_instance; };                                                          \
+	static inline void init()                                                                                                              \
+	{                                                                                                                                      \
+		DEBUG_ASSERT(CLASS_NAME::s_instance == nullptr); /*must be called only once*/                                                              \
+		CLASS_NAME::s_instance = new CLASS_NAME(__VA_ARGS__);                                                                              \
+	}                                                                                                                                      \
+	static CLASS_NAME* s_instance;
+#endif
 
 	struct EzLogObjectPoolFeat
 	{
@@ -1060,10 +1088,11 @@ namespace ezlogspace
 
 			struct steady_flag_helper
 			{
+				EZLOG_SINGLE_INSTANCE_DECLARE(steady_flag_helper)
+
 				static inline steady_flag_t now()
 				{
-					static std::atomic<steady_flag_t> s_steady_t_helper(min());
-					return s_steady_t_helper++;
+					return getRInstance().count++;
 				}
 
 				static constexpr inline steady_flag_t min()
@@ -1075,6 +1104,7 @@ namespace ezlogspace
 				{
 					return std::numeric_limits<steady_flag_t>::max();
 				}
+				std::atomic<steady_flag_t> count{ min() };
 			};
 
 			// for customize timer，must be similar to BaseTimeImpl
@@ -1499,6 +1529,15 @@ namespace ezlogspace
 		static uint64_t getPrintedLogs();
 
 		static void clearPrintedLogs();
+
+#if EZLOG_AUTO_INIT
+		static void init(){};
+		static void initForThisThread(){};
+#else
+		static void init();//This function is NOT thread safe.Make sure call ONLY ONCE before first log.
+		static void initForThisThread();//Must be called for every thread.Make sure call ONLY ONCE before first log of thread.
+		//before call initForThisThread(),must call init() first
+#endif
 
 #if EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL == TRUE
 

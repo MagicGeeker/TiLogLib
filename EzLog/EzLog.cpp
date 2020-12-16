@@ -213,6 +213,7 @@ namespace ezlogspace
 	class EzLogStream;
 	using MiniSpinMutex = OptimisticMutex;
 
+	EZLOG_SINGLE_INSTANCE_DECLARE_OUTER(ezlogspace::internal::ezlogtimespace::steady_flag_helper)
 	thread_local EzLogStream* EzLogStream::s_pNoUsedStream = new EzLogStream(EPlaceHolder{}, false);
 
 	namespace internal
@@ -1041,11 +1042,7 @@ namespace ezlogspace
 		class EzLogNonePrinter : public EzLogPrinter
 		{
 		public:
-			static EzLogNonePrinter* getInstance()
-			{
-				static EzLogNonePrinter* printer = new EzLogNonePrinter();
-				return printer;
-			};
+			EZLOG_SINGLE_INSTANCE_DECLARE(EzLogNonePrinter)
 			EPrinterID getUniqueID() const override
 			{
 				return PRINTER_ID_NONE;
@@ -1062,7 +1059,7 @@ namespace ezlogspace
 		{
 
 		public:
-			static EzLogTerminalPrinter* getInstance();
+			EZLOG_SINGLE_INSTANCE_DECLARE(EzLogTerminalPrinter)
 
 			void onAcceptLogs(MetaData metaData) override;
 			void sync() override;
@@ -1076,7 +1073,7 @@ namespace ezlogspace
 		{
 
 		public:
-			static EzLogFilePrinter* getInstance();
+			EZLOG_SINGLE_INSTANCE_DECLARE(EzLogFilePrinter)
 
 			void onAcceptLogs(MetaData metaData) override;
 			void sync() override;
@@ -1352,9 +1349,12 @@ namespace ezlogspace
 			static uint64_t getPrintedLogs();
 
 			static void clearPrintedLogs();
-		private:
-			inline static EzLogCore& getInstance();
 
+			EZLOG_SINGLE_INSTANCE_DECLARE(EzLogCore)
+
+			static ThreadStru* initForEveryThread();
+
+		private:
 			EzLogCore();
 
 			void CreateCoreThread(CoreThrdStruBase& thrd);
@@ -1488,7 +1488,7 @@ namespace ezlogspace
 			friend class ezlogspace::EzLogStream;
 
 		public:
-			static EzLogPrinterManager& getInstance();
+			EZLOG_SINGLE_INSTANCE_DECLARE(EzLogPrinterManager)
 
 			static void enablePrinter(EPrinterID printer);
 			static void disablePrinter(EPrinterID printer);
@@ -1535,14 +1535,10 @@ namespace ezlogspace
 {
 	namespace internal
 	{
+		EZLOG_SINGLE_INSTANCE_DECLARE_OUTER(EzLogNonePrinter)
 
 #ifdef __________________________________________________EzLogTerminalPrinter__________________________________________________
-
-		EzLogTerminalPrinter* EzLogTerminalPrinter::getInstance()
-		{
-			static EzLogTerminalPrinter* s_ins = new EzLogTerminalPrinter();	// do not delete
-			return s_ins;
-		}
+		EZLOG_SINGLE_INSTANCE_DECLARE_OUTER(EzLogTerminalPrinter)
 
 		EzLogTerminalPrinter::EzLogTerminalPrinter()
 		{
@@ -1566,12 +1562,7 @@ namespace ezlogspace
 
 
 #ifdef __________________________________________________EzLogFilePrinter__________________________________________________
-
-		EzLogFilePrinter* EzLogFilePrinter::getInstance()
-		{
-			static EzLogFilePrinter* s_ins = new EzLogFilePrinter();	// do not delete
-			return s_ins;
-		}
+		EZLOG_SINGLE_INSTANCE_DECLARE_OUTER(EzLogFilePrinter)
 
 		EzLogFilePrinter::EzLogFilePrinter() {}
 
@@ -1658,12 +1649,7 @@ namespace ezlogspace
 #endif
 
 #ifdef __________________________________________________EzLogPrinterManager__________________________________________________
-		inline EzLogPrinterManager& EzLogPrinterManager::getInstance()
-		{
-			static EzLogPrinterManager& ipml = *new EzLogPrinterManager();	  // do not delete
-			return ipml;
-		}
-
+		EZLOG_SINGLE_INSTANCE_DECLARE_OUTER(EzLogPrinterManager)
 		EzLogPrinterManager::EzLogPrinterManager() : m_printers(GetPrinterNum()), m_dest(DEFAULT_ENABLED_PRINTERS), m_level(STATIC_LOG_LEVEL)
 		{
 			for (EzLogPrinter*& x : m_printers)
@@ -1675,18 +1661,16 @@ namespace ezlogspace
 
 		void EzLogPrinterManager::enablePrinter(EPrinterID printer)
 		{
-			auto& thiz = getInstance();
-			thiz.m_dest |= ((printer_ids_t)printer);
+			getInstance()->m_dest |= ((printer_ids_t)printer);
 		}
 		void EzLogPrinterManager::disablePrinter(EPrinterID printer)
 		{
-			auto& thiz = getInstance();
-			thiz.m_dest &= (~(printer_ids_t)printer);
+			getInstance()->m_dest &= (~(printer_ids_t)printer);
 		}
 
 		void EzLogPrinterManager::setPrinter(printer_ids_t printerIds)
 		{
-			getInstance().m_dest = printerIds;
+			getInstance()->m_dest = printerIds;
 		}
 
 		void EzLogPrinterManager::addPrinter(EzLogPrinter* printer)
@@ -1700,24 +1684,24 @@ namespace ezlogspace
 
 		void EzLogPrinterManager::setLogLevel(ELevel level)
 		{
-			getInstance().m_level = level;
+			getInstance()->m_level = level;
 		}
 
 		ELevel EzLogPrinterManager::getDynamicLogLevel()
 		{
-			return getInstance().m_level;
+			return getInstance()->m_level;
 		}
 
 		Vector<EzLogPrinter*> EzLogPrinterManager::getAllValidPrinters()
 		{
-			Vector<EzLogPrinter*>& v = getInstance().m_printers;
+			Vector<EzLogPrinter*>& v = getInstance()->m_printers;
 			return Vector<EzLogPrinter*>(v.begin() + 1, v.end());
 		}
 
 		Vector<EzLogPrinter*> EzLogPrinterManager::getCurrentPrinters()
 		{
-			printer_ids_t dest = getInstance().m_dest;
-			Vector<EzLogPrinter*>& arr = getInstance().m_printers;
+			printer_ids_t dest = getInstance()->m_dest;
+			Vector<EzLogPrinter*>& arr = getInstance()->m_printers;
 			Vector<EzLogPrinter*> vec;
 			for (uint32_t i = 1, x = PRINTER_ID_BEGIN; x < PRINTER_ID_MAX; ++i, x <<= 1U)
 			{
@@ -1732,14 +1716,12 @@ namespace ezlogspace
 	namespace internal
 	{
 #ifdef __________________________________________________EzLogCore__________________________________________________
-		thread_local ThreadStru* EzLogCore::s_pThreadLocalStru = EzLogCore::getInstance().InitForEveryThread();
-
-		EzLogCore& EzLogCore::getInstance()
-		{
-			static EzLogCore& t = *new EzLogCore();
-			return t;
-		}
-
+		EZLOG_SINGLE_INSTANCE_DECLARE_OUTER(EzLogCore)
+#if EZLOG_AUTO_INIT
+		thread_local ThreadStru* EzLogCore::s_pThreadLocalStru = EzLogCore::getRInstance().InitForEveryThread();
+#else
+		thread_local ThreadStru* EzLogCore::s_pThreadLocalStru = nullptr;
+#endif
 		EzLogCore::EzLogCore()
 		{
 			CreateCoreThread(mPoll);
@@ -1748,7 +1730,7 @@ namespace ezlogspace
 			CreateCoreThread(mGC);
 
 			mExistThreads = 4;
-			atexit([] { getInstance().AtExit(); });
+			atexit([] { getRInstance().AtExit(); });
 			mInited = true;
 		}
 
@@ -1773,6 +1755,13 @@ namespace ezlogspace
 			bean.vcache.clear();
 			mMerge.mList.swap_insert(mMerge.mMergeCaches);
 			return mMerge.mList.full();
+		}
+
+		ThreadStru* EzLogCore::initForEveryThread()
+		{
+			DEBUG_ASSERT(getInstance() != nullptr);	   // must call init() first
+			DEBUG_ASSERT(s_pThreadLocalStru== nullptr);//must be called only once
+			return getRInstance().InitForEveryThread();
 		}
 
 		ThreadStru* EzLogCore::InitForEveryThread()
@@ -1816,7 +1805,9 @@ namespace ezlogspace
 
 		void EzLogCore::pushLog(EzLogBean* pBean)
 		{
-			getInstance().IPushLog(pBean);
+			DEBUG_ASSERT(getInstance() != nullptr);			// must call init() first
+			DEBUG_ASSERT(s_pThreadLocalStru != nullptr);	// must call initForEveryThread() first
+			getRInstance().IPushLog(pBean);
 		}
 
 		void EzLogCore::IPushLog(EzLogBean* pBean)
@@ -2354,12 +2345,12 @@ namespace ezlogspace
 
 		uint64_t EzLogCore::getPrintedLogs()
 		{
-			return getInstance().mPrintedLogs;
+			return getRInstance().mPrintedLogs;
 		}
 
 		void EzLogCore::clearPrintedLogs()
 		{
-			getInstance().mPrintedLogs = 0;
+			getRInstance().mPrintedLogs = 0;
 		}
 
 #endif
@@ -2401,6 +2392,19 @@ namespace ezlogspace
 	{
 		EzLogCore::clearPrintedLogs();
 	}
+
+#if !EZLOG_AUTO_INIT
+	void EzLog::init()
+	{
+		ezlogspace::internal::ezlogtimespace::steady_flag_helper::init();
+		ezlogspace::internal::EzLogNonePrinter::init();
+		ezlogspace::internal::EzLogTerminalPrinter::init();
+		ezlogspace::internal::EzLogFilePrinter::init();
+		ezlogspace::internal::EzLogPrinterManager::init();
+		ezlogspace::internal::EzLogCore::init();
+	}
+	void EzLog::initForThisThread() { ezlogspace::internal::EzLogCore::initForEveryThread(); }
+#endif
 
 #if EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL == TRUE
 	void EzLog::setLogLevel(ELevel level)

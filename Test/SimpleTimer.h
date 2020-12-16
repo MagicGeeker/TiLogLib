@@ -1,9 +1,8 @@
-#include<string>
-#include "inc.h"
-
 #ifndef ANDROIDLANGUAGEPROCESS_TIMEINTERVAL_H
 #define ANDROIDLANGUAGEPROCESS_TIMEINTERVAL_H
-
+#include<string>
+#include <iostream>
+#include <chrono>
 
 class SimpleTimer
 {
