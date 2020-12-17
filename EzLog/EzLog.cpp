@@ -59,6 +59,8 @@
 
 using SystemTimePoint = std::chrono::system_clock::time_point;
 using SystemClock = std::chrono::system_clock;
+using SteadyTimePoint = std::chrono::steady_clock::time_point;
+using SteadyClock = std::chrono::steady_clock;
 using EzLogTime = ezlogspace::internal::EzLogBean::EzLogTime;
 
 
@@ -67,6 +69,19 @@ using EzLogTime = ezlogspace::internal::EzLogBean::EzLogTime;
 using namespace std;
 using namespace ezlogspace;
 
+namespace ezlogspace
+{
+	namespace internal
+	{
+		namespace ezlogtimespace
+		{
+			EZLOG_SINGLE_INSTANCE_DECLARE_OUTER(steady_flag_helper)
+			SteadyClockImpl::SystemTimePoint SteadyClockImpl::initSystemTime{};
+			SteadyClockImpl::TimePoint SteadyClockImpl::initSteadyTime{};
+		}	 // namespace ezlogtimespace
+	}		 // namespace internal
+	thread_local EzLogStream* EzLogStream::s_pNoUsedStream = new EzLogStream(EPlaceHolder{}, false);
+};	  // namespace ezlogspace
 
 namespace ezloghelperspace
 {
@@ -142,7 +157,7 @@ namespace ezloghelperspace
 		return false;
 	}
 
-	static size_t SystemTimePointToTimeCStr(char* dst, const SystemTimePoint& nowTime)
+	static size_t TimePointToTimeCStr(char* dst, SystemTimePoint nowTime)
 	{
 		time_t t = std::chrono::system_clock::to_time_t(nowTime);
 		struct tm* tmd = localtime(&t);
@@ -165,6 +180,22 @@ namespace ezloghelperspace
 #endif
 			return len;
 		} while (false);
+		dst[0] = '\0';
+		return 0;
+	}
+
+	static size_t TimePointToTimeCStr(char* dst, SteadyTimePoint nowTime)
+	{
+		using namespace ezlogspace::internal::ezlogtimespace;
+		auto duration = nowTime - SteadyClockImpl::getInitSteadyTime();
+		auto t = SteadyClockImpl::getInitSystemTime() + std::chrono::duration_cast<SystemClock::duration>(duration);
+		return TimePointToTimeCStr(dst, t);
+	}
+
+	template <typename TimePointType>
+	static size_t TimePointToTimeCStr(char* dst, TimePointType nowTime)
+	{
+		DEBUG_ASSERT(false);
 		dst[0] = '\0';
 		return 0;
 	}
@@ -212,9 +243,6 @@ namespace ezlogspace
 {
 	class EzLogStream;
 	using MiniSpinMutex = OptimisticMutex;
-
-	EZLOG_SINGLE_INSTANCE_DECLARE_OUTER(ezlogspace::internal::ezlogtimespace::steady_flag_helper)
-	thread_local EzLogStream* EzLogStream::s_pNoUsedStream = new EzLogStream(EPlaceHolder{}, false);
 
 	namespace internal
 	{
@@ -1597,7 +1625,7 @@ namespace ezlogspace
 		void EzLogFilePrinter::CreateNewFile(MetaData metaData)
 		{
 			char timeStr[EZLOG_CTIME_MAX_LEN];
-			size_t size = SystemTimePointToTimeCStr(timeStr, metaData->logTime.get_origin_time());
+			size_t size = TimePointToTimeCStr(timeStr, metaData->logTime.get_origin_time());
 			String s;
 			char indexs[9];
 			snprintf(indexs, 9, "%07d ", index);
@@ -1724,6 +1752,7 @@ namespace ezlogspace
 #endif
 		EzLogCore::EzLogCore()
 		{
+			ezlogspace::internal::ezlogtimespace::SteadyClockImpl::init();
 			CreateCoreThread(mPoll);
 			CreateCoreThread(mMerge);
 			CreateCoreThread(mDeliver);
@@ -1971,7 +2000,7 @@ namespace ezlogspace
 				// time is equal to pre,no need to update
 			} else
 			{
-				size_t len = SystemTimePointToTimeCStr(mDeliver.mctimestr, oriTime);
+				size_t len = TimePointToTimeCStr(mDeliver.mctimestr, oriTime);
 				mDeliver.mPreLogTime = len == 0 ? EzLogTime::origin_time_type() : oriTime;
 				mDeliver.mLogTimeStringView.resize(len);
 			}

@@ -28,7 +28,9 @@
 /**************************************************MACRO FOR USER**************************************************/
 #define EZLOG_AUTO_INIT 0
 
-#define EZLOG_USE_STD_SYSTEM_CLOCK
+#define EZLOG_STD_STEADY_CLOCK 1
+#define EZLOG_STD_SYSTEM_CLOCK 2
+#define EZLOG_TIME_IMPL_TYPE EZLOG_STD_STEADY_CLOCK
 #define EZLOG_WITH_MILLISECONDS TRUE
 
 #define EZLOG_LOG_WILL_NOT_BIGGER_THAN_UINT32MAX TRUE
@@ -1113,6 +1115,7 @@ namespace ezlogspace
 				/**
 			public:
 				 using origin_time_type=xxx;
+				 using steady_flag_t = xxxx;
 			public:
 				inline BaseTimeImpl() ;
 
@@ -1145,6 +1148,7 @@ namespace ezlogspace
 				 */
 			};
 
+			//help transform no-steady time to steady time
 			EZLOG_ABSTRACT class NoSteadyTimeHelper : public BaseTimeImpl
 			{
 			public:
@@ -1178,14 +1182,14 @@ namespace ezlogspace
 			EZLOG_ABSTRACT class SystemClockBase : BaseTimeImpl
 			{
 			public:
-				using SystemLock = std::chrono::system_clock;
+				using Clock = std::chrono::system_clock;
 				using TimePoint = std::chrono::system_clock::time_point;
 				using origin_time_type = TimePoint;
 
 			public:
 				inline time_t to_time_t() const
 				{
-					return SystemLock::to_time_t(chronoTime);
+					return Clock::to_time_t(chronoTime);
 				}
 				inline void cast_to_sec()
 				{
@@ -1206,110 +1210,188 @@ namespace ezlogspace
 			};
 
 			// to use this class ,make sure system_lock is steady
-			class SteadySystemClock : SystemClockBase
+			class NativeSteadySystemClockWrapper : SystemClockBase
 			{
 			public:
-				using steady_flag_t = SystemLock::rep;
+				using steady_flag_t = Clock::rep;
 
 			public:
-				inline SteadySystemClock()
+				inline NativeSteadySystemClockWrapper()
 				{
 					chronoTime = TimePoint::min();
 				}
 
-				inline SteadySystemClock(TimePoint t)
+				inline NativeSteadySystemClockWrapper(TimePoint t)
 				{
 					chronoTime = t;
 				}
 
-				inline bool operator<(const SteadySystemClock& rhs) const
+				inline bool operator<(const NativeSteadySystemClockWrapper& rhs) const
 				{
 					return chronoTime < rhs.chronoTime;
 				}
 
-				inline bool operator<=(const SteadySystemClock& rhs) const
+				inline bool operator<=(const NativeSteadySystemClockWrapper& rhs) const
 				{
 					return chronoTime <= rhs.chronoTime;
 				}
 
-				inline SteadySystemClock& operator=(const SteadySystemClock& t) = default;
-				//				{
-				//					chronoTime = t.chronoTime;
-				//					return *this;
-				//				}
+				inline NativeSteadySystemClockWrapper& operator=(const NativeSteadySystemClockWrapper& t) = default;
 
 				inline steady_flag_t toSteadyFlag() const
 				{
 					return chronoTime.time_since_epoch().count();
 				}
 
-				inline static SteadySystemClock now()
+				inline static NativeSteadySystemClockWrapper now()
 				{
-					return SystemLock::now();
+					return Clock::now();
 				}
 
-				inline static SteadySystemClock min()
+				inline static NativeSteadySystemClockWrapper min()
 				{
 					return TimePoint::min();
 				}
 
-				inline static SteadySystemClock max()
+				inline static NativeSteadySystemClockWrapper max()
 				{
 					return TimePoint::max();
 				}
 			};
 
-			class NoSteadySystemClock : public SystemClockBase, public NoSteadyTimeHelper
+			class NativeNoSteadySystemClockWrapper : public SystemClockBase, public NoSteadyTimeHelper
 			{
 			public:
-				inline NoSteadySystemClock()
+				inline NativeNoSteadySystemClockWrapper()
 				{
 					chronoTime = TimePoint::min();
 				}
 
-				inline NoSteadySystemClock(TimePoint t, steady_flag_t st)
+				inline NativeNoSteadySystemClockWrapper(TimePoint t, steady_flag_t st)
 				{
 					steadyT = st;
 					chronoTime = t;
 				}
 
-				inline NoSteadySystemClock& operator=(const NoSteadySystemClock& t) = default;
-				//				{
-				//					steadyT = t.steadyT;
-				//					chronoTime = t.chronoTime;
-				//					return *this;
-				//				}
+				inline NativeNoSteadySystemClockWrapper& operator=(const NativeNoSteadySystemClockWrapper& t) = default;
 
-				inline static NoSteadySystemClock now()
+				inline static NativeNoSteadySystemClockWrapper now()
 				{
-					return { SystemLock::now(), steady_flag_helper::now() };
+					return { Clock::now(), steady_flag_helper::now() };
 				}
 
-				inline static NoSteadySystemClock min()
+				inline static NativeNoSteadySystemClockWrapper min()
 				{
 					return { TimePoint::min(), steady_flag_helper::min() };
 				}
 
-				inline static NoSteadySystemClock max()
+				inline static NativeNoSteadySystemClockWrapper max()
 				{
 					return { TimePoint::max(), steady_flag_helper::max() };
 				}
 			};
 
-			template <typename _TimeImplType>
-			class EzLogTime
+			using SystemClockImpl = std::conditional< std::chrono::system_clock::is_steady, NativeSteadySystemClockWrapper, NativeNoSteadySystemClockWrapper>::type ;
+
+			class SteadyClockImpl : public BaseTimeImpl
 			{
 			public:
-				using TimeImplType = _TimeImplType;
+				using Clock = std::chrono::steady_clock;
+				using TimePoint = std::chrono::steady_clock::time_point;
+				using origin_time_type = TimePoint;
+				using steady_flag_t = Clock::rep;
+
+				using SystemClock = std::chrono::system_clock;
+				using SystemTimePoint = std::chrono::system_clock::time_point;
+			public:
+				static inline void init()
+				{
+					initSystemTime = SystemClock::now();
+					initSteadyTime = Clock::now();
+				}
+				static inline SystemTimePoint getInitSystemTime(){ return initSystemTime; }
+				static inline TimePoint getInitSteadyTime(){ return initSteadyTime; }
+				inline SteadyClockImpl()
+				{
+					chronoTime = TimePoint::min();
+				}
+
+				inline SteadyClockImpl(TimePoint t)
+				{
+					chronoTime = t;
+				}
+
+				inline SteadyClockImpl& operator=(const SteadyClockImpl& t) = default;
+
+				inline bool operator<(const SteadyClockImpl& rhs) const
+				{
+					return chronoTime < rhs.chronoTime;
+				}
+
+				inline bool operator<=(const SteadyClockImpl& rhs) const
+				{
+					return chronoTime <= rhs.chronoTime;
+				}
+
+				inline time_t to_time_t() const
+				{
+					auto dura = chronoTime - initSteadyTime;
+					auto t = initSystemTime + std::chrono::duration_cast<SystemClock::duration>(dura);
+					return SystemClock::to_time_t(t);
+				}
+				inline void cast_to_sec()
+				{
+					chronoTime = std::chrono::time_point_cast<std::chrono::seconds>(chronoTime);
+				}
+				inline void cast_to_ms()
+				{
+					chronoTime = std::chrono::time_point_cast<std::chrono::milliseconds>(chronoTime);
+				}
+
+				inline origin_time_type get_origin_time() const
+				{
+					return chronoTime;
+				}
+
+				inline steady_flag_t toSteadyFlag() const
+				{
+					return chronoTime.time_since_epoch().count();
+				}
+
+				inline static SteadyClockImpl now()
+				{
+					return  Clock::now();
+				}
+
+				inline static SteadyClockImpl min()
+				{
+					return  TimePoint::min();
+				}
+
+				inline static SteadyClockImpl max()
+				{
+					return TimePoint::max();
+				}
+
+			protected:
+				TimePoint chronoTime;
+				static SystemTimePoint initSystemTime;
+				static TimePoint initSteadyTime;
+			};
+
+			template <typename TimeImplType>
+			class IEzLogTime
+			{
+			public:
 				using origin_time_type = typename TimeImplType::origin_time_type;
-				using ezlog_steady_flag_t = typename _TimeImplType::steady_flag_t;
+				using ezlog_steady_flag_t = typename TimeImplType::steady_flag_t;
 
 			public:
-				inline EzLogTime()
+				inline IEzLogTime()
 				{
 					impl = TimeImplType::min();
 				}
-				inline EzLogTime(EPlaceHolder)
+				inline IEzLogTime(EPlaceHolder)
 				{
 					impl = TimeImplType::now();
 #ifdef EZLOG_WITH_MILLISECONDS
@@ -1318,12 +1400,12 @@ namespace ezlogspace
 					cast_to_sec();
 #endif
 				}
-				inline EzLogTime(const TimeImplType& t)
+				inline IEzLogTime(const TimeImplType& t)
 				{
 					impl = t;
 				}
 
-				inline EzLogTime(ELogTime e)
+				inline IEzLogTime(ELogTime e)
 				{
 					switch (e)
 					{
@@ -1342,21 +1424,17 @@ namespace ezlogspace
 					}
 				}
 
-				inline bool operator<(const EzLogTime& rhs) const
+				inline bool operator<(const IEzLogTime& rhs) const
 				{
 					return impl < rhs.impl;
 				}
 
-				inline bool operator<=(const EzLogTime& rhs) const
+				inline bool operator<=(const IEzLogTime& rhs) const
 				{
 					return impl <= rhs.impl;
 				}
 
-				inline EzLogTime& operator=(const EzLogTime& rhs) = default;
-				//				{
-				//					impl = rhs.impl;
-				//					return *this;
-				//				}
+				inline IEzLogTime& operator=(const IEzLogTime& rhs) = default;
 
 				inline ezlog_steady_flag_t toSteadyFlag() const
 				{
@@ -1400,17 +1478,6 @@ namespace ezlogspace
 				TimeImplType impl;
 			};
 
-			template <typename T, typename T2 = void>
-			struct SystemLockTag
-			{
-				using type = ezlogspace::internal::ezlogtimespace::NoSteadySystemClock;
-			};
-
-			template <typename T>
-			struct SystemLockTag<T, typename std::enable_if<T::is_steady>::type>
-			{
-				using type = ezlogspace::internal::ezlogtimespace::SteadySystemClock;
-			};
 		};	  // namespace ezlogtimespace
 
 	}	 // namespace internal
@@ -1423,9 +1490,11 @@ namespace ezlogspace
 		public:
 			using SystemLock = std::chrono::system_clock;
 			using TimePoint = std::chrono::system_clock::time_point;
-			using EzLogTime =
-				ezlogspace::internal::ezlogtimespace::EzLogTime<ezlogspace::internal::ezlogtimespace::SystemLockTag<SystemLock>::type>;
-
+#if EZLOG_TIME_IMPL_TYPE == EZLOG_STD_STEADY_CLOCK
+			using EzLogTime = ezlogspace::internal::ezlogtimespace::IEzLogTime<ezlogtimespace::SteadyClockImpl>;
+#elif EZLOG_TIME_IMPL_TYPE == EZLOG_STD_SYSTEM_CLOCK
+			using EzLogTime = ezlogspace::internal::ezlogtimespace::IEzLogTime<ezlogtimespace::SystemClockImpl>;
+#endif
 			static_assert(std::is_trivially_copy_assignable<EzLogTime>::value, "EzLogBean will be realloc so must be trivally-assignable");
 			static_assert(std::is_trivially_destructible<EzLogTime>::value, "EzLogBean will be realloc so must be trivally-destructible");
 
