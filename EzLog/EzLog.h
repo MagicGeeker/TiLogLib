@@ -528,29 +528,27 @@ namespace ezlogspace
 
 			inline EzLogStringExtend(EzLogStringExtend&& x) noexcept
 			{
-				// create();
 				this->pCore = nullptr;
 				swap(x);
-				// x.resize(0);
 			}
 
 			inline EzLogStringExtend& operator=(const String& str)
 			{
-				resize(0);
+				clear();
 				DEBUG_ASSERT(str.size() < std::numeric_limits<size_type>::max());
 				return append(str.data(), (size_type)str.size());
 			}
 
 			inline EzLogStringExtend& operator=(const EzLogStringExtend& str)
 			{
-				resize(0);
+				clear();
 				return append(str.data(), str.size());
 			}
 
 			inline EzLogStringExtend& operator=(EzLogStringExtend&& str) noexcept
 			{
 				swap(str);
-				str.resize(0);
+				str.clear();
 				return *this;
 			}
 
@@ -855,14 +853,25 @@ namespace ezlogspace
 				ensureZero();
 			}
 
-			// std::string will set '\0' for all increased char,but this class not.
-			inline void resize(size_type size)
+			// will set '\0' if increase
+			inline void resize(size_type sz)
 			{
-				ensureCap(size);
-				pCore->size = size;
+				size_t presize = size();
+				ensureCap(sz);
+				if (sz > presize) { memset(pFront() + presize, 0, sz - presize); }
+				pCore->size = sz;
 				ensureZero();
 			}
 
+			// force set size
+			inline void resetsize(size_type sz)
+			{
+				DEBUG_ASSERT(sz <= capacity());
+				pCore->size = sz;
+				ensureZero();
+			}
+
+			inline void clear() { resetsize(0); }
 
 		public:
 			inline EzLogStringExtend& operator+=(char c)
@@ -1801,17 +1810,22 @@ namespace ezlogspace
 
 		inline EzLogStream& operator()(const char* fmt, ...)
 		{
-			char buf[EZLOG_SINGLE_LOG_RESERVE_LEN];
-			size_t sz;
-			va_list vaList;
-			va_start(vaList, fmt);
-			sz = vsnprintf(buf, EZLOG_SINGLE_LOG_RESERVE_LEN, fmt, vaList);
-			va_end(vaList);
+			size_type size_pre = this->size();
+			va_list args;
+			va_start(args, fmt);
+			int sz = vsnprintf(NULL, 0, fmt, args);
 			if (sz > 0)
 			{
-				DEBUG_ASSERT(sz < std::numeric_limits<size_type>::max());
-				this->append(buf, (size_type)sz);
+				this->reserve(size_pre + sz);
+				vsprintf(this->pEnd(), fmt, args);
+				this->resetsize(size_pre + sz);
+			} else
+			{
+				this->ext()->level = (char)ELogLevelFlag::E;
+				this->append("get err format:\n", 16);
+				this->append(fmt);
 			}
+			va_end(args);
 
 			return *this;
 		}

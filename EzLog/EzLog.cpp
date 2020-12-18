@@ -327,20 +327,20 @@ namespace ezlogspace
 
 			inline EzLogString& operator=(const String& str)
 			{
-				resize(0);
+				clear();
 				return append(str.data(), str.size());
 			}
 
 			inline EzLogString& operator=(const EzLogString& str)
 			{
-				resize(0);
+				clear();
 				return append(str.data(), str.size());
 			}
 
 			inline EzLogString& operator=(EzLogString&& str) noexcept
 			{
 				swap(str);
-				str.resize(0);
+				str.clear();
 				return *this;
 			}
 
@@ -638,14 +638,25 @@ namespace ezlogspace
 				ensureZero();
 			}
 
-			// std::string will set '\0' for all increased char,but this class not.
-			inline void resize(size_t size)
+			// will set '\0' if increase
+			inline void resize(size_t sz)
 			{
-				ensureCap(size);
-				m_end = m_front + size;
+				size_t presize = size();
+				ensureCap(sz);
+				if (sz > presize) { memset(m_front + presize, 0, sz - presize); }
+				m_end = m_front + sz;
 				ensureZero();
 			}
 
+			// force set size
+			inline void resetsize(size_type sz)
+			{
+				DEBUG_ASSERT(sz <= capacity());
+				m_end = m_front + sz;
+				ensureZero();
+			}
+
+			inline void clear() { resetsize(0); }
 
 		public:
 			inline EzLogString& operator+=(char c)
@@ -2145,7 +2156,7 @@ namespace ezlogspace
 		{
 			if (deliverCache.empty()) { return; }
 			EzLogCoreString& logs = mDeliver.mDeliverCacheStr;
-			logs.resize(0);
+			logs.clear();
 			EzLogTime firstLogTime = mergeLogsToOneString(deliverCache);
 			DEBUG_PRINT(EZLOG_LEVEL_INFO, "prepare to deliver %u bytes\n", (unsigned)logs.size());
 			if (logs.size() == 0) { return; }
