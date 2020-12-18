@@ -106,6 +106,7 @@ namespace ezlogspace
 		MAX= VERBOSE
 	};
 
+	constexpr static uint32_t EZLOG_NO_USED_STREAM_LENGTH = 64;	// no used stream length
 	constexpr static uint32_t EZLOG_POLL_DEFAULT_THREAD_SLEEP_MS = 1000;	// poll period to ensure print every logs for every thread
 	constexpr static size_t EZLOG_GLOBAL_BUF_SIZE = ((size_t)1 << 20U);						 // global cache string reserve length
 	constexpr static size_t EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE = ((size_t)1 << 8U);			 // single thread cache queue max length
@@ -1639,19 +1640,17 @@ namespace ezlogspace
 
 	// clang-format off
 
-#define EZLOG_INTERNAL_GET_LEVEL(lv)  	[&]()->char{ DEBUG_ASSERT((lv)>=ezlogspace::ELevel::MIN);DEBUG_ASSERT((lv)<=ezlogspace::ELevel::MAX); return (lv);}()
-#define EZLOG_INTERNAL_GET_FILE()  	[]()->const char*{return __FILE__;}()
-#define EZLOG_INTERNAL_GET_FILE_LEN()  []()->uint16_t{static_assert( sizeof( __FILE__ ) - 1 <= UINT16_MAX, "fatal error,file path is too long" ); return (uint16_t)(sizeof(__FILE__)-1);}()
-#define EZLOG_INTERNAL_GET_LINE()  []()->uint16_t{static_assert(__LINE__<=UINT16_MAX,"fatal error,file line too big"); return  (uint16_t)(__LINE__);}()
+#define EZLOG_INTERNAL_GET_LEVEL(lv)                                                                                                       \
+	[&]() {                                                                                                                                \
+		static_assert((sizeof(__FILE__) - 1) <= UINT16_MAX, "fatal error,file path is too long");                                          \
+		static_assert(__LINE__ <= UINT16_MAX, "fatal error,file line too big");                                                            \
+		DEBUG_ASSERT((lv) >= ezlogspace::ELevel::MIN);                                                                                     \
+		DEBUG_ASSERT((lv) <= ezlogspace::ELevel::MAX);                                                                                     \
+		return (lv);                                                                                                                       \
+	}()
 
-#define EZLOG_INTERNAL_CREATE_EZLOG_STREAM(lv)                                       \
-	[&]{ return	                                                                     \
-	((lv)>ezlogspace::EzLog::getDynamicLogLevel()?                                   \
-	ezlogspace::EzLogStream(ezlogspace::internal::EPlaceHolder{}):         \
-	ezlogspace::EzLogStream(EZLOG_INTERNAL_GET_LEVEL(lv),                            \
-	EZLOG_INTERNAL_GET_FILE(),                                                     \
-	EZLOG_INTERNAL_GET_FILE_LEN(),                                                   \
-	EZLOG_INTERNAL_GET_LINE()  ));}()
+#define EZLOG_INTERNAL_CREATE_EZLOG_STREAM(lv)                                                                                             \
+	EzLogCreateNewEzLogStream<(sizeof(__FILE__) - 1), __LINE__>(__FILE__, EZLOG_INTERNAL_GET_LEVEL(lv))
 
 	// clang-format on
 
@@ -1696,9 +1695,14 @@ namespace ezlogspace
 		}
 
 		// make a valid stream
-		inline EzLogStream(uint32_t lv, const char* file, uint16_t fileLen, uint16_t line)
-			: StringType(EPlaceHolder{}, EZLOG_SINGLE_LOG_RESERVE_LEN)
+		inline EzLogStream(uint32_t lv, const char* file, uint16_t fileLen, uint16_t line) : StringType(EPlaceHolder{})
 		{
+			if (lv > ezlogspace::EzLog::getDynamicLogLevel())
+			{
+				bindToNoUseStream();
+				return;
+			}
+			create(EZLOG_SINGLE_LOG_RESERVE_LEN);
 			EzLogBean& bean = *ext();
 			new (&bean.ezLogTime) EzLogBean::EzLogTime(EPlaceHolder{});
 			bean.tid = ezlogspace::internal::GetThreadIDString();
@@ -1768,7 +1772,7 @@ namespace ezlogspace
 		}
 
 		// special constructor for s_pNoUsedStream
-		inline EzLogStream(EPlaceHolder, bool) : StringType()
+		inline EzLogStream(EPlaceHolder, bool) : StringType(EPlaceHolder{},EZLOG_NO_USED_STREAM_LENGTH)
 		{
 			setAsNoUsedStream();
 		}
@@ -1876,12 +1880,7 @@ namespace ezlogspace
 	}	 // namespace internal
 
 
-#define EZLOG_INTERNAL_CREATE_EZLOG_NONE_STREAM()                                                                                          \
-	[] {                                                                                                                                   \
-		EZLOG_INTERNAL_GET_FILE_LEN();                                                                                                     \
-		EZLOG_INTERNAL_GET_LINE();                                                                                                         \
-		return ezlogspace::EzLogNoneStream();                                                                                              \
-	}()
+#define EZLOG_INTERNAL_CREATE_EZLOG_NONE_STREAM() EzLogCreateNewEzLogNoneStream(EZLOG_INTERNAL_GET_LEVEL(EZLOG_LEVEL_DEBUG))
 	class EzLogNoneStream
 	{
 	public:
@@ -1913,6 +1912,52 @@ namespace ezlogspace
 		}
 	};
 }	 // namespace ezlogspace
+
+inline static ezlogspace::EzLogNoneStream EzLogCreateNewEzLogNoneStream(uint32_t)
+{
+	return ezlogspace::EzLogNoneStream();
+}
+template <uint32_t fileLen, uint32_t line>
+inline static ezlogspace::EzLogStream EzLogCreateNewEzLogStream(const char* file, uint32_t lv)
+{
+	return ezlogspace::EzLogStream(lv, file, fileLen, line);
+}
+
+namespace DBG
+{
+	inline static ezlogspace::EzLogNoneStream EzLogCreateNewEzLogNoneStream(uint32_t) { return ezlogspace::EzLogNoneStream(); }
+#ifdef NDEBUG
+	template <uint32_t fileLen, uint32_t line>
+	inline static ezlogspace::EzLogNoneStream EzLogCreateNewEzLogStream(const char* file, uint32_t lv)
+	{
+		return ezlogspace::EzLogNoneStream();
+	}
+#else
+	template <uint32_t fileLen, uint32_t line>
+	inline static ezlogspace::EzLogStream EzLogCreateNewEzLogStream(const char* file, uint32_t lv)
+	{
+		return ezlogspace::EzLogStream(lv, file, fileLen, line);
+	}
+#endif
+}	 // namespace DBG
+
+namespace NDBG
+{
+	inline static ezlogspace::EzLogNoneStream EzLogCreateNewEzLogNoneStream(uint32_t) { return ezlogspace::EzLogNoneStream(); }
+#ifdef NDEBUG
+	template <uint32_t fileLen, uint32_t line>
+	inline static ezlogspace::EzLogStream EzLogCreateNewEzLogStream(const char* file, uint32_t lv)
+	{
+		return ezlogspace::EzLogStream(lv, file, fileLen, line);
+	}
+#else
+	template <uint32_t fileLen, uint32_t line>
+	inline static ezlogspace::EzLogNoneStream EzLogCreateNewEzLogStream(const char* file, uint32_t lv)
+	{
+		return ezlogspace::EzLogNoneStream();
+	}
+#endif
+}	 // namespace NDBG
 
 
 namespace ezlogspace
