@@ -1073,9 +1073,6 @@ namespace ezlogspace
 			T* pEnd;
 		};
 
-		using EzLogBeanPtrCircularQueue = PodCircularQueue<EzLogBean*,EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE-1>;
-		using EzLogBeanPtrVector = Vector<EzLogBean*>;
-		using EzLogBeanPtrVectorPtr = Vector<EzLogBean*>*;
 #endif
 
 		class EzLogNonePrinter : public EzLogPrinter
@@ -1133,11 +1130,15 @@ namespace ezlogspace
 		};
 
 
+		using CrcQueueLogCache = PodCircularQueue<EzLogBean*, EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE - 1>;
+		using VecLogCache = Vector<EzLogBean*>;
+		using VecLogCachePtr = VecLogCache*;
+
 		using ThreadLocalSpinMutex = OptimisticMutex;
 
 		struct ThreadStru : public EzLogObject
 		{
-			EzLogBeanPtrCircularQueue vcache;
+			CrcQueueLogCache qCache;
 			ThreadLocalSpinMutex spinMtx;	  // protect cache
 
 			EzLogStream* noUseStream;
@@ -1146,7 +1147,7 @@ namespace ezlogspace
 			std::condition_variable thrdExistCV;
 
 			explicit ThreadStru(size_t cacheSize)
-				: vcache(), spinMtx(), noUseStream(EzLogStreamHelper::get_no_used_stream()), tid(GetThreadIDString()),
+				: qCache(), spinMtx(), noUseStream(EzLogStreamHelper::get_no_used_stream()), tid(GetThreadIDString()),
 				  thrdExistMtx(), thrdExistCV(){};
 
 			~ThreadStru()
@@ -1157,8 +1158,6 @@ namespace ezlogspace
 			}
 		};
 
-		using LogCaches =EzLogBeanPtrVector;
-
 		template <typename Container, size_t CAPACITY = 4>
 		struct ContainerList : public EzLogObject
 		{
@@ -1167,34 +1166,34 @@ namespace ezlogspace
 
 			explicit ContainerList()
 			{
-				mlist.resize(CAPACITY);
-				it_next = mlist.begin();
+				mList.resize(CAPACITY);
+				it_next = mList.begin();
 			}
 			bool swap_insert(Container& v)
 			{
-				DEBUG_ASSERT2(it_next != mlist.end(), CAPACITY, size());
+				DEBUG_ASSERT2(it_next != mList.end(), CAPACITY, size());
 				std::swap(*it_next, v);
 				++it_next;
-				return it_next == mlist.end();
+				return it_next == mList.end();
 			}
 
-			size_t size() { return std::distance(mlist.begin(), it_next); }
+			size_t size() { return std::distance(mList.begin(), it_next); }
 
 			void clear()
 			{
-				it_next = mlist.begin();
+				it_next = mList.begin();
 			}
 			bool empty()
 			{
-				return it_next == mlist.begin();
+				return it_next == mList.begin();
 			}
 			bool full()
 			{
-				return it_next == mlist.end();
+				return it_next == mList.end();
 			}
 			iterator begin()
 			{
-				return mlist.begin();
+				return mList.begin();
 			};
 			iterator end()
 			{
@@ -1202,28 +1201,28 @@ namespace ezlogspace
 			}
 			void swap(ContainerList& rhs)
 			{
-				std::swap(this->mlist, rhs.mlist);
+				std::swap(this->mList, rhs.mList);
 				std::swap(this->it_next, rhs.it_next);
 			}
 
 		protected:
-			List<Container> mlist;
+			List<Container> mList;
 			iterator it_next;
 		};
 
-		struct MergeList : public ContainerList<EzLogBeanPtrVector, EZLOG_MERGE_QUEUE_RATE>
+		struct MergeList : public ContainerList<VecLogCache, EZLOG_MERGE_QUEUE_RATE>
 		{
 		};
 
-		struct DeliverList : public ContainerList<EzLogBeanPtrVector, EZLOG_DELIVER_QUEUE_SIZE>
+		struct DeliverList : public ContainerList<VecLogCache, EZLOG_DELIVER_QUEUE_SIZE>
 		{
 		};
 
-		struct GCList : public ContainerList<EzLogBeanPtrVector, EZLOG_GARBAGE_COLLECTION_QUEUE_RATE>
+		struct GCList : public ContainerList<VecLogCache, EZLOG_GARBAGE_COLLECTION_QUEUE_RATE>
 		{
 			void gc()
 			{
-				for (auto it = mlist.begin(); it != it_next; ++it)
+				for (auto it = mList.begin(); it != it_next; ++it)
 				{
 					auto& v = *it;
 					for (EzLogBean* pBean : v)
@@ -1251,22 +1250,22 @@ namespace ezlogspace
 			}
 		};
 
-		struct EzLogBeanPtrVectorPtrLesser
+		struct VecLogCachePtrLesser
 		{
-			bool operator()(const EzLogBeanPtrVectorPtr lhs, const EzLogBeanPtrVectorPtr rhs) const
+			bool operator()(const VecLogCachePtr lhs, const VecLogCachePtr rhs) const
 			{
 				return rhs->size() < lhs->size();
 			}
 		};
 
-		struct EzLogBeanPtrVectorFeat : EzLogObjectPoolFeat
+		struct VecLogCacheFeat : EzLogObjectPoolFeat
 		{
-			inline void operator()(EzLogBeanPtrVector& x)
+			inline void operator()(VecLogCache& x)
 			{
 				x.clear();
 			}
 		};
-		using EzLogBeanPtrVectorPool = EzLogObjectPool<EzLogBeanPtrVector, EzLogBeanPtrVectorFeat>;
+		using VecLogCachePool = EzLogObjectPool<VecLogCache, VecLogCacheFeat>;
 		using task_t = std::function<void()>;
 		class EzLogTaskQueue
 		{
@@ -1345,12 +1344,12 @@ namespace ezlogspace
 			} stat;
 		};
 
-		struct EzLogTaskQueueReFeat : EzLogObjectPoolFeat
+		struct EzLogTaskQueueFeat : EzLogObjectPoolFeat
 		{
 			void operator()(EzLogTaskQueue& q) {}
 		};
 
-		using EzLogThreadPool = EzLogObjectPool<EzLogTaskQueue, EzLogTaskQueueReFeat>;
+		using EzLogThreadPool = EzLogObjectPool<EzLogTaskQueue, EzLogTaskQueueFeat>;
 
 
 		class EzLogCore;
@@ -1378,7 +1377,7 @@ namespace ezlogspace
 		};
 
 		using EzLogCoreString = EzLogString;
-		using EzLogBeanPtrVectorPtrPriorQueue=PriorQueue <EzLogBeanPtrVectorPtr,Vector<EzLogBeanPtrVectorPtr>, EzLogBeanPtrVectorPtrLesser>;
+		using VecLogCachePtrPriorQueue =PriorQueue <VecLogCachePtr,Vector<VecLogCachePtr>, VecLogCachePtrLesser>;
 
 		class EzLogCore : public EzLogObject
 		{
@@ -1431,9 +1430,9 @@ namespace ezlogspace
 
 			void thrdFuncPoll();
 
-			EzLogTime mergeLogsToOneString(LogCaches& deliverCache);
+			EzLogTime mergeLogsToOneString(VecLogCache& deliverCache);
 
-			void pushLogsToPrinters(const Vector<EzLogPrinter*>& printers, LogCaches& deliverCache);
+			void pushLogsToPrinters(const Vector<EzLogPrinter*>& printers, VecLogCache& deliverCache);
 
 			void DeliverLogs();
 
@@ -1471,12 +1470,12 @@ namespace ezlogspace
 			struct MergeStru : public CoreThrdStru
 			{
 				MergeList mList;						  // input
-				LogCaches mMergeCaches{ GLOBAL_SIZE };	  // output
+				VecLogCache mMergeCaches{ GLOBAL_SIZE };	  // output
 
-				EzLogBeanPtrVector mInsertToSetVec{};					   // temp vector
-				EzLogBeanPtrVector mMergeSortVec{};					   // temp vector
-				EzLogBeanPtrVectorPtrPriorQueue mThreadStruPriorQueue;	   // prior queue of ThreadStru cache
-				EzLogBeanPtrVectorPool mVecPool;
+				VecLogCache mInsertToSetVec{};					   // temp vector
+				VecLogCache mMergeSortVec{};					   // temp vector
+				VecLogCachePtrPriorQueue mThreadStruPriorQueue;	   // prior queue of ThreadStru cache
+				VecLogCachePool mVecPool;
 				const char* GetName() override { return "merge"; }
 				CoreThrdEntryFuncType GetThrdEntryFunc() override { return &EzLogCore::thrdFuncMergeLogs; }
 				bool IsBusy() override { return mList.full(); }
@@ -1782,17 +1781,17 @@ namespace ezlogspace
 
 		inline bool EzLogCore::LocalCircularQueuePushBack(EzLogBean* obj)
 		{
-			//DEBUG_ASSERT(!s_pThreadLocalStru->vcache.full());
-			s_pThreadLocalStru->vcache.emplace_back(obj);
-			return s_pThreadLocalStru->vcache.full();
+			//DEBUG_ASSERT(!s_pThreadLocalStru->qCache.full());
+			s_pThreadLocalStru->qCache.emplace_back(obj);
+			return s_pThreadLocalStru->qCache.full();
 		}
 
 		inline bool EzLogCore::MoveLocalCacheToGlobal(ThreadStru& bean)
 		{
 			static_assert(EZLOG_MERGE_QUEUE_RATE >= 1, "fatal error!too small");
 
-			EzLogBeanPtrCircularQueue::to_vector(mMerge.mMergeCaches, bean.vcache);
-			bean.vcache.clear();
+			CrcQueueLogCache::to_vector(mMerge.mMergeCaches, bean.qCache);
+			bean.qCache.clear();
 			mMerge.mList.swap_insert(mMerge.mMergeCaches);
 			return mMerge.mList.full();
 		}
@@ -1860,7 +1859,7 @@ namespace ezlogspace
 			{
 				std::unique_lock<std::mutex> lk_merge = GetMergeLock();
 				lk_local.lock();	// maybe judge full again?
-				//if (!s_pThreadLocalStru->vcache.full()) { return; }
+				//if (!s_pThreadLocalStru->qCache.full()) { return; }
 				bool isGlobalFull = MoveLocalCacheToGlobal(*s_pThreadLocalStru);
 				lk_local.unlock();
 				if (isGlobalFull)
@@ -1881,9 +1880,9 @@ namespace ezlogspace
 			{
 				ThreadStru& threadStru = **it;
 				threadStru.spinMtx.lock();
-				EzLogBeanPtrCircularQueue& vcache = threadStru.vcache;
+				CrcQueueLogCache& qCache = threadStru.qCache;
 
-				auto func_to_vector = [&](EzLogBeanPtrCircularQueue::iterator it_sub_beg, EzLogBeanPtrCircularQueue::iterator it_sub_end) {
+				auto func_to_vector = [&](CrcQueueLogCache::iterator it_sub_beg, CrcQueueLogCache::iterator it_sub_end) {
 					DEBUG_ASSERT(it_sub_beg <= it_sub_end);
 					size_t size = it_sub_end - it_sub_beg;
 					if (size == 0) { return it_sub_end; }
@@ -1891,33 +1890,33 @@ namespace ezlogspace
 					return it_sub;
 				};
 
-				size_t vcachePreSize = vcache.size();
+				size_t qCachePreSize = qCache.size();
 				DEBUG_PRINT(
-					EZLOG_LEVEL_DEBUG, "MergeThreadStruQueueToSet ptid %p , tid %s , vcachePreSize= %u\n", threadStru.tid,
-					(threadStru.tid == nullptr ? "" : threadStru.tid->c_str()), (unsigned)vcachePreSize);
-				if (vcachePreSize == 0) { continue; }
-				if (bean.time() < (**vcache.first_sub_queue_begin()).time()) { continue; }
+					EZLOG_LEVEL_DEBUG, "MergeThreadStruQueueToSet ptid %p , tid %s , qCachePreSize= %u\n", threadStru.tid,
+					(threadStru.tid == nullptr ? "" : threadStru.tid->c_str()), (unsigned)qCachePreSize);
+				if (qCachePreSize == 0) { continue; }
+				if (bean.time() < (**qCache.first_sub_queue_begin()).time()) { continue; }
 
-				if (!vcache.normalized())
+				if (!qCache.normalized())
 				{
-					if (bean.time() < (**vcache.second_sub_queue_begin()).time()) { goto one_sub; }
-					// bean.time() >= ( **vcache.second_sub_queue_begin() ).time()
+					if (bean.time() < (**qCache.second_sub_queue_begin()).time()) { goto one_sub; }
+					// bean.time() >= ( **qCache.second_sub_queue_begin() ).time()
 					// so bean.time() >= all first sub queue time
 					{
 						// trans circular queue to vector,v is a capture at this moment
-						EzLogBeanPtrCircularQueue::to_vector(v, vcache.first_sub_queue_begin(), vcache.first_sub_queue_end());
+						CrcQueueLogCache::to_vector(v, qCache.first_sub_queue_begin(), qCache.first_sub_queue_end());
 
 						// get iterator > bean
-						auto it_before_last_merge = func_to_vector(vcache.second_sub_queue_begin(), vcache.second_sub_queue_end());
-						v.insert(v.end(), vcache.second_sub_queue_begin(), it_before_last_merge);
-						vcache.erase_from_begin_to(it_before_last_merge);
+						auto it_before_last_merge = func_to_vector(qCache.second_sub_queue_begin(), qCache.second_sub_queue_end());
+						v.insert(v.end(), qCache.second_sub_queue_begin(), it_before_last_merge);
+						qCache.erase_from_begin_to(it_before_last_merge);
 					}
 				} else
 				{
 				one_sub:
-					auto it_before_last_merge = func_to_vector(vcache.first_sub_queue_begin(), vcache.first_sub_queue_end());
-					EzLogBeanPtrCircularQueue::to_vector(v, vcache.first_sub_queue_begin(), it_before_last_merge);
-					vcache.erase_from_begin_to(it_before_last_merge);
+					auto it_before_last_merge = func_to_vector(qCache.first_sub_queue_begin(), qCache.first_sub_queue_end());
+					CrcQueueLogCache::to_vector(v, qCache.first_sub_queue_begin(), it_before_last_merge);
+					qCache.erase_from_begin_to(it_before_last_merge);
 				}
 
 				auto sorted_judge_func = [&v]() {
@@ -1935,7 +1934,7 @@ namespace ezlogspace
 				auto p = mMerge.mVecPool.acquire();
 				std::swap(*p, v);
 				mMerge.mThreadStruPriorQueue.emplace(p);	   // insert for every thread
-				DEBUG_ASSERT2(v.size() <= vcachePreSize, v.size(), vcachePreSize);
+				DEBUG_ASSERT2(v.size() <= qCachePreSize, v.size(), qCachePreSize);
 			}
 		}
 
@@ -1964,9 +1963,9 @@ namespace ezlogspace
 
 			while (s.size() >= 2)	 // merge sort and finally get one sorted vector
 			{
-				EzLogBeanPtrVectorPtr it_fst_vec = s.top();
+				VecLogCachePtr it_fst_vec = s.top();
 				s.pop();
-				EzLogBeanPtrVectorPtr it_sec_vec = s.top();
+				VecLogCachePtr it_sec_vec = s.top();
 				s.pop();
 				v.resize(it_fst_vec->size() + it_sec_vec->size());
 				std::merge(it_fst_vec->begin(), it_fst_vec->end(), it_sec_vec->begin(), it_sec_vec->end(), v.begin(), EzLogBeanPtrComp());
@@ -1981,7 +1980,7 @@ namespace ezlogspace
 					mMerge.mMergeCaches.clear();
 				} else
 				{
-					EzLogBeanPtrVectorPtr p = s.top();
+					VecLogCachePtr p = s.top();
 					mMerge.mMergeCaches.swap(*p);
 				}
 			}
@@ -2085,7 +2084,7 @@ namespace ezlogspace
 			unique_lock<mutex> ulk = GetGCLock();
 			DEBUG_PRINT(EZLOG_LEVEL_INFO, "NotifyGC \n");
 			DEBUG_ASSERT1(mGC.mGCList.empty(), mGC.mGCList.size());
-			for (LogCaches& c : mDeliver.mNeedGCCache)
+			for (VecLogCache& c : mDeliver.mNeedGCCache)
 			{
 				mGC.mGCList.swap_insert(c);
 				c.clear();
@@ -2109,7 +2108,7 @@ namespace ezlogspace
 					mMerge.mThreadStruPriorQueue = {};
 					for (auto it = mMerge.mList.begin(); it != mMerge.mList.end(); ++it)
 					{
-						LogCaches& caches = *it;
+						VecLogCache& caches = *it;
 						mMerge.mThreadStruPriorQueue.emplace(&caches);
 					}
 					MergeSortForGlobalQueue();
@@ -2133,7 +2132,7 @@ namespace ezlogspace
 			return;
 		}
 
-		EzLogTime EzLogCore::mergeLogsToOneString(LogCaches& deliverCache)
+		EzLogTime EzLogCore::mergeLogsToOneString(VecLogCache& deliverCache)
 		{
 			DEBUG_ASSERT(!deliverCache.empty());
 
@@ -2152,7 +2151,7 @@ namespace ezlogspace
 			return deliverCache[0]->time();
 		}
 
-		void EzLogCore::pushLogsToPrinters(const Vector<EzLogPrinter*> &printers,LogCaches& deliverCache)
+		void EzLogCore::pushLogsToPrinters(const Vector<EzLogPrinter*> &printers, VecLogCache& deliverCache)
 		{
 			if (deliverCache.empty()) { return; }
 			EzLogCoreString& logs = mDeliver.mDeliverCacheStr;
@@ -2189,7 +2188,7 @@ namespace ezlogspace
 				Vector<EzLogPrinter*> printers = EzLogPrinterManager::getCurrentPrinters();
 				if (printers.empty()) { break; }
 				if (mDeliver.mDeliverCache.empty()) { break; }
-				for (LogCaches& c : mDeliver.mDeliverCache)
+				for (VecLogCache& c : mDeliver.mDeliverCache)
 				{
 					pushLogsToPrinters(printers, c);
 				}
@@ -2324,7 +2323,7 @@ namespace ezlogspace
 				{
 					ThreadStru& threadStru = *(*it);
 					// to need to lock threadStru.spinMtx here
-					if (threadStru.vcache.empty())
+					if (threadStru.qCache.empty())
 					{
 						DEBUG_PRINT(
 							EZLOG_LEVEL_VERBOSE, "thrd %s exit and has been merged.move to toDelQueue\n", threadStru.tid->c_str());
