@@ -373,6 +373,7 @@ namespace ezlogspace
 				return m_end;
 			}
 		public:
+			inline bool empty() const { return size() == 0; }
 			inline size_t size() const
 			{
 				check();
@@ -1133,6 +1134,7 @@ namespace ezlogspace
 		using CrcQueueLogCache = PodCircularQueue<EzLogBean*, EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE - 1>;
 		using VecLogCache = Vector<EzLogBean*>;
 		using VecLogCachePtr = VecLogCache*;
+		using EzLogCoreString = EzLogString;
 
 		using ThreadLocalSpinMutex = OptimisticMutex;
 
@@ -1163,6 +1165,7 @@ namespace ezlogspace
 		{
 			static_assert(CAPACITY >= 1, "fatal error");
 			using iterator = typename List<Container>::iterator;
+			using const_iterator = typename List<Container>::const_iterator;
 
 			explicit ContainerList()
 			{
@@ -1199,6 +1202,14 @@ namespace ezlogspace
 			{
 				return it_next;
 			}
+			const_iterator begin()const
+			{
+				return mList.begin();
+			};
+			const_iterator end()const
+			{
+				return it_next;
+			}
 			void swap(ContainerList& rhs)
 			{
 				std::swap(this->mList, rhs.mList);
@@ -1210,6 +1221,7 @@ namespace ezlogspace
 			iterator it_next;
 		};
 
+		class EzLogCore;
 		struct MergeList : public ContainerList<VecLogCache, EZLOG_MERGE_QUEUE_RATE>
 		{
 		};
@@ -1266,26 +1278,23 @@ namespace ezlogspace
 			}
 		};
 		using VecLogCachePool = EzLogObjectPool<VecLogCache, VecLogCacheFeat>;
-		using task_t = std::function<void()>;
-		class EzLogTaskQueue
-		{
-		public:
-			EzLogTaskQueue(const EzLogTaskQueue& rhs) = delete;
-			EzLogTaskQueue(EzLogTaskQueue&& rhs) = delete;
 
-			explicit EzLogTaskQueue(bool runAtOnce = true)
+		template<typename MutexType=std::mutex,typename task_t = std::function<void()>>
+		class EzLogTaskQueueBasic
+		{
+			using ConditionVariableType= typename std::conditional< std::is_same<MutexType,std::mutex>::value,std::condition_variable ,std::condition_variable_any>::type;
+
+		public:
+			EzLogTaskQueueBasic(const EzLogTaskQueueBasic& rhs) = delete;
+			EzLogTaskQueueBasic(EzLogTaskQueueBasic&& rhs) = delete;
+
+			explicit EzLogTaskQueueBasic(bool runAtOnce = true)
 			{
 				stat = RUN;
 				if (runAtOnce) { start(); }
 			}
-			~EzLogTaskQueue()
-			{
-				wait_stop();
-			}
-			void start()
-			{
-				loopThread = std::thread(&EzLogTaskQueue::loop, this);
-			}
+			~EzLogTaskQueueBasic() { wait_stop(); }
+			void start() { loopThread = std::thread(&EzLogTaskQueueBasic::loop, this); }
 
 			void wait_stop()
 			{
@@ -1295,24 +1304,20 @@ namespace ezlogspace
 
 			void stop()
 			{
-				unique_lock<Mutex> lk(mtx);
-				stat = TO_STOP;
-				lk.unlock();
-				cva.notify_one();
+				synchronized(mtx) { stat = TO_STOP; }
+				cv.notify_one();
 			}
 
 			void pushTask(task_t p)
 			{
-				unique_lock<Mutex> lk(mtx);
-				taskDeque.push_back(p);
-				lk.unlock();
-				cva.notify_one();
+				synchronized(mtx) { taskDeque.push_back(p); }
+				cv.notify_one();
 			}
 
 		private:
 			void loop()
 			{
-				unique_lock<Mutex> lk(mtx);
+				std::unique_lock<MutexType> lk(mtx);
 				while (true)
 				{
 					if (!taskDeque.empty())
@@ -1323,25 +1328,27 @@ namespace ezlogspace
 					} else
 					{
 						if (TO_STOP == stat) { break; }
-						cva.wait(lk);
+						cv.wait(lk);
 					}
 				}
 				stat = STOP;
 			}
 
 		private:
-			using Mutex = OptimisticMutex;
-
-			thread loopThread;
+			std::thread loopThread;
 			Deque<task_t> taskDeque;
-			Mutex mtx;
-			condition_variable_any cva;
+			ConditionVariableType cv;
+			EZLOG_MUTEXABLE_CLASS_MACRO(MutexType, mtx)
 			enum
 			{
 				RUN,
 				TO_STOP,
 				STOP
 			} stat;
+		};
+
+		class EzLogTaskQueue : public EzLogTaskQueueBasic<OptimisticMutex>
+		{
 		};
 
 		struct EzLogTaskQueueFeat : EzLogObjectPoolFeat
@@ -1376,7 +1383,6 @@ namespace ezlogspace
 			bool mCompleted = false;
 		};
 
-		using EzLogCoreString = EzLogString;
 		using VecLogCachePtrPriorQueue =PriorQueue <VecLogCachePtr,Vector<VecLogCachePtr>, VecLogCachePtrLesser>;
 
 		class EzLogCore : public EzLogObject
@@ -2027,9 +2033,10 @@ namespace ezlogspace
 		  // clang-format off
 			auto& logs = mDeliver.mDeliverCacheStr;
 			size_t preSize = logs.size();
-			logs.reserve(
-				preSize + L3 + bean.tid->size() + mDeliver.mLogTimeStringView.size() + bean.fileLen + bean.str_view().size()
-				+ EZLOG_PREFIX_RESERVE_LEN_L1);
+			size_t reserveSize = preSize + L3 + bean.tid->size() + mDeliver.mLogTimeStringView.size() + bean.fileLen
+				+ bean.str_view().size() + EZLOG_PREFIX_RESERVE_LEN_L1;
+			DEBUG_PRINT(EZLOG_LEVEL_DEBUG, "logs size %u capacity %u \n",(unsigned)logs.size(),(unsigned)logs.capacity());
+			logs.reserve(reserveSize);
 
 #define _SL(S) EZLOG_STRING_LEN_OF_CHAR_ARRAY(S)
 			logs.append_unsafe('\n');												  // 1

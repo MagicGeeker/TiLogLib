@@ -304,6 +304,12 @@ namespace ezlogspace
 	constexpr size_t EZLOG_DOUBLE_MAX_CHAR_LEN = (25 + 1);	  // TODO
 	constexpr size_t EZLOG_FLOAT_MAX_CHAR_LEN = (25 + 1);	  // TODO
 
+#define EZLOG_MUTEXABLE_CLASS_MACRO(mtx_type, mtx_name)                                                                                    \
+	mtx_type mtx_name;                                                                                                                     \
+	inline void lock() { mtx_name.lock(); };                                                                                               \
+	inline void unlock() { mtx_name.unlock(); };                                                                                           \
+	inline bool try_lock() { return mtx_name.try_lock(); };
+
 	template <uint32_t NRetry, size_t Nanosec>
 	class SpinMutex
 	{
@@ -316,21 +322,24 @@ namespace ezlogspace
 			while (locked_flag_.test_and_set())
 			{
 				if (n++ < NRetry) { continue; }
-				if_constexpr(Nanosec == size_t(-1))
-				{
-					std::this_thread::yield();
-				}
-				else if_constexpr(Nanosec != 0)
-				{
-					std::this_thread::sleep_for(std::chrono::nanoseconds(Nanosec));
-				}
+				if_constexpr(Nanosec == size_t(-1)) { std::this_thread::yield(); }
+				else if_constexpr(Nanosec != 0) { std::this_thread::sleep_for(std::chrono::nanoseconds(Nanosec)); }
 			}
 		}
 
-		inline void unlock()
+		inline bool try_lock()
 		{
-			locked_flag_.clear();
+			uint32_t n = 0;
+			while (locked_flag_.test_and_set())
+			{
+				if (n++ < NRetry) { continue; }
+				return false;
+			}
+			return true;
 		}
+
+
+		inline void unlock() { locked_flag_.clear(); }
 	};
 
 }	 // namespace ezlogspace
