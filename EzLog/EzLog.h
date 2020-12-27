@@ -200,6 +200,48 @@ namespace ezlogspace
 	{
 	};
 
+
+#define EZLOG_MUTEXABLE_CLASS_MACRO(mtx_type, mtx_name)                                                                                    \
+	mtx_type mtx_name;                                                                                                                     \
+	inline void lock() { mtx_name.lock(); };                                                                                               \
+	inline void unlock() { mtx_name.unlock(); };                                                                                           \
+	inline bool try_lock() { return mtx_name.try_lock(); };
+
+#define EZLOG_MUTEXABLE_CLASS_MACRO_WITH_CV(mtx_type, mtx_name, cv_type_alias, cv_name)                                                    \
+	using cv_type_alias =                                                                                                                  \
+		typename std::conditional<std::is_same<mtx_type, std::mutex>::value, std::condition_variable, std::condition_variable_any>::type;  \
+	cv_type_alias cv_name;                                                                                                                 \
+	EZLOG_MUTEXABLE_CLASS_MACRO(mtx_type, mtx_name)
+
+	template <uint32_t NRetry, size_t Nanosec>
+	class SpinMutex
+	{
+		std::atomic_flag mLockedFlag = ATOMIC_FLAG_INIT;
+
+	public:
+		inline void lock()
+		{
+			for (uint32_t n = 0; mLockedFlag.test_and_set();)
+			{
+				if (n++ < NRetry) { continue; }
+				if_constexpr(Nanosec == size_t(-1)) { std::this_thread::yield(); }
+				else if_constexpr(Nanosec != 0) { std::this_thread::sleep_for(std::chrono::nanoseconds(Nanosec)); }
+			}
+		}
+
+		inline bool try_lock()
+		{
+			for (uint32_t n = 0; mLockedFlag.test_and_set();)
+			{
+				if (n++ < NRetry) { continue; }
+				return false;
+			}
+			return true;
+		}
+
+		inline void unlock() { mLockedFlag.clear(); }
+	};
+
 #define EZLOG_AUTO_SINGLE_INSTANCE_DECLARE(CLASS_NAME, ...)                                                                                \
 	inline static CLASS_NAME* getInstance()                                                                                                \
 	{                                                                                                                                      \
@@ -236,7 +278,7 @@ namespace ezlogspace
 	class EzLogObjectPool : public EzLogObject
 	{
 		static_assert(FeatType::INIT_SIZE > 0, "fatal error");
-		static_assert(FeatType::MAX_SIZE > FeatType::INIT_SIZE, "fatal error");
+		static_assert(FeatType::MAX_SIZE >= FeatType::INIT_SIZE, "fatal error");
 
 	public:
 		using ObjectPtr = Object*;
@@ -281,6 +323,66 @@ namespace ezlogspace
 		typename List<Object>::iterator it_next;
 	};
 
+	template <typename OType>
+	struct EzLogSyncedObjectPoolFeat : public EzLogObject
+	{
+		using mutex_type = std::mutex;
+		constexpr static uint32_t MAX_SIZE = 32;
+		inline static OType* create() { return new OType{}; }
+		inline static void recreate(OType* p) { *p = OType{}; }
+		inline static void destroy(OType* p) { delete p; }
+	};
+
+	template <typename OType, typename FeatType = EzLogSyncedObjectPoolFeat<OType>>
+	class EzLogSyncedObjectPool : public EzLogObject
+	{
+		constexpr static uint32_t SIZE = FeatType::MAX_SIZE;
+		static_assert(SIZE > 0, "fatal error");
+
+	public:
+		using ObjectPtr = OType*;
+
+		~EzLogSyncedObjectPool()
+		{
+			for (auto p : pool)
+			{
+				FeatType::destroy(p);
+			}
+		};
+
+		explicit EzLogSyncedObjectPool()
+		{
+			for (auto& p : pool)
+			{
+				p = FeatType::create();
+			}
+		}
+
+		void release(ObjectPtr p)
+		{
+			FeatType::recreate(p);
+			synchronized(mtx) { pool.emplace_back(p); }
+			cv.notify_one();
+		}
+
+		ObjectPtr acquire()
+		{
+			ObjectPtr p;
+			synchronized_u(lk, mtx)
+			{
+				cv.wait(lk, [this] { return !pool.empty(); });
+				p = pool.back();
+				pool.pop_back();
+			}
+			return p;
+		}
+
+	private:
+		Vector<ObjectPtr> pool{ SIZE };
+		EZLOG_MUTEXABLE_CLASS_MACRO_WITH_CV(typename FeatType::mutex_type, mtx, CondType, cv);
+	};
+
+
 	constexpr char LOG_PREFIX[] = "FF  FEWIDVFFFF";	   // begin FF,and end FFFF is invalid
 	enum class ELogLevelFlag : char
 	{
@@ -303,44 +405,6 @@ namespace ezlogspace
 	constexpr size_t EZLOG_INT64_MAX_CHAR_LEN = (20 + 1);
 	constexpr size_t EZLOG_DOUBLE_MAX_CHAR_LEN = (25 + 1);	  // TODO
 	constexpr size_t EZLOG_FLOAT_MAX_CHAR_LEN = (25 + 1);	  // TODO
-
-#define EZLOG_MUTEXABLE_CLASS_MACRO(mtx_type, mtx_name)                                                                                    \
-	mtx_type mtx_name;                                                                                                                     \
-	inline void lock() { mtx_name.lock(); };                                                                                               \
-	inline void unlock() { mtx_name.unlock(); };                                                                                           \
-	inline bool try_lock() { return mtx_name.try_lock(); };
-
-	template <uint32_t NRetry, size_t Nanosec>
-	class SpinMutex
-	{
-		std::atomic_flag locked_flag_ = ATOMIC_FLAG_INIT;
-
-	public:
-		inline void lock()
-		{
-			uint32_t n = 0;
-			while (locked_flag_.test_and_set())
-			{
-				if (n++ < NRetry) { continue; }
-				if_constexpr(Nanosec == size_t(-1)) { std::this_thread::yield(); }
-				else if_constexpr(Nanosec != 0) { std::this_thread::sleep_for(std::chrono::nanoseconds(Nanosec)); }
-			}
-		}
-
-		inline bool try_lock()
-		{
-			uint32_t n = 0;
-			while (locked_flag_.test_and_set())
-			{
-				if (n++ < NRetry) { continue; }
-				return false;
-			}
-			return true;
-		}
-
-
-		inline void unlock() { locked_flag_.clear(); }
-	};
 
 }	 // namespace ezlogspace
 
@@ -368,19 +432,24 @@ namespace ezlogspace
 			size_type sz;
 
 		public:
-			positive_size_type(size_type sz) : sz(sz)
-			{
-				DEBUG_ASSERT(sz != 0);
-			}
+			positive_size_type(size_type sz) : sz(sz) { DEBUG_ASSERT(sz != 0); }
 
-			operator size_type() const
-			{
-				return sz;
-			}
+			operator size_type() const { return sz; }
+		};
+
+		class positive_size_t
+		{
+			size_t sz;
+
+		public:
+			positive_size_t(size_t sz) : sz(sz) { DEBUG_ASSERT(sz != 0); }
+
+			operator size_t() const { return sz; }
 		};
 
 #else
 		using positive_size_type = size_type;
+		using positive_size_t = size_t;
 #endif
 
 		using EPlaceHolder=decltype(std::placeholders::_1);
