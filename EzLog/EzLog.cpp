@@ -12,6 +12,7 @@
 #include <thread>
 #include <future>
 #include <atomic>
+#include <utility>
 #include "EzLog.h"
 
 #define __________________________________________________EzLogCircularQueue__________________________________________________
@@ -1241,6 +1242,23 @@ namespace ezlogspace
 		{
 		};
 
+		struct IOBean : public EzLogCoreString
+		{
+			EzLogTime mTime;
+			using EzLogCoreString::EzLogCoreString;
+			using EzLogCoreString::operator=;
+		};
+		using IOBeanSharedPtr = std::shared_ptr<IOBean>;
+
+		struct IOBeanPoolFeat : EzLogSyncedObjectPoolFeat<IOBean>
+		{
+			using mutex_type = OptimisticMutex;
+			constexpr static uint32_t MAX_SIZE = EZLOG_IO_STRING_DATA_POOL_SIZE;
+			inline static void recreate(IOBean* p) { p->clear(); }
+		};
+
+		using SyncedIOBeanPool = EzLogSyncedObjectPool<IOBean, IOBeanPoolFeat>;
+
 		struct GCList : public ContainerList<VecLogCache, EZLOG_GARBAGE_COLLECTION_QUEUE_RATE>
 		{
 			void gc()
@@ -1293,8 +1311,6 @@ namespace ezlogspace
 		template<typename MutexType=std::mutex,typename task_t = std::function<void()>>
 		class EzLogTaskQueueBasic
 		{
-			using ConditionVariableType= typename std::conditional< std::is_same<MutexType,std::mutex>::value,std::condition_variable ,std::condition_variable_any>::type;
-
 		public:
 			EzLogTaskQueueBasic(const EzLogTaskQueueBasic& rhs) = delete;
 			EzLogTaskQueueBasic(EzLogTaskQueueBasic&& rhs) = delete;
@@ -1302,22 +1318,23 @@ namespace ezlogspace
 			explicit EzLogTaskQueueBasic(bool runAtOnce = true)
 			{
 				stat = RUN;
+				DEBUG_PRINT(INFO, "Create EzLogTaskQueueBasic %p\n", this);
 				if (runAtOnce) { start(); }
 			}
 			~EzLogTaskQueueBasic() { wait_stop(); }
 			void start()
 			{
 				loopThread = std::thread(&EzLogTaskQueueBasic::loop, this);
-				String s = GetStringByStdThreadID(loopThread.get_id());
-				DEBUG_PRINT(INFO, "start loop, thread id %s\n", s.c_str());
+				looptid = GetStringByStdThreadID(loopThread.get_id());
+				DEBUG_PRINT(INFO, "loop %p start loop, thread id %s\n", this, looptid.c_str());
 			}
 
 			void wait_stop()
 			{
 				stop();
-				String s = GetStringByStdThreadID(loopThread.get_id());
-				DEBUG_PRINT(INFO, "end loop, thread id %s\n", s.c_str());
+				DEBUG_PRINT(INFO, "loop %p wait end loop, thread id %s\n", this, looptid.c_str());
 				if (loopThread.joinable()) { loopThread.join(); }
+				DEBUG_PRINT(INFO, "loop %p end loop, thread id %s\n", this, looptid.c_str());
 			}
 
 			void stop()
@@ -1355,8 +1372,8 @@ namespace ezlogspace
 		private:
 			std::thread loopThread;
 			Deque<task_t> taskDeque;
-			ConditionVariableType cv;
-			EZLOG_MUTEXABLE_CLASS_MACRO(MutexType, mtx)
+			String looptid;
+			EZLOG_MUTEXABLE_CLASS_MACRO_WITH_CV(MutexType, mtx, CondType, cv)
 			enum
 			{
 				RUN,
@@ -1456,7 +1473,7 @@ namespace ezlogspace
 
 			EzLogTime mergeLogsToOneString(VecLogCache& deliverCache);
 
-			void pushLogsToPrinters(const Vector<EzLogPrinter*>& printers, VecLogCache& deliverCache);
+			void pushLogsToPrinters(IOBean* pIObean);
 
 			inline void DeliverLogs();
 
@@ -1512,8 +1529,8 @@ namespace ezlogspace
 				EzLogTime::origin_time_type mPreLogTime{};
 				char mctimestr[EZLOG_CTIME_MAX_LEN] = { 0 };
 				EzLogStringView mLogTimeStringView{ mctimestr, EZLOG_CTIME_MAX_LEN - 1 };
-				EzLogCoreString mDeliverCacheStr;
-				EzLogThreadPool mPrinterPool{ GetArgsNum<EZLOG_REGISTER_PRINTERS>() };
+				IOBean mIoBean;
+				SyncedIOBeanPool mIOBeanPool;
 				const char* GetName() override { return "deliver"; }
 				CoreThrdEntryFuncType GetThrdEntryFunc() override { return &EzLogCore::thrdFuncDeliverLogs; }
 				bool IsBusy() override { return mDeliverCache.full(); }
@@ -1541,6 +1558,30 @@ namespace ezlogspace
 			_,_,_,_,_,_,8
 		};
 		// clang-format on
+
+		class EzLogPrinterData
+		{
+			friend class EzLogPrinterManager;
+		public:
+			explicit EzLogPrinterData(EzLogPrinter* p) : mTaskQueue(), mpPrinter(p) {}
+
+			void pushLogs(IOBeanSharedPtr bufPtr)
+			{
+				auto printTask = [this, bufPtr] {
+					EzLogPrinter::buf_t buf{ bufPtr->data(), bufPtr->size(), bufPtr->mTime };
+					mpPrinter->onAcceptLogs(EzLogPrinter::MetaData{ &buf });
+				};
+				mTaskQueue.pushTask(printTask);
+			}
+
+		private:
+			using buf_t = EzLogPrinter::buf_t;
+			using EzLogPrinterTask = EzLogTaskQueueBasic<std::mutex>;
+
+			EzLogPrinterTask mTaskQueue;
+			EzLogPrinter* mpPrinter;
+		};
+
 		class EzLogPrinterManager : public EzLogObject
 		{
 
@@ -1555,8 +1596,12 @@ namespace ezlogspace
 			static void disablePrinter(EPrinterID printer);
 			static void setPrinter(printer_ids_t printerIds);
 
-		public:
+			EzLogPrinterManager();
+			~EzLogPrinterManager();
+
+		public:	   // internal public
 			void addPrinter(EzLogPrinter* printer);
+			static void pushLogsToPrinters(IOBeanSharedPtr spLogs);
 
 		public:
 			static void setLogLevel(ELevel level);
@@ -1565,22 +1610,10 @@ namespace ezlogspace
 			static Vector<EzLogPrinter*> getAllValidPrinters();
 			static Vector<EzLogPrinter*> getCurrentPrinters();
 
-		private:
-
 		protected:
-			EzLogPrinterManager();
+			constexpr static uint32_t GetPrinterNum() { return GetArgsNum<EZLOG_REGISTER_PRINTERS>(); }
 
-			~EzLogPrinterManager() = default;
-
-			constexpr static uint32_t GetPrinterNum()
-			{
-				return GetArgsNum<EZLOG_REGISTER_PRINTERS>();
-			}
-
-			constexpr static uint32_t GetIndexFromPUID(EPrinterID e)
-			{
-				return log2table[(uint32_t)e];
-			}
+			constexpr static int32_t GetIndexFromPUID(EPrinterID e) { return e > 128 ? _ : log2table[(uint32_t)e]; }
 
 		private:
 			Vector<EzLogPrinter*> m_printers;
@@ -1690,7 +1723,7 @@ namespace ezlogspace
 		{
 			static void RegisterForPrinter(EzLogPrinterManager& impl)
 			{
-				impl.addPrinter(Args0::getInstance());
+				PrinterRegister<Args0>::RegisterForPrinter(impl);
 				PrinterRegister<Args...>::RegisterForPrinter(impl);
 			}
 		};
@@ -1699,7 +1732,9 @@ namespace ezlogspace
 		{
 			static void RegisterForPrinter(EzLogPrinterManager& impl)
 			{
-				impl.addPrinter(Args0::getInstance());
+				Args0::init();	  // init printer
+				auto printer = Args0::getInstance();
+				impl.addPrinter(printer);	 // add to printer list
 			}
 		};
 		template <typename... Args>
@@ -1720,6 +1755,14 @@ namespace ezlogspace
 			DoRegisterForPrinter<EZLOG_REGISTER_PRINTERS>(*this);
 		}
 
+		EzLogPrinterManager::~EzLogPrinterManager()
+		{
+			for (EzLogPrinter* x : m_printers)
+			{
+				delete x;
+			}
+		}
+
 		void EzLogPrinterManager::enablePrinter(EPrinterID printer)
 		{
 			getInstance()->m_dest |= ((printer_ids_t)printer);
@@ -1738,9 +1781,23 @@ namespace ezlogspace
 		{
 			EPrinterID e = printer->getUniqueID();
 			int32_t u = GetIndexFromPUID(e);
+			DEBUG_PRINT(
+				EZLOG_LEVEL_ALWAYS, "addPrinter printer[addr: %p id: %d index: %d] taskqueue[addr %p]\n", printer, (int)e, (int)u,
+				&printer->mData->mTaskQueue);
 			DEBUG_ASSERT2(u >= 0, e, u);
 			DEBUG_ASSERT2(u < PRINTER_ID_MAX, e, u);
 			m_printers[u] = printer;
+		}
+
+		void EzLogPrinterManager::pushLogsToPrinters(IOBeanSharedPtr spLogs)
+		{
+			Vector<EzLogPrinter*> printers = EzLogPrinterManager::getCurrentPrinters();
+			if (printers.empty()) { return; }
+			DEBUG_PRINT(EZLOG_LEVEL_INFO, "prepare to push %u bytes\n", (unsigned)spLogs->size());
+			for (EzLogPrinter* printer : printers)
+			{
+				printer->mData->pushLogs(std::move(spLogs));
+			}
 		}
 
 		void EzLogPrinterManager::setLogLevel(ELevel level)
@@ -1863,6 +1920,7 @@ namespace ezlogspace
 				this_thread::yield();
 			}
 			DEBUG_PRINT(EZLOG_LEVEL_INFO, "exit\n");
+			EzLog::destroy();
 		}
 
 		inline void EzLogCore::pushLog(EzLogBean* pBean)
@@ -2049,11 +2107,18 @@ namespace ezlogspace
 			constexpr size_t L3 = 0;
 #endif	  // IUILS_DEBUG_WITH_ASSERT
 		  // clang-format off
-			auto& logs = mDeliver.mDeliverCacheStr;
-			size_t preSize = logs.size();
-			size_t reserveSize = preSize + L3 + bean.tid->size() + mDeliver.mLogTimeStringView.size() + bean.fileLen
-				+ bean.str_view().size() + EZLOG_PREFIX_RESERVE_LEN_L1;
-			DEBUG_PRINT(EZLOG_LEVEL_DEBUG, "logs size %u capacity %u \n",(unsigned)logs.size(),(unsigned)logs.capacity());
+			auto& logs = mDeliver.mIoBean;
+			auto preSize = logs.size();
+			auto tidSize = bean.tid->size();
+			auto timeSVSize = mDeliver.mLogTimeStringView.size();
+			auto fileLen = bean.fileLen;
+			auto beanSVSize = bean.str_view().size();
+			using llu = long long unsigned;
+			DEBUG_PRINT(
+				EZLOG_LEVEL_VERBOSE, "preSize %llu, tid[size %llu,addr %p ,val %.6s], timeSVSize %llu, fileLen %llu, beanSVSize %llu\n",
+				(llu)preSize, (llu)tidSize, bean.tid, bean.tid->c_str(), (llu)timeSVSize, (llu)fileLen, (llu)beanSVSize);
+			size_t reserveSize = L3 + preSize + tidSize + timeSVSize + fileLen + beanSVSize + EZLOG_PREFIX_RESERVE_LEN_L1;
+			DEBUG_PRINT(EZLOG_LEVEL_VERBOSE, "logs size %llu capacity %llu \n", (llu)logs.size(), (llu)logs.capacity());
 			logs.reserve(reserveSize);
 
 #define _SL(S) EZLOG_STRING_LEN_OF_CHAR_ARRAY(S)
@@ -2160,7 +2225,7 @@ namespace ezlogspace
 		{
 			DEBUG_ASSERT(!deliverCache.empty());
 
-			DEBUG_PRINT(EZLOG_LEVEL_INFO, "mergeLogsToOneString,transform deliverCache to mDeliverCacheStr\n");
+			DEBUG_PRINT(EZLOG_LEVEL_INFO, "mergeLogsToOneString,transform deliverCache to string\n");
 			for (EzLogBean* pBean : deliverCache)
 			{
 				DEBUG_RUN(EzLogBean::check(pBean));
@@ -2170,54 +2235,32 @@ namespace ezlogspace
 				EzLogStringView&& log = AppendToMergeCacheByMetaData(bean);
 			}
 			mPrintedLogs += deliverCache.size();
-			DEBUG_PRINT(
-				EZLOG_LEVEL_INFO, "End of mergeLogsToOneString,mDeliverCacheStr size= %u\n", (unsigned)mDeliver.mDeliverCacheStr.size());
-			return deliverCache[0]->time();
+			DEBUG_PRINT(EZLOG_LEVEL_INFO, "End of mergeLogsToOneString,string size= %llu\n", (long long unsigned)mDeliver.mIoBean.size());
+			EzLogTime firstLogTime = deliverCache[0]->time();
+			mDeliver.mIoBean.mTime = firstLogTime;
+			return firstLogTime;
 		}
 
-		void EzLogCore::pushLogsToPrinters(const Vector<EzLogPrinter*> &printers, VecLogCache& deliverCache)
+		void EzLogCore::pushLogsToPrinters(IOBean* pIObean)
 		{
-			if (deliverCache.empty()) { return; }
-			EzLogCoreString& logs = mDeliver.mDeliverCacheStr;
-			logs.clear();
-			EzLogTime firstLogTime = mergeLogsToOneString(deliverCache);
-			DEBUG_PRINT(EZLOG_LEVEL_INFO, "prepare to deliver %u bytes\n", (unsigned)logs.size());
-			if (logs.size() == 0) { return; }
-			EzLogPrinter::buf_t buf{ logs.data(), logs.size(), firstLogTime };
-			EzLogPrinter::MetaData metaData{ &buf };
-
-			MiniSpinMutex mtx;
-			unique_lock<MiniSpinMutex> lk(mtx);
-			condition_variable_any cv;
-			size_t count = printers.size();
-			for (EzLogPrinter* printer : printers)
-			{
-				mDeliver.mPrinterPool.acquire()->pushTask([printer, metaData, &mtx, &count, &cv]() {
-					printer->onAcceptLogs(metaData);
-					mtx.lock();
-					count--;
-					mtx.unlock();
-					cv.notify_one();
-				});
-			}
-
-			cv.wait(lk, [&] { return count == 0; });
-			mDeliver.mPrinterPool.release_all();
+			EzLogPrinterManager::pushLogsToPrinters({ pIObean, [this](IOBean* p) { mDeliver.mIOBeanPool.release(p); } });
 		}
 
 		inline void EzLogCore::DeliverLogs()
 		{
-			do
+			if (mDeliver.mDeliverCache.empty()) { return; }
+			for (VecLogCache& c : mDeliver.mDeliverCache)
 			{
-				Vector<EzLogPrinter*> printers = EzLogPrinterManager::getCurrentPrinters();
-				if (printers.empty()) { break; }
-				if (mDeliver.mDeliverCache.empty()) { break; }
-				for (VecLogCache& c : mDeliver.mDeliverCache)
+				if (c.empty()) { continue; }
+				mDeliver.mIoBean.clear();
+				mergeLogsToOneString(c);
+				if (!mDeliver.mIoBean.empty())
 				{
-					pushLogsToPrinters(printers, c);
+					IOBean* t = mDeliver.mIOBeanPool.acquire();
+					std::swap(mDeliver.mIoBean, *t);
+					pushLogsToPrinters(t);
 				}
-			} while (false);
-
+			}
 		}
 
 		void EzLogCore::thrdFuncDeliverLogs()
@@ -2420,7 +2463,8 @@ using namespace ezlogspace::internal;
 
 namespace ezlogspace
 {
-
+	EzLogPrinter::EzLogPrinter() { mData = new EzLogPrinterData(this); }
+	EzLogPrinter::~EzLogPrinter() { delete mData; }
 #ifdef __________________________________________________EzLog__________________________________________________
 
 	void EzLog::enablePrinter(EPrinterID printer)
@@ -2455,14 +2499,18 @@ namespace ezlogspace
 	void EzLog::init()
 	{
 		ezlogspace::internal::ezlogtimespace::steady_flag_helper::init();
-		ezlogspace::internal::EzLogNonePrinter::init();
-		ezlogspace::internal::EzLogTerminalPrinter::init();
-		ezlogspace::internal::EzLogFilePrinter::init();
 		ezlogspace::internal::EzLogPrinterManager::init();
 		ezlogspace::internal::EzLogCore::init();
 	}
 	void EzLog::initForThisThread() { ezlogspace::internal::EzLogCore::initForEveryThread(); }
 #endif
+
+	void EzLog::destroy()
+	{
+		delete ezlogspace::internal::ezlogtimespace::steady_flag_helper::getInstance();
+		delete ezlogspace::internal::EzLogPrinterManager::getInstance();
+		delete ezlogspace::internal::EzLogCore::getInstance();
+	}
 
 #if EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL == TRUE
 	void EzLog::setLogLevel(ELevel level)

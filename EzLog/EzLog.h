@@ -112,6 +112,7 @@ namespace ezlogspace
 	constexpr static size_t EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE = ((size_t)1 << 8U);			 // single thread cache queue max length
 	constexpr static size_t EZLOG_MERGE_QUEUE_RATE = ((size_t)24);	// (global cache queue max length)/(single thread cache queue max length)
 	constexpr static size_t EZLOG_DELIVER_QUEUE_SIZE = ((size_t)4);	// deliver queue max length
+	constexpr static size_t EZLOG_IO_STRING_DATA_POOL_SIZE = ((size_t)4);	// io string data max szie
 	constexpr static size_t EZLOG_GARBAGE_COLLECTION_QUEUE_RATE = ((size_t)4);	// (garbage collection queue length)/(global cache queue max length)
 	constexpr static size_t EZLOG_SINGLE_LOG_RESERVE_LEN = 50;	// reserve for every log except for level,tid ...
 	constexpr static size_t EZLOG_THREAD_ID_MAX_LEN = SIZE_MAX;	// tid max len,SIZE_MAX means no limit,in popular system limit is EZLOG_UINT64_MAX_CHAR_LEN
@@ -129,6 +130,7 @@ namespace ezlogspace
         ezlogspace::internal::EzLogTerminalPrinter                             )
 
 	using printer_ids_t = uint8_t;
+	static_assert(std::is_unsigned<printer_ids_t>::value, "fatal error,id must be unsigned");
 	enum EPrinterID : printer_ids_t
 	{
 		PRINTER_ID_NONE = 0,				
@@ -1643,9 +1645,15 @@ namespace ezlogspace
 namespace ezlogspace
 {
 	class EzLogStream;
-
+	namespace internal
+	{
+		class EzLogPrinterManager;
+		class EzLogPrinterData;
+	}
 	EZLOG_ABSTRACT class EzLogPrinter : public EzLogObject
 	{
+		friend class internal::EzLogPrinterManager;
+
 	public:
 		using EzLogBean = ezlogspace::internal::EzLogBean;
 		using EzLogTime = ezlogspace::internal::EzLogBean::EzLogTime;
@@ -1655,7 +1663,7 @@ namespace ezlogspace
 			size_t logs_size;
 			EzLogTime logTime;
 		};
-		using MetaData = const struct buf_t*;
+		using MetaData = const buf_t*;
 
 	public:
 		// accept logs with size,logs and NOT end with '\0'
@@ -1666,7 +1674,11 @@ namespace ezlogspace
 
 		virtual EPrinterID getUniqueID()const=0;
 
-		virtual ~EzLogPrinter() = default;
+		EzLogPrinter();
+		virtual ~EzLogPrinter();
+
+	private:
+		internal::EzLogPrinterData* mData;
 	};
 
 #ifdef H__________________________________________________EzLog__________________________________________________
@@ -1691,10 +1703,11 @@ namespace ezlogspace
 		static void init(){};
 		static void initForThisThread(){};
 #else
-		static void init();//This function is NOT thread safe.Make sure call ONLY ONCE before first log.
-		static void initForThisThread();//Must be called for every thread.Make sure call ONLY ONCE before first log of thread.
-		//before call initForThisThread(),must call init() first
+		static void init();					// This function is NOT thread safe.Make sure call ONLY ONCE before first log.
+		static void initForThisThread();	// Must be called for every thread.Make sure call ONLY ONCE before first log of thread.
+		// before call initForThisThread(),must call init() first
 #endif
+		static void destroy();	  // call internal
 
 #if EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL == TRUE
 
