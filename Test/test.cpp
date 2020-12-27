@@ -2,6 +2,7 @@
 #include "inc.h"
 #include "SimpleTimer.h"
 #include "func.h"
+#include "mthread.h"
 #if USE_CATCH_TEST == TRUE
 
 #include "../depend_libs/catch/catch.hpp"
@@ -16,7 +17,7 @@ using namespace ezlogspace;
 //#define terminal_many_thread_log_test_____________________
 //#define file_many_thread_log_test_____________________
 //#define file_time_many_thread_log_test_with_sleep_____________________
-#define file_time_multi_thread_simulation__log_test_____________________
+//#define file_time_multi_thread_simulation__log_test_____________________
 //#define file_single_thread_benchmark_test_____________________
 //#define file_multi_thread_benchmark_test_____________________
 //#define file_single_thread_operator_test_____________________
@@ -27,7 +28,7 @@ using namespace ezlogspace;
 
 //__________________________________________________long time test__________________________________________________//
 //#define terminal_multi_thread_poll__log_test_____________________
-//#define file_multi_thread_memory_leak_stress_test_____________________
+#define file_multi_thread_memory_leak_stress_test_____________________
 
 
 
@@ -46,6 +47,12 @@ using namespace ezlogspace;
 //#define static_log_level_multi_thread_benchmark_test_____________________
 //#define dynamic_log_level_multi_thread_benchmark_test_____________________
 
+struct ThreadIniter
+{
+	void operator()() { EzLog::initForThisThread(); }
+};
+using TestThread = MThread<ThreadIniter>;
+
 #ifdef single_thread_log_test_____________________
 
 TEST_CASE("single_thread_log_test_____________________")
@@ -62,7 +69,7 @@ TEST_CASE("multi_thread_log_test_____________________")
 {
 	EZCOUT << "multi_thread_log_test_____________________";
 
-	thread([]() -> void {
+	TestThread([]() -> void {
 		this_thread::sleep_for(std::chrono::milliseconds(10));
 		EZLOGD << "scccc";
 	}).join();
@@ -79,7 +86,7 @@ TEST_CASE("file_multi_thread_log_test_____________________")
 	EZCOUT << "file_multi_thread_log_test_____________________";
 	EZLOGI << "adcc";
 
-	thread([]() -> void {
+	TestThread([]() -> void {
 		this_thread::sleep_for(std::chrono::milliseconds(10));
 		EZLOGD << "scccc";
 	}).join();
@@ -99,10 +106,10 @@ TEST_CASE("terminal_many_thread_cout_test_____________________")
 	static condition_variable cv;
 
 	cout << "terminal_many_thread_cout_test_____________________" << endl;
-	std::vector<std::thread> vec;
+	std::vector<TestThread> vec;
 	for (int i = 1; i < 100; i++)
 	{
-		vec.emplace_back(thread([&](int index) -> void {
+		vec.emplace_back(TestThread([&](int index) -> void {
 			int a = 0;
 			shared_lock<shared_mutex> slck(smtx);
 			cva.wait(slck, []() -> bool { return begin; });
@@ -138,10 +145,10 @@ TEST_CASE("terminal_many_thread_log_test_____________________")
 	static condition_variable_any cva;
 	static shared_mutex smtx;
 
-	std::vector<std::thread> vec;
+	std::vector<TestThread> vec;
 	for (int i = 1; i < 100; i++)
 	{
-		vec.emplace_back(thread([&](int index) -> void {
+		vec.emplace_back(TestThread([&](int index) -> void {
 			int a = 0;
 			shared_lock<shared_mutex> slck(smtx);
 			cva.wait(slck, []() -> bool { return begin; });
@@ -175,10 +182,10 @@ TEST_CASE("file_many_thread_log_test_____________________")
 	static condition_variable_any cva;
 	static shared_mutex smtx;
 
-	std::vector<std::thread> vec;
+	std::vector<TestThread> vec;
 	for (int i = 1; i < 100; i++)
 	{
-		vec.emplace_back(thread([&](int index) -> void {
+		vec.emplace_back(TestThread([&](int index) -> void {
 			int a = 0;
 			shared_lock<shared_mutex> slck(smtx);
 			cva.wait(slck, []() -> bool { return begin; });
@@ -212,11 +219,11 @@ TEST_CASE("file_time_many_thread_log_test_with_sleep_____________________")
 	static condition_variable_any cva;
 	static shared_mutex smtx;
 
-	std::vector<std::thread> vec;
+	std::vector<TestThread> vec;
 
 	for (int i = 1; i < 20; i++)
 	{
-		vec.emplace_back(thread([&](int index) -> void {
+		vec.emplace_back(TestThread([&](int index) -> void {
 			int a = 0;
 			shared_lock<shared_mutex> slck(smtx);
 			cva.wait(slck, []() -> bool { return begin; });
@@ -299,11 +306,11 @@ TEST_CASE("file_multi_thread_benchmark_test_____________________")
 	static condition_variable_any cva;
 	static shared_mutex smtx;
 
-	std::vector<std::thread> vec;
+	std::vector<TestThread> vec;
 
 	for (int i = 1; i <= threads; i++)
 	{
-		vec.emplace_back(thread([&](int index) -> void {
+		vec.emplace_back(TestThread([&](int index) -> void {
 			shared_lock<shared_mutex> slck(smtx);
 			cva.wait(slck, []() -> bool { return begin; });
 
@@ -351,11 +358,11 @@ TEST_CASE("file_multi_thread_close_print_benchmark_test_____________________")
 	static condition_variable_any cva;
 	static shared_mutex smtx;
 
-	std::vector<std::thread> vec;
+	std::vector<TestThread> vec;
 
 	for (int i = 1; i <= threads; i++)
 	{
-		vec.emplace_back(thread([&](int index) -> void {
+		vec.emplace_back(TestThread([&](int index) -> void {
 			shared_lock<shared_mutex> slck(smtx);
 			cva.wait(slck, []() -> bool { return begin; });
 
@@ -405,11 +412,11 @@ TEST_CASE("file_single_thread_operator_test_____________________")
 	static condition_variable_any cva;
 	static shared_mutex smtx;
 
-	std::vector<std::thread> vec;
+	std::vector<TestThread> vec;
 
 	for (int i = 1; i <= threads; i++)
 	{
-		vec.emplace_back(thread([&](int index) -> void {
+		vec.emplace_back(TestThread([&](int index) -> void {
 			shared_lock<shared_mutex> slck(smtx);
 			cva.wait(slck, []() -> bool { return begin; });
 
@@ -458,11 +465,11 @@ TEST_CASE("terminal_multi_thread_poll__log_test_____________________")
 	static condition_variable_any cva;
 	static shared_mutex smtx;
 
-	std::vector<std::thread> vec;
+	std::vector<TestThread> vec;
 
 	for (int i = 1; i <= threads; i++)
 	{
-		vec.emplace_back(thread([&](int index) -> void {
+		vec.emplace_back(TestThread([&](int index) -> void {
 			shared_lock<shared_mutex> slck(smtx);
 			cva.wait(slck, []() -> bool { return begin; });
 
@@ -493,12 +500,12 @@ TEST_CASE("terminal_multi_thread_poll__log_test_____________________")
 
 TEST_CASE("file_multi_thread_memory_leak_stress_test_____________________")
 {
-	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_TERMINAL);
+	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_FILE);
 	EZCOUT << "file_multi_thread_memory_leak_stress_test_____________________";
 #ifdef NDEBUG
 	constexpr int32_t threads = 20000;
 #else
-	constexpr int32_t threads = 500;
+	constexpr int32_t threads = 2000;
 #endif
 	constexpr uint64_t loops = 50;
 
@@ -510,7 +517,7 @@ TEST_CASE("file_multi_thread_memory_leak_stress_test_____________________")
 
 	for (int i = 1; i <= threads; i++)
 	{
-		thread([=, &tt]() -> void {
+		TestThread([=, &tt]() -> void {
 			for (uint64_t j = 0; j < loops; j++)
 			{
 				EZLOGD << "loop= " << loops << " j= " << j;
@@ -693,11 +700,11 @@ TEST_CASE("file_multi_thread_print_level_test_____________________")
 	static condition_variable_any cva;
 	static shared_mutex smtx;
 
-	std::vector<std::thread> vec;
+	std::vector<TestThread> vec;
 
 	for (int i = ELevel::ALWAYS; i <= ELevel::VERBOSE; i++)
 	{
-		vec.emplace_back(thread([&](int index) -> void {
+		vec.emplace_back(TestThread([&](int index) -> void {
 			shared_lock<shared_mutex> slck(smtx);
 			cva.wait(slck, []() -> bool { return begin; });
 
@@ -821,11 +828,11 @@ TEST_CASE("static_log_level_multi_thread_benchmark_test_____________________")
 	static condition_variable_any cva;
 	static shared_mutex smtx;
 
-	std::vector<std::thread> vec;
+	std::vector<TestThread> vec;
 
 	for (int i = 1; i <= threads; i++)
 	{
-		vec.emplace_back(thread(
+		vec.emplace_back(TestThread(
 			[&](int index) -> void {
 				shared_lock<shared_mutex> slck(smtx);
 				cva.wait(slck, []() -> bool { return begin; });
@@ -870,12 +877,12 @@ TEST_CASE("dynamic_log_level_multi_thread_benchmark_test_____________________")
 	static condition_variable_any cva;
 	static shared_mutex smtx;
 
-	std::vector<std::thread> vec;
+	std::vector<TestThread> vec;
 
 	EzLog::setLogLevel(ELevel::INFO);
 	for (int i = 1; i <= threads; i++)
 	{
-		vec.emplace_back(thread(
+		vec.emplace_back(TestThread(
 			[&](int index) -> void {
 				shared_lock<shared_mutex> slck(smtx);
 				cva.wait(slck, []() -> bool { return begin; });
