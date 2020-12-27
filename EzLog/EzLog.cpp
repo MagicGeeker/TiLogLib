@@ -116,7 +116,7 @@ namespace ezloghelperspace
 			FILE* p = fopen(s, "a");
 			if (p)
 			{
-				char s2[] = "\n\n\ncreate new internal log";
+				char s2[] = "\n\n\ncreate new internal log\n";
 				fwrite(s2, sizeof(char), EZLOG_STRING_LEN_OF_CHAR_ARRAY(s2), p);
 			}
 			return p;
@@ -264,6 +264,13 @@ namespace ezlogspace
 			thread_local static const String* s_tid = GetNewThreadIDString();
 			return s_tid;
 		}
+
+		String GetStringByStdThreadID(std::thread::id val)
+		{
+			StringStream os;
+			os << val;
+			return os.str();
+		}
 	}	 // namespace internal
 
 	namespace internal
@@ -293,14 +300,14 @@ namespace ezlogspace
 			}
 
 			// init with capacity n
-			inline EzLogString(EPlaceHolder, positive_size_type n)
+			inline EzLogString(EPlaceHolder, positive_size_t n)
 			{
 				do_malloc(0, n);
 				ensureZero();
 			}
 
 			// init with n count of c
-			inline EzLogString(positive_size_type n, char c)
+			inline EzLogString(positive_size_t n, char c)
 			{
 				do_malloc(n, n);
 				memset(m_front, c, n);
@@ -474,7 +481,7 @@ namespace ezlogspace
 			inline EzLogString& append(const String& str)
 			{
 				size_t length = str.length();
-				request_new_size((size_type)length);
+				request_new_size(length);
 				return append_unsafe(str);
 			}
 
@@ -650,7 +657,7 @@ namespace ezlogspace
 			}
 
 			// force set size
-			inline void resetsize(size_type sz)
+			inline void resetsize(size_t sz)
 			{
 				DEBUG_ASSERT(sz <= capacity());
 				m_end = m_front + sz;
@@ -733,7 +740,7 @@ namespace ezlogspace
 				size_t pre_cap = capacity();
 				if (pre_cap >= ensure_cap) { return; }
 				size_t new_cap = ((ensure_cap * RESERVE_RATE_DEFAULT) >> RESERVE_RATE_BASE);
-				// you must ensure (ensure_cap * RESERVE_RATE_DEFAULT) will not over-flow size_type max
+				// you must ensure (ensure_cap * RESERVE_RATE_DEFAULT) will not over-flow size_t max
 				DEBUG_ASSERT2(new_cap > ensure_cap, new_cap, ensure_cap);
 				do_realloc(new_cap);
 			}
@@ -1149,12 +1156,16 @@ namespace ezlogspace
 			std::condition_variable thrdExistCV;
 
 			explicit ThreadStru(size_t cacheSize)
-				: qCache(), spinMtx(), noUseStream(EzLogStreamHelper::get_no_used_stream()), tid(GetThreadIDString()),
-				  thrdExistMtx(), thrdExistCV(){};
+				: qCache(), spinMtx(), noUseStream(EzLogStreamHelper::get_no_used_stream()), tid(GetThreadIDString()), thrdExistMtx(),
+				  thrdExistCV()
+			{
+				DEBUG_PRINT(EZLOG_LEVEL_INFO, "ThreadStru new tid %p %s\n", tid, tid->c_str());
+			};
 
 			~ThreadStru()
 			{
 				EzLogStreamHelper::free_no_used_stream(noUseStream);
+				DEBUG_PRINT(EZLOG_LEVEL_INFO, "ThreadStru delete tid %p %s\n", tid, tid->c_str());
 				delete (tid);
 				// DEBUG_RUN(tid = NULL);
 			}
@@ -1294,11 +1305,18 @@ namespace ezlogspace
 				if (runAtOnce) { start(); }
 			}
 			~EzLogTaskQueueBasic() { wait_stop(); }
-			void start() { loopThread = std::thread(&EzLogTaskQueueBasic::loop, this); }
+			void start()
+			{
+				loopThread = std::thread(&EzLogTaskQueueBasic::loop, this);
+				String s = GetStringByStdThreadID(loopThread.get_id());
+				DEBUG_PRINT(INFO, "start loop, thread id %s\n", s.c_str());
+			}
 
 			void wait_stop()
 			{
 				stop();
+				String s = GetStringByStdThreadID(loopThread.get_id());
+				DEBUG_PRINT(INFO, "end loop, thread id %s\n", s.c_str());
 				if (loopThread.joinable()) { loopThread.join(); }
 			}
 
