@@ -1497,6 +1497,9 @@ namespace ezlogspace
 			atomic_uint64_t mPrintedLogs{ 0 };
 
 			ThreadStruQueue mThreadStruQueue;
+			//only all of logs of dead thread have been delivered,
+			//the ThreadStru will be move to toDelQueue
+			atomic_uint32_t mWaitDeliverDeadThreads{0};
 
 			struct PollStru : public CoreThrdStruBase
 			{
@@ -2272,6 +2275,7 @@ namespace ezlogspace
 				mDeliver.mCV.wait(lk_deliver, [this]() -> bool { return (mDeliver.mDoing && mInited); });
 
 				DeliverLogs();
+				mWaitDeliverDeadThreads = 0;
 				mDeliver.mDeliverCache.swap(mDeliver.mNeedGCCache);
 				mDeliver.mDeliverCache.clear();
 				NotifyGC();
@@ -2365,9 +2369,14 @@ namespace ezlogspace
 					lk_merge.unlock();
 					mMerge.mCV.notify_one();
 				}
+
+				if (mWaitDeliverDeadThreads != 0) { continue; }
+
+				// try lock when first run or deliver complete recently
 				unique_lock<decltype(mThreadStruQueue)> lk_queue(mThreadStruQueue, std::try_to_lock);
 				if (!lk_queue.owns_lock()) { continue; }
 
+				uint32_t deadThreads =0;
 				for (auto it = mThreadStruQueue.availQueue.begin(); it != mThreadStruQueue.availQueue.end();)
 				{
 					ThreadStru& threadStru = *(*it);
@@ -2376,6 +2385,7 @@ namespace ezlogspace
 					if (mtx.try_lock())
 					{
 						mtx.unlock();
+						++deadThreads;
 						DEBUG_PRINT(EZLOG_LEVEL_VERBOSE, "thrd %s exit.move to waitMergeQueue\n", threadStru.tid->c_str());
 						mThreadStruQueue.waitMergeQueue.emplace_back(*it);
 						it = mThreadStruQueue.availQueue.erase(it);
@@ -2383,6 +2393,12 @@ namespace ezlogspace
 					{
 						++it;
 					}
+				}
+
+				if (deadThreads !=0)
+				{
+					mWaitDeliverDeadThreads += deadThreads;
+					continue;
 				}
 
 				for (auto it = mThreadStruQueue.waitMergeQueue.begin(); it != mThreadStruQueue.waitMergeQueue.end();)
