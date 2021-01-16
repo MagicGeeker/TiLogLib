@@ -2370,12 +2370,30 @@ namespace ezlogspace
 					mMerge.mCV.notify_one();
 				}
 
+				// if mWaitDeliverDeadThreads!=0, skip this loop
 				if (mWaitDeliverDeadThreads != 0) { continue; }
 
 				// try lock when first run or deliver complete recently
 				unique_lock<decltype(mThreadStruQueue)> lk_queue(mThreadStruQueue, std::try_to_lock);
 				if (!lk_queue.owns_lock()) { continue; }
 
+				// if mWaitDeliverDeadThreads==0,move all of the merged and delivered ThreadStrus to toDelQueue
+				for (auto it = mThreadStruQueue.waitMergeQueue.begin(); it != mThreadStruQueue.waitMergeQueue.end();)
+				{
+					ThreadStru& threadStru = *(*it);
+					// no need to lock threadStru.spinMtx here because the thread of threadStru has died
+					if (threadStru.qCache.empty())
+					{
+						DEBUG_PRINT(EZLOG_LEVEL_VERBOSE, "thrd %s exit and has been merged.move to toDelQueue\n", threadStru.tid->c_str());
+						mThreadStruQueue.toDelQueue.emplace_back(*it);
+						it = mThreadStruQueue.waitMergeQueue.erase(it);
+					} else
+					{
+						++it;
+					}
+				}
+
+				// find all of the dead thread and move these to waitMergeQueue
 				uint32_t deadThreads =0;
 				for (auto it = mThreadStruQueue.availQueue.begin(); it != mThreadStruQueue.availQueue.end();)
 				{
@@ -2394,30 +2412,9 @@ namespace ezlogspace
 						++it;
 					}
 				}
-
-				if (deadThreads !=0)
-				{
-					mWaitDeliverDeadThreads += deadThreads;
-					continue;
-				}
-
-				for (auto it = mThreadStruQueue.waitMergeQueue.begin(); it != mThreadStruQueue.waitMergeQueue.end();)
-				{
-					ThreadStru& threadStru = *(*it);
-					// no need to lock threadStru.spinMtx here because the thread of threadStru has died
-					if (threadStru.qCache.empty())
-					{
-						DEBUG_PRINT(
-							EZLOG_LEVEL_VERBOSE, "thrd %s exit and has been merged.move to toDelQueue\n", threadStru.tid->c_str());
-						mThreadStruQueue.toDelQueue.emplace_back(*it);
-						it = mThreadStruQueue.waitMergeQueue.erase(it);
-					} else
-					{
-						++it;
-					}
-				}
-
-				lk_queue.unlock();
+				mWaitDeliverDeadThreads += deadThreads;
+				// if deadThreads!=0,next poll loop will skip move dead ThreadStrus to toDelQueue to
+				// ensure these dead ThreadStrus will not be gc.
 
 			} while (PollThreadSleep());
 
