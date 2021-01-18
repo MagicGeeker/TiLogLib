@@ -1,6 +1,15 @@
 #include "inc.h"
 #include "func.h"
 
+bool InitFunc()
+{
+	static bool r = []() {
+		ezlogspace::EzLog::init();
+		ezlogspace::EzLog::initForThisThread();
+		return true;
+	}();
+	return r;
+}
 bool s_main_init = InitFunc();
 
 #if USE_CATCH_TEST == FALSE
@@ -27,7 +36,12 @@ using namespace ezlogspace;
 #define FUN_MAIN  2
 int main()
 {
-#if FUN_MAIN==0
+#if FUN_MAIN==-1
+	(EZLOGV<<"main.cpp")("abc %d %lld",123,456LL);
+	(EZLOGV<<"666")("abc %0999999999999999d %",123,456LL);
+	(EZLOGV<<"6601000010000000000100000000100000000000230100000000000230002300000000236")
+		("abc 0100000000010000000000101000000000002300000000000023002301000000000002300023 %d %lld",123,456LL);
+#elif FUN_MAIN==0
 	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_FILE);
 	EZCOUT << "file_time_multi_thread_simulation__log_test_____________________";
 
@@ -116,10 +130,10 @@ int main()
 		th.join();
 	}
 	uint64_t us = s1m.GetMicrosecondsUpToNOW();
-	EZLOGI << (1000 * threads * loops / us) << " logs per millisecond\n";
-	EZLOGI << 1.0 * us / (loops * threads) << " us per log\n";
 	EZCOUT << (1000 * threads * loops / us) << " logs per millisecond\n";
 	EZCOUT << 1.0 * us / (loops * threads) << " us per log\n";
+	EZLOGI << (1000 * threads * loops / us) << " logs per millisecond\n";
+	EZLOGI << 1.0 * us / (loops * threads) << " us per log\n";
 #endif
 }
 

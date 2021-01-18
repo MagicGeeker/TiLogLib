@@ -47,6 +47,8 @@ using namespace ezlogspace;
 //#define static_log_level_multi_thread_benchmark_test_____________________
 //#define dynamic_log_level_multi_thread_benchmark_test_____________________
 
+bool s_test_init = InitFunc();
+
 struct ThreadIniter
 {
 	void operator()() { EzLog::initForThisThread(); }

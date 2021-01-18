@@ -4,15 +4,7 @@
 #include "inc.h"
 #include "SimpleTimer.h"
 
-static bool InitFunc()
-{
-	static bool r = []() {
-		ezlogspace::EzLog::init();
-		ezlogspace::EzLog::initForThisThread();
-		return true;
-	}();
-	return r;
-}
+bool InitFunc();
 
 
 template <size_t N = 50>
