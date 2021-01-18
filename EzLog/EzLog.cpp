@@ -13,9 +13,20 @@
 #include <future>
 #include <atomic>
 #include <utility>
+
 #include "EzLog.h"
+#ifdef EZLOG_OS_WIN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#elif defined(EZLOG_OS_POSIX)
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
 #define __________________________________________________EzLogCircularQueue__________________________________________________
+#define __________________________________________________EzLogFile__________________________________________________
 #define __________________________________________________EzLogTerminalPrinter__________________________________________________
 #define __________________________________________________EzLogFilePrinter__________________________________________________
 #define __________________________________________________PrinterRegister__________________________________________________
@@ -1084,6 +1095,36 @@ namespace ezlogspace
 
 #endif
 
+#ifdef EZLOG_OS_WIN
+		static const auto nullfd = INVALID_HANDLE_VALUE;
+#elif defined(EZLOG_OS_POSIX)
+		static constexpr int nullfd = -1;
+#else
+		static constexpr FILE* nullfd = nullptr;
+#endif
+		struct fctx_t : EzLogObject
+		{
+			EzLogStringView fpath{};
+			std::remove_const<decltype(nullfd)>::type fd{ nullfd };
+		} fctx;
+
+		class EzLogFile : public EzLogObject
+		{
+		public:
+			inline EzLogFile() = default;
+			inline ~EzLogFile();
+			inline EzLogFile(EzLogStringView fpath, const char mode[3]);
+			inline operator bool() const;
+			inline bool valid() const;
+			inline bool open(EzLogStringView fpath, const char mode[3]);
+			inline void close();
+			inline void sync();
+			inline int64_t write(EzLogStringView buf);
+
+		private:
+			fctx_t fctx;
+		};
+
 		class EzLogNonePrinter : public EzLogPrinter
 		{
 		public:
@@ -1134,7 +1175,7 @@ namespace ezlogspace
 
 		protected:
 			const String folderPath = EZLOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER;
-			std::FILE* m_pFile = nullptr;
+			EzLogFile mFile;
 			uint32_t index = 1;
 		};
 
@@ -1632,6 +1673,85 @@ namespace ezlogspace
 {
 	namespace internal
 	{
+#ifdef __________________________________________________EzLogFile__________________________________________________
+#ifdef EZLOG_OS_WIN
+		inline static HANDLE func_open(const char* path, const char mode[3])
+		{
+			HANDLE fd = nullfd;
+			switch (mode[0])
+			{
+			case 'r':
+				fd = CreateFileA(path, GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, 0);
+				break;
+			case 'a':
+				fd = CreateFileA(path, FILE_APPEND_DATA, 0, nullptr, OPEN_ALWAYS, 0, 0);
+				break;
+			case 'w':
+				fd = CreateFileA(path, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, 0);
+				break;
+			}
+			return fd;
+		}
+		inline static void func_close(HANDLE fd) { CloseHandle(fd); }
+		inline static void func_sync(HANDLE fd) { FlushFileBuffers(fd); }
+		inline static int64_t func_write(HANDLE fd, EzLogStringView buf)
+		{
+			DWORD r = 0;
+			WriteFile(fd, buf.data(), (DWORD)buf.size(), &r, 0);
+			return (int64_t)r;
+		}
+#elif defined(EZLOG_OS_POSIX)
+		inline static int func_open(const char* path, const char mode[3])
+		{
+			int fd = nullfd;
+			switch (mode[0])
+			{
+			case 'r':
+				fd = ::open(path, O_RDONLY);
+				break;
+			case 'a':
+				fd = ::open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+				break;
+			case 'w':
+				fd = ::open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+				break;
+			}
+			return fd;
+		}
+		inline static void func_close(int fd) { ::close(fd); }
+		inline static void func_sync(int fd) { ::fsync(fd); }
+		inline static int64_t func_write(int fd, EzLogStringView buf) { return ::write(fd, buf.data(), buf.size()); }
+#else
+		inline static FILE* func_open(const char* path, const char mode[3]) { return fopen(path, mode); }
+		inline static void func_close(FILE* fd) { fclose(fd); }
+		inline static void func_sync(FILE* fd) { fflush(fd); }
+		inline static int64_t func_write(FILE* fd, EzLogStringView buf) { return (int64_t)fwrite(buf.data(), buf.size(), 1, fd); }
+#endif
+
+		inline EzLogFile::~EzLogFile() { close(); }
+		inline EzLogFile::EzLogFile(EzLogStringView fpath, const char mode[3]) { open(fpath, mode); }
+		inline EzLogFile::operator bool() const { return fctx.fd != nullfd; }
+		inline bool EzLogFile::valid() const { return fctx.fd != nullfd; }
+		inline bool EzLogFile::open(EzLogStringView fpath, const char mode[3])
+		{
+			this->close();
+			fctx.fpath = fpath;
+			return (fctx.fd = func_open(fpath.data(), mode)) != nullfd;
+		}
+		inline void EzLogFile::close()
+		{
+			if (valid())
+			{
+				func_close(fctx.fd);
+				fctx.fd = nullfd;
+			}
+		}
+		inline void EzLogFile::sync() { valid() ? func_sync(fctx.fd) : void(0); }
+		inline int64_t EzLogFile::write(EzLogStringView buf) { return valid() ? func_write(fctx.fd, buf) : -1; }
+
+#endif
+
+
 		EZLOG_SINGLE_INSTANCE_DECLARE_OUTER(EzLogNonePrinter)
 
 #ifdef __________________________________________________EzLogTerminalPrinter__________________________________________________
@@ -1663,11 +1783,7 @@ namespace ezlogspace
 
 		EzLogFilePrinter::EzLogFilePrinter() {}
 
-		EzLogFilePrinter::~EzLogFilePrinter()
-		{
-			fflush(m_pFile);
-			if (m_pFile != nullptr) { fclose(m_pFile); }
-		}
+		EzLogFilePrinter::~EzLogFilePrinter() {}
 
 		void EzLogFilePrinter::onAcceptLogs(MetaData metaData)
 		{
@@ -1675,18 +1791,17 @@ namespace ezlogspace
 			{
 				s_printedLogsLength += singleFilePrintedLogSize;
 				singleFilePrintedLogSize = 0;
-				fflush(m_pFile);
-				if (m_pFile != nullptr)
+				if (mFile)
 				{
-					fclose(m_pFile);
+					mFile.close();
 					DEBUG_PRINT(EZLOG_LEVEL_VERBOSE, "sync and write index=%u \n", (unsigned)index);
 				}
 
 				CreateNewFile(metaData);
 			}
-			if (m_pFile != nullptr)
+			if (mFile)
 			{
-				fwrite(metaData->logs, sizeof(char), metaData->logs_size, m_pFile);
+				mFile.write(EzLogStringView{metaData->logs,metaData->logs_size});
 				singleFilePrintedLogSize += metaData->logs_size;
 			}
 		}
@@ -1707,12 +1822,12 @@ namespace ezlogspace
 			if (s.empty()) { s = folderPath + indexs; }
 
 			index++;
-			m_pFile = fopen(s.data(), "w");
+			mFile.open({ s.data(), s.size() }, "a");
 		}
 
 		void EzLogFilePrinter::sync()
 		{
-			fflush(m_pFile);
+			mFile.sync();
 		}
 		EPrinterID EzLogFilePrinter::getUniqueID() const
 		{

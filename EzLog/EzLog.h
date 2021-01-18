@@ -24,7 +24,51 @@
 #include "../depend_libs/miloyip/dtoa_milo.h"
 #include "../depend_libs/ftoa-fast/ftoa.h"
 // clang-format off
+
+/**************************************************MACRO FOR INTERNAL**************************************************/
+#ifndef EZLOG_OS_MACRO
+#define EZLOG_OS_MACRO
+
+#if defined(_M_X64) || defined(__amd64__) || defined(__IA64__)
+#define EZLOG_OS_64BIT
+#endif
+
+#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
+#define EZLOG_OS_WIN  //define something for Windows (32-bit and 64-bit, this part is common)
+#ifdef _WIN64
+#define EZLOG_OS_WIN64 //define something for Windows (64-bit only)
+#else
+#define EZLOG_OS_WIN32 //define something for Windows (32-bit only)
+#endif
+#elif __APPLE__
+#include <TargetConditionals.h>
+    #if TARGET_IPHONE_SIMULATOR
+         // iOS Simulator
+    #elif TARGET_OS_IPHONE
+        // iOS device
+    #elif TARGET_OS_MAC
+        // Other kinds of Mac OS
+    #else
+    #   error "Unknown Apple platform"
+    #endif
+#elif __linux__
+    #define EZLOG_OS_LINUX // linux
+#elif __unix__ // all unices not caught above
+    #define EZLOG_OS_UNIX // Unix
+#elif defined(_POSIX_VERSION)
+    // POSIX
+#else
+	// other platform
+#endif
+
+#if defined(TARGET_OS_MAC) || defined(__linux__) || defined(__unix__) || defined(_POSIX_VERSION)
+#define EZLOG_OS_POSIX // POSIX
+#endif
+
+#endif
+
 #define  EZLOG_INTERNAL_REGISTER_PRINTERS_MACRO(...)  __VA_ARGS__
+
 /**************************************************MACRO FOR USER**************************************************/
 #define EZLOG_AUTO_INIT 0
 
@@ -156,9 +200,7 @@ namespace ezlogspace
 
 namespace ezlogspace
 {
-#if defined(_M_X64) || defined(__amd64__)
-#define EZLOG_X64
-#endif
+
 
 #define EZLOG_ABSTRACT
 #define EZLOG_INTERFACE
@@ -1168,13 +1210,9 @@ namespace ezlogspace
 				MAX
 			};
 
-#ifdef EZLOG_X64
 			// suppose 1.0e7 logs per second(limit),1year=365.2422days,
 			// need 58455 years to UINT64_MAX,it is enough
 			using steady_flag_t = uint64_t;
-#else
-			using steady_flag_t = uint32_t;
-#endif
 			static_assert(
 				EZLOG_MAX_LOG_NUM <= std::numeric_limits<steady_flag_t>::max(), "Fatal error,max++ is equal to min,it will be not steady!");
 
