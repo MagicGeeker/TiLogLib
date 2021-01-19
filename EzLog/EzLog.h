@@ -90,14 +90,25 @@
 #define EZLOG_CPP20_FEATURE(...)
 #endif
 
+
+
 #define  EZLOG_INTERNAL_REGISTER_PRINTERS_MACRO(...)  __VA_ARGS__
 
+#define EZLOG_INTERNAL_STD_STEADY_CLOCK 1
+#define EZLOG_INTERNAL_STD_SYSTEM_CLOCK 2
+
+#define EZLOG_INTERNAL_LEVEL_CLOSE 2
+#define EZLOG_INTERNAL_LEVEL_ALWAYS 3
+#define EZLOG_INTERNAL_LEVEL_FATAL 4
+#define EZLOG_INTERNAL_LEVEL_ERROR 5
+#define EZLOG_INTERNAL_LEVEL_WARN 6
+#define EZLOG_INTERNAL_LEVEL_INFO 7
+#define EZLOG_INTERNAL_LEVEL_DEBUG 8
+#define EZLOG_INTERNAL_LEVEL_VERBOSE 9
 /**************************************************MACRO FOR USER**************************************************/
 #define EZLOG_AUTO_INIT 0
 
-#define EZLOG_STD_STEADY_CLOCK 1
-#define EZLOG_STD_SYSTEM_CLOCK 2
-#define EZLOG_TIME_IMPL_TYPE EZLOG_STD_STEADY_CLOCK
+#define EZLOG_TIME_IMPL_TYPE EZLOG_INTERNAL_STD_STEADY_CLOCK
 #define EZLOG_WITH_MILLISECONDS TRUE
 
 #define EZLOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER "a:/"
@@ -108,16 +119,7 @@
 #define EZLOG_FREE_FUNCTION(ptr) free(ptr)
 
 #define EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL FALSE
-#define EZLOG_STATIC_LOG__LEVEL 9	 // set the static log level,dynamic log level will always <= static log level
-
-#define EZLOG_LEVEL_CLOSE 2
-#define EZLOG_LEVEL_ALWAYS 3
-#define EZLOG_LEVEL_FATAL 4
-#define EZLOG_LEVEL_ERROR 5
-#define EZLOG_LEVEL_WARN 6
-#define EZLOG_LEVEL_INFO 7
-#define EZLOG_LEVEL_DEBUG 8
-#define EZLOG_LEVEL_VERBOSE 9
+#define EZLOG_STATIC_LOG__LEVEL EZLOG_INTERNAL_LEVEL_VERBOSE	 // set the static log level,dynamic log level will always <= static log level
 
 /**************************************************user-defined data structure**************************************************/
 namespace ezlogspace
@@ -1265,9 +1267,9 @@ namespace ezlogspace
 		public:
 			using SystemLock = std::chrono::system_clock;
 			using TimePoint = std::chrono::system_clock::time_point;
-#if EZLOG_TIME_IMPL_TYPE == EZLOG_STD_STEADY_CLOCK
+#if EZLOG_TIME_IMPL_TYPE == EZLOG_INTERNAL_STD_STEADY_CLOCK
 			using EzLogTime = ezlogspace::internal::ezlogtimespace::IEzLogTime<ezlogtimespace::SteadyClockImpl>;
-#elif EZLOG_TIME_IMPL_TYPE == EZLOG_STD_SYSTEM_CLOCK
+#elif EZLOG_TIME_IMPL_TYPE == EZLOG_INTERNAL_STD_SYSTEM_CLOCK
 			using EzLogTime = ezlogspace::internal::ezlogtimespace::IEzLogTime<ezlogtimespace::SystemClockImpl>;
 #endif
 			static_assert(std::is_trivially_copy_assignable<EzLogTime>::value, "EzLogBean will be realloc so must be trivally-assignable");
@@ -1422,23 +1424,6 @@ namespace ezlogspace
 	{
 		struct EzLogStreamHelper;
 	}
-
-	// clang-format off
-
-#define EZLOG_INTERNAL_GET_LEVEL(lv)                                                                                                       \
-	[&]() {                                                                                                                                \
-		static_assert((sizeof(__FILE__) - 1) <= UINT16_MAX, "fatal error,file path is too long");                                          \
-		static_assert(__LINE__ <= UINT16_MAX, "fatal error,file line too big");                                                            \
-		DEBUG_ASSERT((lv) >= ezlogspace::ELevel::MIN);                                                                                     \
-		DEBUG_ASSERT((lv) <= ezlogspace::ELevel::MAX);                                                                                     \
-		return (lv);                                                                                                                       \
-	}()
-
-#define EZLOG_INTERNAL_CREATE_EZLOG_STREAM(lv)                                                                                             \
-	EzLogCreateNewEzLogStream<(sizeof(__FILE__) - 1), __LINE__>(__FILE__, EZLOG_INTERNAL_GET_LEVEL(lv))
-
-	// clang-format on
-
 
 #ifdef H__________________________________________________EzLogStream__________________________________________________
 
@@ -1660,8 +1645,6 @@ namespace ezlogspace
 
 	}	 // namespace internal
 
-
-#define EZLOG_INTERNAL_CREATE_EZLOG_NONE_STREAM() EzLogCreateNewEzLogNoneStream(EZLOG_INTERNAL_GET_LEVEL(EZLOG_LEVEL_DEBUG))
 	class EzLogNoneStream
 	{
 	public:
@@ -1753,61 +1736,74 @@ namespace ezlogspace
 }	 // namespace ezlogspace
 
 
+// clang-format off
+
+#define EZLOG_INTERNAL_GET_LEVEL(lv)                                                                                                       \
+	[&]() {                                                                                                                                \
+		static_assert((sizeof(__FILE__) - 1) <= UINT16_MAX, "fatal error,file path is too long");                                          \
+		static_assert(__LINE__ <= UINT16_MAX, "fatal error,file line too big");                                                            \
+		DEBUG_ASSERT((lv) >= ezlogspace::ELevel::MIN);                                                                                     \
+		DEBUG_ASSERT((lv) <= ezlogspace::ELevel::MAX);                                                                                     \
+		return (lv);                                                                                                                       \
+	}()
+
+#define EZLOG_INTERNAL_CREATE_EZLOG_STREAM(lv)                                                                                             \
+	EzLogCreateNewEzLogStream<(sizeof(__FILE__) - 1), __LINE__>(__FILE__, EZLOG_INTERNAL_GET_LEVEL(lv))
+
+#define EZLOG_INTERNAL_CREATE_EZLOG_NONE_STREAM()                                                                                           \
+	EzLogCreateNewEzLogNoneStream(EZLOG_INTERNAL_GET_LEVEL(EZLOG_INTERNAL_LEVEL_DEBUG))
+// clang-format on
+
 //------------------------------------------define micro for user------------------------------------------//
-#define EZLOG_CSTR(str)                                                                                                                    \
-	[]() {                                                                                                                                 \
-		static_assert(!std::is_pointer<decltype(str)>::value, "must be a c-style array");                                                  \
-		return ezlogspace::internal::EPlaceHolder{};                                                                                \
-	}(),                                                                                                                                   \
-		str, sizeof(str) - 1
 
 #define EZCOUT std::cout
+#define EZCERR std::cerr
+#define EZCLOG std::clog
 
-#if EZLOG_STATIC_LOG__LEVEL >= EZLOG_LEVEL_ALWAYS
-#define EZLOG EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_ALWAYS)
+#if EZLOG_STATIC_LOG__LEVEL >= EZLOG_INTERNAL_LEVEL_ALWAYS
+#define EZLOGA EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_INTERNAL_LEVEL_ALWAYS)
 #else
-#define EZLOG EZLOG_INTERNAL_CREATE_EZLOG_NONE_STREAM()
+#define EZLOGA EZLOG_INTERNAL_CREATE_EZLOG_NONE_STREAM()
 #endif
 
-#if EZLOG_STATIC_LOG__LEVEL >= EZLOG_LEVEL_FATAL
-#define EZLOGF EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_FATAL)
+#if EZLOG_STATIC_LOG__LEVEL >= EZLOG_INTERNAL_LEVEL_FATAL
+#define EZLOGF EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_INTERNAL_LEVEL_FATAL)
 #else
 #define EZLOGF EZLOG_INTERNAL_CREATE_EZLOG_NONE_STREAM()
 #endif
 
-#if EZLOG_STATIC_LOG__LEVEL >= EZLOG_LEVEL_ERROR
-#define EZLOGE EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_ERROR)
+#if EZLOG_STATIC_LOG__LEVEL >= EZLOG_INTERNAL_LEVEL_ERROR
+#define EZLOGE EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_INTERNAL_LEVEL_ERROR)
 #else
 #define EZLOGE EZLOG_INTERNAL_CREATE_EZLOG_NONE_STREAM()
 #endif
 
-#if EZLOG_STATIC_LOG__LEVEL >= EZLOG_LEVEL_WARN
-#define EZLOGW EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_WARN)
+#if EZLOG_STATIC_LOG__LEVEL >= EZLOG_INTERNAL_LEVEL_WARN
+#define EZLOGW EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_INTERNAL_LEVEL_WARN)
 #else
 #define EZLOGW EZLOG_INTERNAL_CREATE_EZLOG_NONE_STREAM()
 #endif
 
-#if EZLOG_STATIC_LOG__LEVEL >= EZLOG_LEVEL_INFO
-#define EZLOGI EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_INFO)
+#if EZLOG_STATIC_LOG__LEVEL >= EZLOG_INTERNAL_LEVEL_INFO
+#define EZLOGI EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_INTERNAL_LEVEL_INFO)
 #else
 #define EZLOGI EZLOG_INTERNAL_CREATE_EZLOG_NONE_STREAM()
 #endif
 
-#if EZLOG_STATIC_LOG__LEVEL >= EZLOG_LEVEL_DEBUG
-#define EZLOGD EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_DEBUG)
+#if EZLOG_STATIC_LOG__LEVEL >= EZLOG_INTERNAL_LEVEL_DEBUG
+#define EZLOGD EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_INTERNAL_LEVEL_DEBUG)
 #else
 #define EZLOGD EZLOG_INTERNAL_CREATE_EZLOG_NONE_STREAM()
 #endif
 
-#if EZLOG_STATIC_LOG__LEVEL >= EZLOG_LEVEL_VERBOSE
-#define EZLOGV EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_LEVEL_VERBOSE)
+#if EZLOG_STATIC_LOG__LEVEL >= EZLOG_INTERNAL_LEVEL_VERBOSE
+#define EZLOGV EZLOG_INTERNAL_CREATE_EZLOG_STREAM(EZLOG_INTERNAL_LEVEL_VERBOSE)
 #else
 #define EZLOGV EZLOG_INTERNAL_CREATE_EZLOG_NONE_STREAM()
 #endif
 
 // not recommend,use EZCOUT to EZLOGV for better performance
-#define EZLOG_LV(lv) EZLOG_INTERNAL_CREATE_EZLOG_STREAM(lv)
-#define EZLOGS(lv,printers) EZLOG_INTERNAL_CREATE_EZLOG_STREAM_WITH_PRINTERS(lv,printers)
+#define EZLOG(lv) EZLOG_INTERNAL_CREATE_EZLOG_STREAM(lv)
 //------------------------------------------end define micro for user------------------------------------------//
 
 

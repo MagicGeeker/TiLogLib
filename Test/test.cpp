@@ -425,15 +425,8 @@ TEST_CASE("file_single_thread_operator_test_____________________")
 			for (uint64_t j = 0; j < loops; j++)
 			{
 				EZLOGD("index= %d, j= %lld",index,(long long int)j);
-				EZLOGD(EZLOG_CSTR("hello,world"));
 				EZLOGD("666");
 				EZLOGD("$$ %%D test %%D");
-
-//				Compile error
-//				char s0[]="dsda";
-//				char *p=s0;
-//				EZLOGD(EZLOG_CSTR(p));
-
 			}
 		}, i));
 	}
@@ -712,7 +705,7 @@ TEST_CASE("file_multi_thread_print_level_test_____________________")
 
 			for (uint64_t j = 1; j <= loops; j++)
 			{
-				EZLOG_LV(index) << "index= " << index << " j= " << j;
+				EZLOG(index) << "index= " << index << " j= " << j;
 				if (index == ELevel::ALWAYS && (j * 8) % loops == 0)
 				{
 					uint64_t v = j * 8 / loops;	   // 1-8
@@ -734,7 +727,7 @@ TEST_CASE("file_multi_thread_print_level_test_____________________")
 	EzLog::setLogLevel(ezlogspace::ELevel::VERBOSE);
 	EZCOUT << (1000.0 * EzLog::getPrintedLogs() / us) << " logs per millisecond\n";
 	EZCOUT << 1.0 * us / (EzLog::getPrintedLogs()) << " us per log\n";
-	EZLOG_LV(ezlogspace::ELevel::VERBOSE) << "Complete!\n";
+	EZLOG(ezlogspace::ELevel::VERBOSE) << "Complete!\n";
 }
 
 #endif
@@ -764,11 +757,11 @@ TEST_CASE("file_static_log_test_____________________")
 #ifdef special_log_test_____________________
 TEST_CASE("special_log_test_____________________")
 {
-	static_assert(EZLOG_STATIC_LOG__LEVEL == EZLOG_LEVEL_WARN, "set warn to begin test");
+	static_assert(EZLOG_STATIC_LOG__LEVEL == EZLOG_INTERNAL_LEVEL_WARN, "set warn to begin test");
 	EZCOUT << "special_log_test_____________________";
 	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_TERMINAL);
 	{
-		auto ezlogcout = EZCOUT;
+		auto& ezlogcout = EZCOUT;
 		ezlogcout << "ezlogcout test__";
 	}
 	{
@@ -813,7 +806,7 @@ TEST_CASE("special_log_test_____________________")
 #ifdef static_log_level_multi_thread_benchmark_test_____________________
 TEST_CASE("static_log_level_multi_thread_benchmark_test_____________________")
 {
-	static_assert(EZLOG_STATIC_LOG__LEVEL == EZLOG_LEVEL_WARN, "set warn to begin test");
+	static_assert(EZLOG_STATIC_LOG__LEVEL == EZLOG_INTERNAL_LEVEL_WARN, "set warn to begin test");
 	static_assert(!EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL, "disable it to test");
 
 	EZLOGI << "static_log_level_multi_thread_benchmark_test_____________________";
@@ -891,7 +884,7 @@ TEST_CASE("dynamic_log_level_multi_thread_benchmark_test_____________________")
 
 				for (uint64_t j = 0; j < loops; j++)
 				{
-					EZLOG_LV(ELevel::DEBUG) << "index= " << index << " j= " << j;
+					EZLOG(ELevel::DEBUG) << "index= " << index << " j= " << j;
 				}
 			},
 			i));
