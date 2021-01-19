@@ -706,6 +706,8 @@ namespace ezlogspace
 			inline EzLogStringExtend& append(const String& str) { return append(str.data(), (size_type)str.size()); }
 			inline EzLogStringExtend& append(const EzLogStringExtend& str) { return append(str.data(), str.size()); }
 			inline EzLogStringExtend& append(unsigned char x) { return append_s(sizeof(unsigned char), x); }
+			inline EzLogStringExtend& append(signed char x) { return append_s(sizeof(unsigned char), x); }
+			inline EzLogStringExtend& append(char x) { return append_s(sizeof(unsigned char), x); }
 			inline EzLogStringExtend& append(uint64_t x) { return append_s(EZLOG_UINT64_MAX_CHAR_LEN, x); }
 			inline EzLogStringExtend& append(int64_t x) { return append_s(EZLOG_INT64_MAX_CHAR_LEN, x); }
 			inline EzLogStringExtend& append(uint32_t x) { return append_s(EZLOG_UINT32_MAX_CHAR_LEN, x); }
@@ -718,6 +720,8 @@ namespace ezlogspace
 			// length without '\0'
 			inline EzLogStringExtend& append_unsafe(const char* cstr, size_type L) { return memcpy(pEnd(), cstr, L), inc_size_s(L); }
 			inline EzLogStringExtend& append_unsafe(unsigned char c) { return *pEnd() = c, inc_size_s(1); }
+			inline EzLogStringExtend& append_unsafe(signed char c) { return *pEnd() = c, inc_size_s(1); }
+			inline EzLogStringExtend& append_unsafe(char c) { return *pEnd() = c, inc_size_s(1); }
 			inline EzLogStringExtend& append_unsafe(uint64_t x) { return inc_size_s(u64toa_sse2(x, pEnd())); }
 			inline EzLogStringExtend& append_unsafe(int64_t x) { return inc_size_s(i64toa_sse2(x, pEnd())); }
 			inline EzLogStringExtend& append_unsafe(uint32_t x) { return inc_size_s(u32toa_sse2(x, pEnd())); }
@@ -1461,19 +1465,10 @@ namespace ezlogspace
 			ext()->level = (char)ELogLevelFlag::INVALID;
 		}
 		// move constructor
-		inline EzLogStream(EzLogStream&& rhs) noexcept : StringType(std::move(rhs))
-		{
-			rhs.bindToNoUseStream();
-		}
+		inline EzLogStream(EzLogStream&& rhs) noexcept : StringType(std::move(rhs)) { rhs.bindToNoUseStream(); }
 		// make a empty stream
-		inline explicit EzLogStream(EzLogNoneStream&& rhs) noexcept : StringType(EPlaceHolder{})
-		{
-			bindToNoUseStream();
-		}
-		inline explicit EzLogStream(EPlaceHolder) noexcept : StringType(EPlaceHolder{})
-		{
-			bindToNoUseStream();
-		}
+		inline EzLogStream(const EzLogNoneStream& rhs) noexcept : StringType(EPlaceHolder{}) { bindToNoUseStream(); }
+		inline explicit EzLogStream(EPlaceHolder) noexcept : StringType(EPlaceHolder{}) { bindToNoUseStream(); }
 
 		// make a valid stream
 		inline EzLogStream(uint32_t lv, const char* file, uint16_t fileLen, uint16_t line) : StringType(EPlaceHolder{})
