@@ -595,6 +595,7 @@ namespace internal {
 	RAPIDJSON_DIAG_PUSH
 		RAPIDJSON_DIAG_OFF(effc++)
 	RAPIDJSON_DIAG_OFF(array-bounds) // some gcc versions generate wrong warnings https://gcc.gnu.org/bugzilla/show_bug.cgi?id=59124
+	RAPIDJSON_DIAG_OFF(stringop-overflow)	   // char s[25];dtoa(54231.0e6,s); warning
 #endif
 
 	inline void GrisuRound(char* buffer, int len, uint64_t delta, uint64_t rest, uint64_t ten_kappa, uint64_t wp_w) {
