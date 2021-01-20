@@ -179,7 +179,7 @@ namespace ezloghelperspace
 			size_t len = strftime(dst, EZLOG_CTIME_MAX_LEN, "%Y-%m-%d  %H:%M:%S", tmd); //24B
 			// len without zero '\0'
 			if (len == 0) { break; }
-#if EZLOG_WITH_MILLISECONDS == TRUE
+#if EZLOG_IS_WITH_MILLISECONDS == TRUE
 			auto since_epoch = nowTime.time_since_epoch();
 			std::chrono::seconds s = std::chrono::duration_cast<std::chrono::seconds>(since_epoch);
 			since_epoch -= s;
@@ -219,9 +219,11 @@ namespace ezloghelperspace
 		char* ss = (char*)src;
 		switch (size)
 		{
+#if EZLOG_IS_64BIT_OS
 		case 16:
 			*(uint64_t*)dd = *(uint64_t*)ss;
 			dd += 8, ss += 8;
+#endif
 		case 8:
 			*(uint64_t*)dd = *(uint64_t*)ss;
 			break;
@@ -262,7 +264,7 @@ namespace ezlogspace
 		{
 			StringStream os;
 			os << (std::this_thread::get_id());
-			String id = " "+os.str()+" ";
+			String id = "/"+os.str()+" ";
 			DEBUG_PRINT(EZLOG_INTERNAL_LEVEL_INFO, "GetNewThreadIDString, tid %s ,cap %llu\n", id.c_str(), (long long unsigned)id.capacity());
 			if_constexpr(EZLOG_THREAD_ID_MAX_LEN != SIZE_MAX)
 			{
@@ -1309,7 +1311,7 @@ namespace ezlogspace
 					auto& v = *it;
 					for (EzLogBean* pBean : v)
 					{
-						EzLogStream::DestroyPushedEzLogBean(pBean);
+						DestroyPushedEzLogBean(pBean);
 					}
 				}
 				clear();
@@ -1781,7 +1783,11 @@ namespace ezlogspace
 #ifdef __________________________________________________EzLogFilePrinter__________________________________________________
 		EZLOG_SINGLE_INSTANCE_DECLARE_OUTER(EzLogFilePrinter)
 
-		EzLogFilePrinter::EzLogFilePrinter() {}
+		EzLogFilePrinter::EzLogFilePrinter()
+		{
+			DEBUG_ASSERT(!folderPath.empty());
+			DEBUG_ASSERT(folderPath.back() == '/');
+		}
 
 		EzLogFilePrinter::~EzLogFilePrinter() {}
 
@@ -1953,7 +1959,7 @@ namespace ezlogspace
 	{
 #ifdef __________________________________________________EzLogCore__________________________________________________
 		EZLOG_SINGLE_INSTANCE_DECLARE_OUTER(EzLogCore)
-#if EZLOG_AUTO_INIT
+#if EZLOG_IS_AUTO_INIT
 		thread_local ThreadStru* EzLogCore::s_pThreadLocalStru = EzLogCore::getRInstance().InitForEveryThread();
 #else
 		thread_local ThreadStru* EzLogCore::s_pThreadLocalStru = nullptr;
@@ -2623,7 +2629,7 @@ namespace ezlogspace
 		EzLogCore::clearPrintedLogs();
 	}
 
-#if !EZLOG_AUTO_INIT
+#if !EZLOG_IS_AUTO_INIT
 	void EzLog::init()
 	{
 		ezlogspace::internal::ezlogtimespace::steady_flag_helper::init();
@@ -2640,7 +2646,7 @@ namespace ezlogspace
 		delete ezlogspace::internal::EzLogCore::getInstance();
 	}
 
-#if EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL == TRUE
+#if EZLOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL == TRUE
 	void EzLog::setLogLevel(ELevel level)
 	{
 		EzLogPrinterManager::setLogLevel(level);

@@ -35,7 +35,7 @@
 #define EZLOG_OS_MACRO
 
 #if defined(_M_X64) || defined(__amd64__) || defined(__IA64__)
-#define EZLOG_OS_64BIT TRUE
+#define EZLOG_IS_64BIT_OS TRUE
 #endif
 
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
@@ -106,19 +106,20 @@
 #define EZLOG_INTERNAL_LEVEL_DEBUG 8
 #define EZLOG_INTERNAL_LEVEL_VERBOSE 9
 /**************************************************MACRO FOR USER**************************************************/
-#define EZLOG_AUTO_INIT 0
+#define EZLOG_IS_AUTO_INIT FALSE  // TRUE or FALSE,if false must call ezlogspace::EzLog::init() once before use
 
-#define EZLOG_TIME_IMPL_TYPE EZLOG_INTERNAL_STD_STEADY_CLOCK
-#define EZLOG_WITH_MILLISECONDS TRUE
+#define EZLOG_TIME_IMPL_TYPE EZLOG_INTERNAL_STD_STEADY_CLOCK //choose what clock to use
+#define EZLOG_IS_WITH_MILLISECONDS TRUE  // TRUE or FALSE,if false no ms info in timestamp
 
-#define EZLOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER "a:/"
+#define EZLOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER "a:/" // define the defeult file printer ouput path,must a ANSI string and end with /
 
+//define global memory manage functions
 #define EZLOG_MALLOC_FUNCTION(size) malloc(size)
 #define EZLOG_CALLOC_FUNCTION(num_elements, size_of_element) calloc(num_elements, size_of_element)
 #define EZLOG_REALLOC_FUNCTION(ptr, new_size) realloc(ptr, new_size)
 #define EZLOG_FREE_FUNCTION(ptr) free(ptr)
 
-#define EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL FALSE
+#define EZLOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL FALSE //TRUE or FALSE,if false EzLog::setLogLevel no effect
 #define EZLOG_STATIC_LOG__LEVEL EZLOG_INTERNAL_LEVEL_VERBOSE	 // set the static log level,dynamic log level will always <= static log level
 
 /**************************************************user-defined data structure**************************************************/
@@ -156,7 +157,7 @@ namespace ezlogspace
 
 	using OptimisticMutex = SpinMutex<>;
 
-	using size_type = std::conditional<EZLOG_OS_64BIT, size_t, uint32_t>::type;	   // internal string max capacity type
+	using size_type = std::conditional<EZLOG_IS_64BIT_OS, size_t, uint32_t>::type;	   // internal string max capacity type
 }
 /**************************************************ENUMS AND CONSTEXPRS FOR USER**************************************************/
 namespace ezlogspace
@@ -327,7 +328,7 @@ namespace ezlogspace
 	};                                                                                                                                     \
 	inline static CLASS_NAME& getRInstance() { return *getInstance(); };
 
-#if EZLOG_AUTO_INIT
+#if EZLOG_IS_AUTO_INIT
 #define EZLOG_SINGLE_INSTANCE_DECLARE_OUTER(CLASS_NAME)
 #define EZLOG_SINGLE_INSTANCE_DECLARE(CLASS_NAME, ...)                                                                                     \
 	EZLOG_AUTO_SINGLE_INSTANCE_DECLARE(CLASS_NAME)                                                                                         \
@@ -1171,7 +1172,7 @@ namespace ezlogspace
 				inline IEzLogTime(EPlaceHolder)
 				{
 					impl = TimeImplType::now();
-#ifdef EZLOG_WITH_MILLISECONDS
+#ifdef EZLOG_IS_WITH_MILLISECONDS
 					cast_to_ms();
 #else
 					cast_to_sec();
@@ -1386,7 +1387,7 @@ namespace ezlogspace
 
 		static void clearPrintedLogs();
 
-#if EZLOG_AUTO_INIT
+#if EZLOG_IS_AUTO_INIT
 		static void init(){};
 		static void initForThisThread(){};
 #else
@@ -1396,7 +1397,7 @@ namespace ezlogspace
 #endif
 		static void destroy();	  // call internal
 
-#if EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL == TRUE
+#if EZLOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL == TRUE
 
 		static void setLogLevel(ELevel level);
 
@@ -1425,11 +1426,28 @@ namespace ezlogspace
 		struct EzLogStreamHelper;
 	}
 
+	namespace internal
+	{
+		template <typename T>
+		struct ConvertToChar
+		{
+		};
+#define ConvertToCharMacro(T)                                                                                                              \
+	template <>                                                                                                                            \
+	struct ConvertToChar<T>                                                                                                                \
+	{                                                                                                                                      \
+		static constexpr bool value = true;                                                                                                \
+	};
+		ConvertToCharMacro(char) ConvertToCharMacro(const char) ConvertToCharMacro(signed char) ConvertToCharMacro(const signed char)
+			ConvertToCharMacro(const unsigned char) ConvertToCharMacro(unsigned char)
+#undef ConvertToCharMacro
+	}	 // namespace internal
+
 #ifdef H__________________________________________________EzLogStream__________________________________________________
 
 #define EZLOG_INTERNAL_STRING_TYPE                                                                                                         \
 	ezlogspace::internal::EzLogStringExtend<ezlogspace::internal::EzLogBean, ezlogspace::internal::EzLogStreamHelper>
-	class EzLogStream : public EZLOG_INTERNAL_STRING_TYPE
+	class EzLogStream : protected EZLOG_INTERNAL_STRING_TYPE
 	{
 		friend class EZLOG_INTERNAL_STRING_TYPE;
 		friend struct ezlogspace::internal::EzLogStreamHelper;
@@ -1473,10 +1491,6 @@ namespace ezlogspace
 			bean.level = ezlogspace::LOG_PREFIX[lv];
 		}
 
-		inline static void DestroyPushedEzLogBean(EzLogBean* p)
-		{
-			EzLogBean::DestroyInstance(p);
-		}
 
 		inline ~EzLogStream()
 		{
@@ -1503,7 +1517,70 @@ namespace ezlogspace
 				break;
 			}
 		}
+	public:
+		inline EzLogStream& operator()(const char* fmt, ...)
+		{
+			size_type size_pre = this->size();
+			va_list args;
+			va_start(args, fmt);
+			int sz = vsnprintf(NULL, 0, fmt, args);
+			if (sz > 0)
+			{
+				this->reserve(size_pre + sz);
+				vsprintf(this->pEnd(), fmt, args);
+				this->resetsize(size_pre + sz);
+			} else
+			{
+				this->ext()->level = (char)ELogLevelFlag::E;
+				this->append("get err format:\n", 16);
+				this->append(fmt);
+			}
+			va_end(args);
 
+			return *this;
+		}
+
+		template <typename Args0>
+		inline EzLogStream& appends(Args0&& args0)
+		{
+			return StringType::append(std::forward<Args0>(args0)), *this;
+		}
+		template <typename Args0, typename... Args>
+		inline EzLogStream& appends(Args0&& args0, Args&&... args)
+		{
+			return append(std::forward<Args0>(args0)), appends(std::forward<Args>(args)...), *this;
+		}
+
+	public:
+		inline EzLogStream& operator<<(bool b) { return (b ? append("true", 4) : append("false", 5)), *this; }
+		inline EzLogStream& operator<<(unsigned char c) { return append(c), *this; }
+		inline EzLogStream& operator<<(signed char c) { return append(c), *this; }
+		inline EzLogStream& operator<<(char c) { return append(c), *this; }
+		inline EzLogStream& operator<<(int32_t val) { return append(val), *this; }
+		inline EzLogStream& operator<<(uint32_t val) { return append(val), *this; }
+		inline EzLogStream& operator<<(int64_t val) { return append(val), *this; }
+		inline EzLogStream& operator<<(uint64_t val) { return append(val), *this; }
+		inline EzLogStream& operator<<(float val) { return append(val), *this; }
+		inline EzLogStream& operator<<(double val) { return append(val), *this; }
+		inline EzLogStream& operator<<(std::nullptr_t) { return append("nullptr", 7), *this; }
+		inline EzLogStream& operator<<(const void* ptr) { return append((uintptr_t)ptr), *this; }
+		inline EzLogStream& operator<<(const String& s) { return append(s.data(), s.size()), *this; }
+		EZLOG_CPP17_FEATURE(inline EzLogStream& operator<<(const StringView& s) { return append(s.data(), s.size()), *this; })
+
+		template <
+			typename T, typename = typename std::enable_if<!std::is_array<T>::value>::type,
+			typename = typename std::enable_if<std::is_pointer<T>::value>::type,
+			typename = typename std::enable_if<internal::ConvertToChar<typename std::remove_pointer<T>::type>::value>::type>
+		inline EzLogStream& operator<<(T s)	   // const chartype *
+		{
+			return append(s), *this;
+		}
+
+		template <size_t N>
+		inline EzLogStream& operator<<(const char (&s)[N])
+		{
+			return append(s, N), *this;
+		}
 	private:
 		// force overwrite super destructor,do nothing
 		inline void do_overwrited_super_destructor() {}
@@ -1533,101 +1610,22 @@ namespace ezlogspace
 		}
 
 		// special constructor for s_pNoUsedStream
-		inline EzLogStream(EPlaceHolder, bool) : StringType(EPlaceHolder{},EZLOG_NO_USED_STREAM_LENGTH)
-		{
-			setAsNoUsedStream();
-		}
-
-		inline bool isNoUsedStream()
-		{
-			return ext()->level == (char)ELogLevelFlag::NO_USE;
-		}
-
-		inline void setAsNoUsedStream()
-		{
-			ext()->level = (char)ELogLevelFlag::NO_USE;
-		}
-
-		inline void bindToNoUseStream()
-		{
-			this->pCore = s_pNoUsedStream->pCore;
-		}
-
-	public:
-		inline EzLogStream& operator()(EPlaceHolder, const char* s, size_type length)
-		{
-			this->append(s, length);
-			return *this;
-		}
-
-		inline EzLogStream& operator()(const char* fmt, ...)
-		{
-			size_type size_pre = this->size();
-			va_list args;
-			va_start(args, fmt);
-			int sz = vsnprintf(NULL, 0, fmt, args);
-			if (sz > 0)
-			{
-				this->reserve(size_pre + sz);
-				vsprintf(this->pEnd(), fmt, args);
-				this->resetsize(size_pre + sz);
-			} else
-			{
-				this->ext()->level = (char)ELogLevelFlag::E;
-				this->append("get err format:\n", 16);
-				this->append(fmt);
-			}
-			va_end(args);
-
-			return *this;
-		}
-
-		template <typename T>
-		inline EzLogStream& operator<<(const T* ptr)
-		{
-			*this += ((uintptr_t)ptr);
-			return *this;
-		}
-
-		inline EzLogStream& operator<<(const char* s)
-		{
-			*this += s;
-			return *this;
-		}
-
-		inline EzLogStream& operator<<(char c)
-		{
-			*this += c;
-			return *this;
-		}
-
-		inline EzLogStream& operator<<(unsigned char c)
-		{
-			*this += c;
-			return *this;
-		}
-
-		inline EzLogStream& operator<<(const String& s)
-		{
-			*this += s;
-			return *this;
-		}
-
-		template <typename T, typename = typename std::enable_if<std::is_arithmetic<T>::value, void>::type>
-		inline EzLogStream& operator<<(T val)
-		{
-			*this += val;
-			return *this;
-		}
+		inline EzLogStream(EPlaceHolder, bool) : StringType(EPlaceHolder{}, EZLOG_NO_USED_STREAM_LENGTH) { setAsNoUsedStream(); }
+		inline bool isNoUsedStream() { return ext()->level == (char)ELogLevelFlag::NO_USE; }
+		inline void setAsNoUsedStream() { ext()->level = (char)ELogLevelFlag::NO_USE; }
+		inline void bindToNoUseStream() { this->pCore = s_pNoUsedStream->pCore; }
 
 	private:
 		thread_local static EzLogStream* s_pNoUsedStream;
 	};
 #undef EZLOG_INTERNAL_STRING_TYPE
+
 #endif
 
 	namespace internal
 	{
+		inline static void DestroyPushedEzLogBean(EzLogBean* p) { EzLogBean::DestroyInstance(p); }
+
 		struct EzLogStreamHelper : public EzLogObject
 		{
 			using ObjectType = EzLogStream;
@@ -1652,28 +1650,22 @@ namespace ezlogspace
 
 		inline ~EzLogNoneStream() noexcept = default;
 
-		inline EzLogNoneStream(const EzLogNoneStream& rhs) = delete;
-		inline EzLogNoneStream(EzLogNoneStream&& rhs) noexcept {}
+		inline EzLogNoneStream(const EzLogNoneStream&) = delete;
+		inline EzLogNoneStream(EzLogNoneStream&&) noexcept {}
 
 		template <typename T>
-		inline EzLogNoneStream& operator<<(const T& s) noexcept
+		inline EzLogNoneStream& operator<<(T&&) noexcept
 		{
 			return *this;
 		}
 
-		template <typename T>
-		inline EzLogNoneStream& operator<<(T&& s) noexcept
+		template <typename... Args>
+		inline EzLogNoneStream& appends(Args&&...)
 		{
 			return *this;
 		}
-		inline EzLogNoneStream& operator()(ezlogspace::internal::EPlaceHolder, const char* s, size_type length) noexcept
-		{
-			return *this;
-		}
-		inline EzLogNoneStream& operator()(const char* fmt, ...) noexcept
-		{
-			return *this;
-		}
+
+		inline EzLogNoneStream& operator()(const char* fmt, ...) noexcept { return *this; }
 	};
 }	 // namespace ezlogspace
 
@@ -1727,6 +1719,9 @@ namespace NDBG
 namespace ezlogspace
 {
 	static_assert(sizeof(size_type) <= sizeof(size_t), "fatal err!");
+	static_assert( true || EZLOG_IS_AUTO_INIT , "this micro must be defined");
+	static_assert( true || EZLOG_IS_WITH_MILLISECONDS , "this micro must be defined");
+	static_assert( true || EZLOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL , "this micro must be defined");
 
 	static_assert(EZLOG_POLL_DEFAULT_THREAD_SLEEP_MS > 0, "fatal err!");
 	static_assert(EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE > 0, "fatal err!");

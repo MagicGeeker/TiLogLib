@@ -10,25 +10,26 @@
 using namespace std;
 using namespace ezlogspace;
 //__________________________________________________major test__________________________________________________//
-//#define single_thread_log_test_____________________
-//#define multi_thread_log_test_____________________
-//#define file_multi_thread_log_test_____________________
-//#define terminal_many_thread_cout_test_____________________
-//#define terminal_many_thread_log_test_____________________
-//#define file_many_thread_log_test_____________________
-//#define file_time_many_thread_log_test_with_sleep_____________________
-//#define file_time_multi_thread_simulation__log_test_____________________
-//#define file_single_thread_benchmark_test_____________________
-//#define file_multi_thread_benchmark_test_____________________
-//#define file_single_thread_operator_test_____________________
-//#define terminal_single_thread_long_string_log_test_____________________
-//#define file_static_log_test_____________________
+#define single_thread_log_test_____________________
+#define multi_thread_log_test_____________________
+#define file_multi_thread_log_test_____________________
+#define terminal_many_thread_cout_test_____________________
+#define terminal_many_thread_log_test_____________________
+#define file_many_thread_log_test_____________________
+#define file_time_many_thread_log_test_with_sleep_____________________
+#define file_time_multi_thread_simulation__log_test_____________________
+#define file_single_thread_benchmark_test_____________________
+#define file_multi_thread_benchmark_test_____________________
+#define file_single_thread_operator_test_____________________
+#define terminal_single_thread_long_string_log_test_____________________
+#define file_static_log_test_____________________
+#define terminal_multi_way_log_test_____________________
 
 
 
 //__________________________________________________long time test__________________________________________________//
 //#define terminal_multi_thread_poll__log_test_____________________
-#define file_multi_thread_memory_leak_stress_test_____________________
+//#define file_multi_thread_memory_leak_stress_test_____________________
 
 
 
@@ -343,7 +344,7 @@ TEST_CASE("file_multi_thread_benchmark_test_____________________")
 
 TEST_CASE("file_multi_thread_close_print_benchmark_test_____________________")
 {
-	static_assert(EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL,"fatal error,enable it to begin test");
+	static_assert(EZLOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL,"fatal error,enable it to begin test");
 	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_FILE);
 	EzLog::clearPrintedLogs();
 	EZCOUT << "file_multi_thread_close_print_benchmark_test_____________________";
@@ -679,7 +680,7 @@ TEST_CASE("terminal_single_thread_long_string_log_test_____________________")
 
 TEST_CASE("file_multi_thread_print_level_test_____________________")
 {
-	static_assert(EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL,"fatal error,enable it to begin test");
+	static_assert(EZLOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL,"fatal error,enable it to begin test");
 	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_FILE);
 	EzLog::clearPrintedLogs();
 	EZCOUT << "file_multi_thread_print_level_test_____________________";
@@ -754,6 +755,34 @@ TEST_CASE("file_static_log_test_____________________")
 
 #endif
 
+#ifdef terminal_multi_way_log_test_____________________
+TEST_CASE("terminal_multi_way_log_test_____________________")
+{
+	EZCOUT << "terminal_multi_way_log_test_____________________";
+	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_TERMINAL);
+	EZLOGE << true;
+	EZLOGE << 'e';
+	EZLOGE << 101;
+	EZLOGE << 8295934959567868956LL;
+	EZLOGE << nullptr;
+	EZLOGE << NULL;
+	EZLOGE << "e0";
+	const char* pe1 = "e1";
+	EZLOGE << pe1;
+	EZLOGE("e2");
+	EZLOGE << 54231.0f;
+	EZLOGE << 54231.0e6;
+	EZLOGE << std::string("e3");
+	EZLOGE.appends("e4", "e5");
+	EZLOGV.appends(" e6 ", 'e', 101, " e7 ", 00.123f, " e8 ", 54231.0e6);
+	EZLOGV("%d %s %llf", 888, " e9 ", 0.3556);
+	(EZLOGV << " e10 ")("abc %d %lld", 123, 456LL);
+	(EZLOGV << "666")("abc %0999999999999999d %", 123, 456LL);	  // TODO error?
+	(EZLOGV << "6601000010000000000100000000100000000000230100000000000230002300000000236")(
+		"abc 0100000000010000000000101000000000002300000000000023002301000000000002300023 %d %lld", 123, 456LL);
+}
+#endif
+
 #ifdef special_log_test_____________________
 TEST_CASE("special_log_test_____________________")
 {
@@ -807,7 +836,7 @@ TEST_CASE("special_log_test_____________________")
 TEST_CASE("static_log_level_multi_thread_benchmark_test_____________________")
 {
 	static_assert(EZLOG_STATIC_LOG__LEVEL == EZLOG_INTERNAL_LEVEL_WARN, "set warn to begin test");
-	static_assert(!EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL, "disable it to test");
+	static_assert(!EZLOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL, "disable it to test");
 
 	EZLOGI << "static_log_level_multi_thread_benchmark_test_____________________";
 #ifdef NDEBUG
@@ -857,7 +886,7 @@ TEST_CASE("static_log_level_multi_thread_benchmark_test_____________________")
 #ifdef dynamic_log_level_multi_thread_benchmark_test_____________________
 TEST_CASE("dynamic_log_level_multi_thread_benchmark_test_____________________")
 {
-	static_assert(EZLOG_SUPPORT_DYNAMIC_LOG_LEVEL, "enable it to test");
+	static_assert(EZLOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL, "enable it to test");
 	EZLOGI << "dynamic_log_level_multi_thread_benchmark_test_____________________";
 #ifdef NDEBUG
 	constexpr uint64_t loops = (uint64_t)3e7;
