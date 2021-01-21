@@ -408,10 +408,11 @@ namespace tilogspace
 			inline TiLogString& append_unsafe(int32_t x) { return inc_size_s(i32toa_sse2(x, m_end)); }
 			inline TiLogString& append_unsafe(float x) { return inc_size_s(ftoa(m_end, x, NULL)); }
 			inline TiLogString& append_unsafe(double x) { return inc_size_s((size_t)(rapidjson::internal::dtoa(x, m_end) - m_end)); }
-			// length without '\0'
-			template <size_t length>
-			inline TiLogString& append_smallstr_unsafe(const char (&cstr)[length])
+
+			template <size_t L0>
+			inline TiLogString& append_smallstr_unsafe(const char (&cstr)[L0])
 			{
+				constexpr size_t length = L0 - 1;	 // L0 with '\0'
 				memcpy_small<length>(m_end, cstr);
 				m_end += length;
 				return ensureZero();

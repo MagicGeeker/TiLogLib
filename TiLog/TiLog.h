@@ -1404,10 +1404,10 @@ namespace tilogspace
 			return append(s), *this;
 		}
 
-		template <size_t N>
-		inline TiLogStream& operator<<(const char (&s)[N])
+		template <size_t N, typename Ch, typename = typename std::enable_if<internal::ConvertToChar<Ch>::value>::type>
+		inline TiLogStream& operator<<(Ch (&s)[N])
 		{
-			return append(s, N), *this;
+			return append(s, N - 1), *this;	   // N with '\0'
 		}
 
 	private:
