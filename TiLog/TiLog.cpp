@@ -60,6 +60,14 @@
 	} while (0)
 #endif
 
+#define DEBUG_PRINTA(...) DEBUG_PRINT(TILOG_INTERNAL_LEVEL_ALWAYS, __VA_ARGS__)
+#define DEBUG_PRINTF(...) DEBUG_PRINT(TILOG_INTERNAL_LEVEL_FATAL, __VA_ARGS__)
+#define DEBUG_PRINTE(...) DEBUG_PRINT(TILOG_INTERNAL_LEVEL_ERROR, __VA_ARGS__)
+#define DEBUG_PRINTW(...) DEBUG_PRINT(TILOG_INTERNAL_LEVEL_WARN, __VA_ARGS__)
+#define DEBUG_PRINTI(...) DEBUG_PRINT(TILOG_INTERNAL_LEVEL_INFO, __VA_ARGS__)
+#define DEBUG_PRINTD(...) DEBUG_PRINT(TILOG_INTERNAL_LEVEL_DEBUG, __VA_ARGS__)
+#define DEBUG_PRINTV(...) DEBUG_PRINT(TILOG_INTERNAL_LEVEL_VERBOSE, __VA_ARGS__)
+
 
 
 #define TILOG_SIZE_OF_ARRAY(arr) (sizeof(arr) / sizeof(arr[0]))
@@ -265,7 +273,7 @@ namespace tilogspace
 			StringStream os;
 			os << (std::this_thread::get_id());
 			String id = "/"+os.str()+" ";
-			DEBUG_PRINT(TILOG_INTERNAL_LEVEL_INFO, "GetNewThreadIDString, tid %s ,cap %llu\n", id.c_str(), (long long unsigned)id.capacity());
+			DEBUG_PRINTI("GetNewThreadIDString, tid %s ,cap %llu\n", id.c_str(), (long long unsigned)id.capacity());
 			if_constexpr(TILOG_THREAD_ID_MAX_LEN != SIZE_MAX)
 			{
 				if (id.size() > TILOG_THREAD_ID_MAX_LEN) { id.resize(TILOG_THREAD_ID_MAX_LEN); }
@@ -1203,13 +1211,13 @@ namespace tilogspace
 				: qCache(), spinMtx(), noUseStream(TiLogStreamHelper::get_no_used_stream()), tid(GetThreadIDString()), thrdExistMtx(),
 				  thrdExistCV()
 			{
-				DEBUG_PRINT(TILOG_INTERNAL_LEVEL_INFO, "ThreadStru new tid %p %s\n", tid, tid->c_str());
+				DEBUG_PRINTI("ThreadStru new tid %p %s\n", tid, tid->c_str());
 			};
 
 			~ThreadStru()
 			{
 				TiLogStreamHelper::free_no_used_stream(noUseStream);
-				DEBUG_PRINT(TILOG_INTERNAL_LEVEL_INFO, "ThreadStru delete tid %p %s\n", tid, tid->c_str());
+				DEBUG_PRINTI("ThreadStru delete tid %p %s\n", tid, tid->c_str());
 				delete (tid);
 				// DEBUG_RUN(tid = NULL);
 			}
@@ -1361,7 +1369,7 @@ namespace tilogspace
 			explicit TiLogTaskQueueBasic(bool runAtOnce = true)
 			{
 				stat = RUN;
-				DEBUG_PRINT(INFO, "Create TiLogTaskQueueBasic %p\n", this);
+				DEBUG_PRINTI("Create TiLogTaskQueueBasic %p\n", this);
 				if (runAtOnce) { start(); }
 			}
 			~TiLogTaskQueueBasic() { wait_stop(); }
@@ -1369,15 +1377,15 @@ namespace tilogspace
 			{
 				loopThread = std::thread(&TiLogTaskQueueBasic::loop, this);
 				looptid = GetStringByStdThreadID(loopThread.get_id());
-				DEBUG_PRINT(INFO, "loop %p start loop, thread id %s\n", this, looptid.c_str());
+				DEBUG_PRINTI("loop %p start loop, thread id %s\n", this, looptid.c_str());
 			}
 
 			void wait_stop()
 			{
 				stop();
-				DEBUG_PRINT(INFO, "loop %p wait end loop, thread id %s\n", this, looptid.c_str());
+				DEBUG_PRINTI("loop %p wait end loop, thread id %s\n", this, looptid.c_str());
 				if (loopThread.joinable()) { loopThread.join(); }
-				DEBUG_PRINT(INFO, "loop %p end loop, thread id %s\n", this, looptid.c_str());
+				DEBUG_PRINTI("loop %p end loop, thread id %s\n", this, looptid.c_str());
 			}
 
 			void stop()
@@ -1800,7 +1808,7 @@ namespace tilogspace
 				if (mFile)
 				{
 					mFile.close();
-					DEBUG_PRINT(TILOG_INTERNAL_LEVEL_VERBOSE, "sync and write index=%u \n", (unsigned)index);
+					DEBUG_PRINTV("sync and write index=%u \n", (unsigned)index);
 				}
 
 				CreateNewFile(metaData);
@@ -1905,9 +1913,8 @@ namespace tilogspace
 		{
 			EPrinterID e = printer->getUniqueID();
 			int32_t u = GetIndexFromPUID(e);
-			DEBUG_PRINT(
-				TILOG_INTERNAL_LEVEL_ALWAYS, "addPrinter printer[addr: %p id: %d index: %d] taskqueue[addr %p]\n", printer, (int)e, (int)u,
-				&printer->mData->mTaskQueue);
+			DEBUG_PRINTA(
+				"addPrinter printer[addr: %p id: %d index: %d] taskqueue[addr %p]\n", printer, (int)e, (int)u, &printer->mData->mTaskQueue);
 			DEBUG_ASSERT2(u >= 0, e, u);
 			DEBUG_ASSERT2(u < PRINTER_ID_MAX, e, u);
 			m_printers[u] = printer;
@@ -1917,7 +1924,7 @@ namespace tilogspace
 		{
 			Vector<TiLogPrinter*> printers = TiLogPrinterManager::getCurrentPrinters();
 			if (printers.empty()) { return; }
-			DEBUG_PRINT(TILOG_INTERNAL_LEVEL_INFO, "prepare to push %u bytes\n", (unsigned)spLogs->size());
+			DEBUG_PRINTI("prepare to push %u bytes\n", (unsigned)spLogs->size());
 			for (TiLogPrinter* printer : printers)
 			{
 				printer->mData->pushLogs(std::move(spLogs));
@@ -2014,7 +2021,7 @@ namespace tilogspace
 			DEBUG_ASSERT(s_pThreadLocalStru->tid != nullptr);
 			synchronized(mThreadStruQueue)
 			{
-				DEBUG_PRINT(TILOG_INTERNAL_LEVEL_VERBOSE, "availQueue insert thrd tid= %s\n", s_pThreadLocalStru->tid->c_str());
+				DEBUG_PRINTV("availQueue insert thrd tid= %s\n", s_pThreadLocalStru->tid->c_str());
 				mThreadStruQueue.availQueue.emplace_back(s_pThreadLocalStru);
 			}
 			unique_lock<mutex> lk(s_pThreadLocalStru->thrdExistMtx);
@@ -2027,10 +2034,10 @@ namespace tilogspace
 		// 故用到全局变量需要在此函数前构造
 		void TiLogCore::AtExit()
 		{
-			DEBUG_PRINT(TILOG_INTERNAL_LEVEL_INFO, "exit,wait poll\n");
+			DEBUG_PRINTI("exit,wait poll\n");
 			mPoll.s_pollPeriodus = 1;	   // make poll faster
 
-			DEBUG_PRINT(TILOG_INTERNAL_LEVEL_INFO, "prepare to exit\n");
+			DEBUG_PRINTI("prepare to exit\n");
 			mToExit = true;
 
 			while (mPoll.mExist)
@@ -2043,7 +2050,7 @@ namespace tilogspace
 			{
 				this_thread::yield();
 			}
-			DEBUG_PRINT(TILOG_INTERNAL_LEVEL_INFO, "exit\n");
+			DEBUG_PRINTI("exit\n");
 			TiLog::destroy();
 		}
 
@@ -2096,8 +2103,8 @@ namespace tilogspace
 				};
 
 				size_t qCachePreSize = qCache.size();
-				DEBUG_PRINT(
-					TILOG_INTERNAL_LEVEL_DEBUG, "MergeThreadStruQueueToSet ptid %p , tid %s , qCachePreSize= %u\n", threadStru.tid,
+				DEBUG_PRINTD(
+					"MergeThreadStruQueueToSet ptid %p , tid %s , qCachePreSize= %u\n", threadStru.tid,
 					(threadStru.tid == nullptr ? "" : threadStru.tid->c_str()), (unsigned)qCachePreSize);
 				if (qCachePreSize == 0) { continue; }
 				if (bean.time() < (**qCache.first_sub_queue_begin()).time()) { continue; }
@@ -2148,7 +2155,7 @@ namespace tilogspace
 			auto& v = mMerge.mMergeSortVec;
 			auto& s = mMerge.mThreadStruPriorQueue;
 			v.clear();
-			DEBUG_PRINT(TILOG_INTERNAL_LEVEL_INFO, "Begin of MergeSortForGlobalQueue\n");
+			DEBUG_PRINTI("Begin of MergeSortForGlobalQueue\n");
 			TiLogBean referenceBean;
 			referenceBean.time() = mPoll.s_log_last_time = TiLogTime::now();  //referenceBean's time is the biggest up to now
 
@@ -2156,13 +2163,9 @@ namespace tilogspace
 			synchronized(mThreadStruQueue)
 			{
 				mMerge.mVecPool.resize(mThreadStruQueue.availQueue.size() + mThreadStruQueue.waitMergeQueue.size());
-				DEBUG_PRINT(
-					TILOG_INTERNAL_LEVEL_INFO, "MergeThreadStruQueueToSet availQueue.size()= %u\n",
-					(unsigned)mThreadStruQueue.availQueue.size());
+				DEBUG_PRINTI("MergeThreadStruQueueToSet availQueue.size()= %u\n", (unsigned)mThreadStruQueue.availQueue.size());
 				MergeThreadStruQueueToSet(mThreadStruQueue.availQueue, referenceBean);
-				DEBUG_PRINT(
-					TILOG_INTERNAL_LEVEL_INFO, "MergeThreadStruQueueToSet waitMergeQueue.size()= %u\n",
-					(unsigned)mThreadStruQueue.waitMergeQueue.size());
+				DEBUG_PRINTI("MergeThreadStruQueueToSet waitMergeQueue.size()= %u\n", (unsigned)mThreadStruQueue.waitMergeQueue.size());
 				MergeThreadStruQueueToSet(mThreadStruQueue.waitMergeQueue, referenceBean);
 			}
 
@@ -2189,8 +2192,7 @@ namespace tilogspace
 					mMerge.mMergeCaches.swap(*p);
 				}
 			}
-			DEBUG_PRINT(
-				TILOG_INTERNAL_LEVEL_INFO, "End of MergeSortForGlobalQueue mMergeCaches size= %u\n", (unsigned)mMerge.mMergeCaches.size());
+			DEBUG_PRINTI("End of MergeSortForGlobalQueue mMergeCaches size= %u\n", (unsigned)mMerge.mMergeCaches.size());
 		}
 
 		inline void TiLogCore::SwapMergeCacheAndDeliverCache()
@@ -2238,11 +2240,10 @@ namespace tilogspace
 			auto fileLen = bean.fileLen;
 			auto beanSVSize = bean.str_view().size();
 			using llu = long long unsigned;
-			DEBUG_PRINT(
-				TILOG_INTERNAL_LEVEL_VERBOSE, "preSize %llu, tid[size %llu,addr %p ,val %.6s], timeSVSize %llu, fileLen %llu, beanSVSize %llu\n",
+			DEBUG_PRINTV("preSize %llu, tid[size %llu,addr %p ,val %.6s], timeSVSize %llu, fileLen %llu, beanSVSize %llu\n",
 				(llu)preSize, (llu)tidSize, bean.tid, bean.tid->c_str(), (llu)timeSVSize, (llu)fileLen, (llu)beanSVSize);
 			size_t reserveSize = L3 + preSize + tidSize + timeSVSize + fileLen + beanSVSize + TILOG_PREFIX_RESERVE_LEN_L1;
-			DEBUG_PRINT(TILOG_INTERNAL_LEVEL_VERBOSE, "logs size %llu capacity %llu \n", (llu)logs.size(), (llu)logs.capacity());
+			DEBUG_PRINTV("logs size %llu capacity %llu \n", (llu)logs.size(), (llu)logs.capacity());
 			logs.reserve(reserveSize);
 
 #define _SL(S) TILOG_STRING_LEN_OF_CHAR_ARRAY(S)
@@ -2295,7 +2296,7 @@ namespace tilogspace
 			static_assert(TILOG_GARBAGE_COLLECTION_QUEUE_RATE >= TILOG_DELIVER_QUEUE_SIZE, "fatal error!too small");
 
 			unique_lock<mutex> ulk = GetGCLock();
-			DEBUG_PRINT(TILOG_INTERNAL_LEVEL_INFO, "NotifyGC \n");
+			DEBUG_PRINTI("NotifyGC \n");
 			DEBUG_ASSERT1(mGC.mGCList.empty(), mGC.mGCList.size());
 			for (VecLogCache& c : mDeliver.mNeedGCCache)
 			{
@@ -2349,7 +2350,7 @@ namespace tilogspace
 		{
 			DEBUG_ASSERT(!deliverCache.empty());
 
-			DEBUG_PRINT(TILOG_INTERNAL_LEVEL_INFO, "mergeLogsToOneString,transform deliverCache to string\n");
+			DEBUG_PRINTI("mergeLogsToOneString,transform deliverCache to string\n");
 			for (TiLogBean* pBean : deliverCache)
 			{
 				DEBUG_RUN(TiLogBean::check(pBean));
@@ -2359,7 +2360,7 @@ namespace tilogspace
 				TiLogStringView&& log = AppendToMergeCacheByMetaData(bean);
 			}
 			mPrintedLogs += deliverCache.size();
-			DEBUG_PRINT(TILOG_INTERNAL_LEVEL_INFO, "End of mergeLogsToOneString,string size= %llu\n", (long long unsigned)mDeliver.mIoBean.size());
+			DEBUG_PRINTI("End of mergeLogsToOneString,string size= %llu\n", (long long unsigned)mDeliver.mIoBean.size());
 			TiLogTime firstLogTime = deliverCache[0]->time();
 			mDeliver.mIoBean.mTime = firstLogTime;
 			return firstLogTime;
@@ -2469,7 +2470,7 @@ namespace tilogspace
 				this_thread::sleep_for(chrono::microseconds(mPoll.s_pollPeriodus));
 				if (mToExit)
 				{
-					DEBUG_PRINT(TILOG_INTERNAL_LEVEL_INFO, "poll thrd prepare to exit,try last poll\n");
+					DEBUG_PRINTI("poll thrd prepare to exit,try last poll\n");
 					return false;
 				}
 			}
@@ -2483,7 +2484,7 @@ namespace tilogspace
 			{
 				unique_lock<mutex> lk_merge;
 				bool own_lk = tryLocks(lk_merge, mMerge.mMtx);
-				DEBUG_PRINT(TILOG_INTERNAL_LEVEL_DEBUG, "thrdFuncPoll own lock? %d\n", (int)own_lk);
+				DEBUG_PRINTD("thrdFuncPoll own lock? %d\n", (int)own_lk);
 				if (own_lk)
 				{
 					mMerge.mDoing = true;
@@ -2505,7 +2506,7 @@ namespace tilogspace
 					// no need to lock threadStru.spinMtx here because the thread of threadStru has died
 					if (threadStru.qCache.empty())
 					{
-						DEBUG_PRINT(TILOG_INTERNAL_LEVEL_VERBOSE, "thrd %s exit and has been merged.move to toDelQueue\n", threadStru.tid->c_str());
+						DEBUG_PRINTV("thrd %s exit and has been merged.move to toDelQueue\n", threadStru.tid->c_str());
 						mThreadStruQueue.toDelQueue.emplace_back(*it);
 						it = mThreadStruQueue.waitMergeQueue.erase(it);
 					} else
@@ -2525,7 +2526,7 @@ namespace tilogspace
 					{
 						mtx.unlock();
 						++deadThreads;
-						DEBUG_PRINT(TILOG_INTERNAL_LEVEL_VERBOSE, "thrd %s exit.move to waitMergeQueue\n", threadStru.tid->c_str());
+						DEBUG_PRINTV("thrd %s exit.move to waitMergeQueue\n", threadStru.tid->c_str());
 						mThreadStruQueue.waitMergeQueue.emplace_back(*it);
 						it = mThreadStruQueue.availQueue.erase(it);
 					} else
@@ -2552,7 +2553,7 @@ namespace tilogspace
 			}
 			if (s_pThreadLocalStru == nullptr) { return; }
 			TiLogStreamHelper::free_no_used_stream(s_pThreadLocalStru->noUseStream);
-			DEBUG_PRINT(TILOG_INTERNAL_LEVEL_INFO, "free mem tid: %s\n", s_pThreadLocalStru->tid->c_str());
+			DEBUG_PRINTI("free mem tid: %s\n", s_pThreadLocalStru->tid->c_str());
 			delete (s_pThreadLocalStru->tid);
 			s_pThreadLocalStru->tid = NULL;
 			synchronized(mThreadStruQueue)
@@ -2567,7 +2568,7 @@ namespace tilogspace
 
 		inline void TiLogCore::AtInternalThreadExit(CoreThrdStruBase* thrd, CoreThrdStruBase* nextExitThrd)
 		{
-			DEBUG_PRINT(TILOG_INTERNAL_LEVEL_INFO, "thrd %s exit.\n", thrd->GetName());
+			DEBUG_PRINTI("thrd %s exit.\n", thrd->GetName());
 			thrd->mExist = false;
 			mExistThreads--;
 			CoreThrdStru* t = dynamic_cast<CoreThrdStru*>(nextExitThrd);
