@@ -10,9 +10,9 @@
 #include <type_traits>
 #include <iostream>
 
-#include<string>
+#include <string>
 #if __cplusplus >= 201703L
-#include<string_view>
+#include <string_view>
 #endif
 
 #include <list>
@@ -188,7 +188,7 @@ namespace tilogspace
 
 	constexpr static size_t TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE= (8U << 20U);	// log size per file,it is not accurate,especially TILOG_GLOBAL_BUF_SIZE is bigger
 }	 // namespace tilogspace
-// clang-format on
+
 
 namespace tilogspace
 {
@@ -201,7 +201,7 @@ namespace tilogspace
 	static_assert(std::is_unsigned<printer_ids_t>::value, "fatal error,id must be unsigned");
 	enum EPrinterID : printer_ids_t
 	{
-		PRINTER_ID_NONE = 0,				
+		PRINTER_ID_NONE = 0,
 		PRINTER_ID_BEGIN = 1,				// begin from 1
 		PRINTER_TILOG_FILE = 1 << 0,		// internal file printer
 		PRINTER_TILOG_TERMINAL = 1 << 1,	// internal terminal printer
@@ -209,14 +209,14 @@ namespace tilogspace
 											// user-defined printers,must be power of 2
 		PRINTER_ID_MAX						// end with PRINTER_ID_MAX
 	};
-	constexpr static printer_ids_t DEFAULT_ENABLED_PRINTERS = PRINTER_TILOG_FILE;								  // main printer
+	constexpr static printer_ids_t DEFAULT_ENABLED_PRINTERS = PRINTER_TILOG_FILE;	 // main printer
 
 }	 // namespace tilogspace
 
 
 
 
-
+// clang-format on
 /**************************************************tilogspace codes**************************************************/
 #define H__________________________________________________TiLog__________________________________________________
 #define H__________________________________________________TiLogBean__________________________________________________
@@ -243,35 +243,20 @@ namespace tilogspace
 	class TiLogMemoryManager
 	{
 	public:
-		inline static void* operator new(size_t sz)
-		{
-			return TILOG_MALLOC_FUNCTION(sz);
-		}
+		inline static void* operator new(size_t sz) { return TILOG_MALLOC_FUNCTION(sz); }
 
-		inline static void operator delete(void* p)
-		{
-			TILOG_FREE_FUNCTION(p);
-		}
+		inline static void operator delete(void* p) { TILOG_FREE_FUNCTION(p); }
 
-		inline static void* ezmalloc(size_t sz)
-		{
-			return TILOG_MALLOC_FUNCTION(sz);
-		}
+		inline static void* ezmalloc(size_t sz) { return TILOG_MALLOC_FUNCTION(sz); }
 
 		inline static void* ezcalloc(size_t num_elements, size_t size_of_element)
 		{
 			return TILOG_CALLOC_FUNCTION(num_elements, size_of_element);
 		}
 
-		inline static void* ezrealloc(void* p, size_t sz)
-		{
-			return TILOG_REALLOC_FUNCTION(p, sz);
-		}
+		inline static void* ezrealloc(void* p, size_t sz) { return TILOG_REALLOC_FUNCTION(p, sz); }
 
-		inline static void ezfree(void* p)
-		{
-			TILOG_FREE_FUNCTION(p);
-		}
+		inline static void ezfree(void* p) { TILOG_FREE_FUNCTION(p); }
 	};
 
 	class TiLogObject : public TiLogMemoryManager
@@ -340,7 +325,7 @@ namespace tilogspace
 	inline static CLASS_NAME& getRInstance() { return *CLASS_NAME::s_instance; };                                                          \
 	static inline void init()                                                                                                              \
 	{                                                                                                                                      \
-		DEBUG_ASSERT(CLASS_NAME::s_instance == nullptr); /*must be called only once*/                                                              \
+		DEBUG_ASSERT(CLASS_NAME::s_instance == nullptr); /*must be called only once*/                                                      \
 		CLASS_NAME::s_instance = new CLASS_NAME(__VA_ARGS__);                                                                              \
 	}                                                                                                                                      \
 	static CLASS_NAME* s_instance;
@@ -515,7 +500,7 @@ namespace tilogspace
 		using positive_size_t = size_t;
 #endif
 
-		using EPlaceHolder=decltype(std::placeholders::_1);
+		using EPlaceHolder = decltype(std::placeholders::_1);
 
 		class TiLogStringView
 		{
@@ -524,10 +509,7 @@ namespace tilogspace
 			DEBUG_DECLARE(size_t max_size;)
 
 		public:
-			TiLogStringView() : m_front(nullptr), m_end(nullptr)
-			{
-				DEBUG_RUN(max_size = 0);
-			}
+			TiLogStringView() : m_front(nullptr), m_end(nullptr) { DEBUG_RUN(max_size = 0); }
 			TiLogStringView(const char* front, const char* ed)
 			{
 				DEBUG_ASSERT(front != nullptr);
@@ -545,15 +527,9 @@ namespace tilogspace
 				DEBUG_RUN(max_size = sz);
 			}
 
-			const char* data() const
-			{
-				return m_front;
-			}
+			const char* data() const { return m_front; }
 
-			size_t size() const
-			{
-				return m_end - m_front;
-			}
+			size_t size() const { return m_end - m_front; }
 
 			void resize(size_t sz)
 			{
@@ -681,7 +657,7 @@ namespace tilogspace
 			inline const char& operator[](size_type index) const { return pFront()[index]; }
 			inline char& operator[](size_type index) { return pFront()[index]; }
 			inline const char* data() const { return pFront(); }
-			inline const char* c_str() const { return nullptr == pFront() ? "" : check(), *pEnd() = '\0', pFront(); }
+			inline const char* c_str() const { return nullptr == pFront() ? "" : (check(), *pEnd() = '\0', pFront()); }
 
 		public:
 			inline const ExtType* ext() const { return reinterpret_cast<const ExtType*>(pCore->ex); }
@@ -763,7 +739,6 @@ namespace tilogspace
 			friend std::ostream& operator<<(std::ostream& os, const class_type& s) { return os << String(s.c_str(), s.size()); }
 
 		protected:
-
 			template <typename... Args>
 			inline TiLogStringExtend& append_s(const size_type new_size, Args&&... args)
 			{
@@ -870,20 +845,11 @@ namespace tilogspace
 			{
 				TILOG_SINGLE_INSTANCE_DECLARE(steady_flag_helper)
 
-				static inline steady_flag_t now()
-				{
-					return getRInstance().count++;
-				}
+				static inline steady_flag_t now() { return getRInstance().count++; }
 
-				static constexpr inline steady_flag_t min()
-				{
-					return std::numeric_limits<steady_flag_t>::min();
-				}
+				static constexpr inline steady_flag_t min() { return std::numeric_limits<steady_flag_t>::min(); }
 
-				static constexpr inline steady_flag_t max()
-				{
-					return std::numeric_limits<steady_flag_t>::max();
-				}
+				static constexpr inline steady_flag_t max() { return std::numeric_limits<steady_flag_t>::max(); }
 				std::atomic<steady_flag_t> count{ min() };
 			};
 
@@ -926,32 +892,20 @@ namespace tilogspace
 				 */
 			};
 
-			//help transform no-steady time to steady time
+			// help transform no-steady time to steady time
 			TILOG_ABSTRACT class NoSteadyTimeHelper : public BaseTimeImpl
 			{
 			public:
 				using steady_flag_t = tilogtimespace::steady_flag_t;
 
 			public:
-				inline NoSteadyTimeHelper()
-				{
-					steadyT = steady_flag_helper::min();
-				}
+				inline NoSteadyTimeHelper() { steadyT = steady_flag_helper::min(); }
 
-				inline bool operator<(const NoSteadyTimeHelper& rhs) const
-				{
-					return steadyT < rhs.steadyT;
-				}
+				inline bool operator<(const NoSteadyTimeHelper& rhs) const { return steadyT < rhs.steadyT; }
 
-				inline bool operator<=(const NoSteadyTimeHelper& rhs) const
-				{
-					return steadyT <= rhs.steadyT;
-				}
+				inline bool operator<=(const NoSteadyTimeHelper& rhs) const { return steadyT <= rhs.steadyT; }
 
-				inline steady_flag_t toSteadyFlag() const
-				{
-					return steadyT;
-				}
+				inline steady_flag_t toSteadyFlag() const { return steadyT; }
 
 			protected:
 				steady_flag_t steadyT;
@@ -965,23 +919,11 @@ namespace tilogspace
 				using origin_time_type = TimePoint;
 
 			public:
-				inline time_t to_time_t() const
-				{
-					return Clock::to_time_t(chronoTime);
-				}
-				inline void cast_to_sec()
-				{
-					chronoTime = std::chrono::time_point_cast<std::chrono::seconds>(chronoTime);
-				}
-				inline void cast_to_ms()
-				{
-					chronoTime = std::chrono::time_point_cast<std::chrono::milliseconds>(chronoTime);
-				}
+				inline time_t to_time_t() const { return Clock::to_time_t(chronoTime); }
+				inline void cast_to_sec() { chronoTime = std::chrono::time_point_cast<std::chrono::seconds>(chronoTime); }
+				inline void cast_to_ms() { chronoTime = std::chrono::time_point_cast<std::chrono::milliseconds>(chronoTime); }
 
-				inline origin_time_type get_origin_time() const
-				{
-					return chronoTime;
-				}
+				inline origin_time_type get_origin_time() const { return chronoTime; }
 
 			protected:
 				TimePoint chronoTime;
@@ -994,56 +936,29 @@ namespace tilogspace
 				using steady_flag_t = Clock::rep;
 
 			public:
-				inline NativeSteadySystemClockWrapper()
-				{
-					chronoTime = TimePoint::min();
-				}
+				inline NativeSteadySystemClockWrapper() { chronoTime = TimePoint::min(); }
 
-				inline NativeSteadySystemClockWrapper(TimePoint t)
-				{
-					chronoTime = t;
-				}
+				inline NativeSteadySystemClockWrapper(TimePoint t) { chronoTime = t; }
 
-				inline bool operator<(const NativeSteadySystemClockWrapper& rhs) const
-				{
-					return chronoTime < rhs.chronoTime;
-				}
+				inline bool operator<(const NativeSteadySystemClockWrapper& rhs) const { return chronoTime < rhs.chronoTime; }
 
-				inline bool operator<=(const NativeSteadySystemClockWrapper& rhs) const
-				{
-					return chronoTime <= rhs.chronoTime;
-				}
+				inline bool operator<=(const NativeSteadySystemClockWrapper& rhs) const { return chronoTime <= rhs.chronoTime; }
 
 				inline NativeSteadySystemClockWrapper& operator=(const NativeSteadySystemClockWrapper& t) = default;
 
-				inline steady_flag_t toSteadyFlag() const
-				{
-					return chronoTime.time_since_epoch().count();
-				}
+				inline steady_flag_t toSteadyFlag() const { return chronoTime.time_since_epoch().count(); }
 
-				inline static NativeSteadySystemClockWrapper now()
-				{
-					return Clock::now();
-				}
+				inline static NativeSteadySystemClockWrapper now() { return Clock::now(); }
 
-				inline static NativeSteadySystemClockWrapper min()
-				{
-					return TimePoint::min();
-				}
+				inline static NativeSteadySystemClockWrapper min() { return TimePoint::min(); }
 
-				inline static NativeSteadySystemClockWrapper max()
-				{
-					return TimePoint::max();
-				}
+				inline static NativeSteadySystemClockWrapper max() { return TimePoint::max(); }
 			};
 
 			class NativeNoSteadySystemClockWrapper : public SystemClockBase, public NoSteadyTimeHelper
 			{
 			public:
-				inline NativeNoSteadySystemClockWrapper()
-				{
-					chronoTime = TimePoint::min();
-				}
+				inline NativeNoSteadySystemClockWrapper() { chronoTime = TimePoint::min(); }
 
 				inline NativeNoSteadySystemClockWrapper(TimePoint t, steady_flag_t st)
 				{
@@ -1053,23 +968,15 @@ namespace tilogspace
 
 				inline NativeNoSteadySystemClockWrapper& operator=(const NativeNoSteadySystemClockWrapper& t) = default;
 
-				inline static NativeNoSteadySystemClockWrapper now()
-				{
-					return { Clock::now(), steady_flag_helper::now() };
-				}
+				inline static NativeNoSteadySystemClockWrapper now() { return { Clock::now(), steady_flag_helper::now() }; }
 
-				inline static NativeNoSteadySystemClockWrapper min()
-				{
-					return { TimePoint::min(), steady_flag_helper::min() };
-				}
+				inline static NativeNoSteadySystemClockWrapper min() { return { TimePoint::min(), steady_flag_helper::min() }; }
 
-				inline static NativeNoSteadySystemClockWrapper max()
-				{
-					return { TimePoint::max(), steady_flag_helper::max() };
-				}
+				inline static NativeNoSteadySystemClockWrapper max() { return { TimePoint::max(), steady_flag_helper::max() }; }
 			};
 
-			using SystemClockImpl = std::conditional< std::chrono::system_clock::is_steady, NativeSteadySystemClockWrapper, NativeNoSteadySystemClockWrapper>::type ;
+			using SystemClockImpl = std::conditional<
+				std::chrono::system_clock::is_steady, NativeSteadySystemClockWrapper, NativeNoSteadySystemClockWrapper>::type;
 
 			class SteadyClockImpl : public BaseTimeImpl
 			{
@@ -1081,35 +988,24 @@ namespace tilogspace
 
 				using SystemClock = std::chrono::system_clock;
 				using SystemTimePoint = std::chrono::system_clock::time_point;
+
 			public:
 				static inline void init()
 				{
 					initSystemTime = SystemClock::now();
 					initSteadyTime = Clock::now();
 				}
-				static inline SystemTimePoint getInitSystemTime(){ return initSystemTime; }
-				static inline TimePoint getInitSteadyTime(){ return initSteadyTime; }
-				inline SteadyClockImpl()
-				{
-					chronoTime = TimePoint::min();
-				}
+				static inline SystemTimePoint getInitSystemTime() { return initSystemTime; }
+				static inline TimePoint getInitSteadyTime() { return initSteadyTime; }
+				inline SteadyClockImpl() { chronoTime = TimePoint::min(); }
 
-				inline SteadyClockImpl(TimePoint t)
-				{
-					chronoTime = t;
-				}
+				inline SteadyClockImpl(TimePoint t) { chronoTime = t; }
 
 				inline SteadyClockImpl& operator=(const SteadyClockImpl& t) = default;
 
-				inline bool operator<(const SteadyClockImpl& rhs) const
-				{
-					return chronoTime < rhs.chronoTime;
-				}
+				inline bool operator<(const SteadyClockImpl& rhs) const { return chronoTime < rhs.chronoTime; }
 
-				inline bool operator<=(const SteadyClockImpl& rhs) const
-				{
-					return chronoTime <= rhs.chronoTime;
-				}
+				inline bool operator<=(const SteadyClockImpl& rhs) const { return chronoTime <= rhs.chronoTime; }
 
 				inline time_t to_time_t() const
 				{
@@ -1117,39 +1013,18 @@ namespace tilogspace
 					auto t = initSystemTime + std::chrono::duration_cast<SystemClock::duration>(dura);
 					return SystemClock::to_time_t(t);
 				}
-				inline void cast_to_sec()
-				{
-					chronoTime = std::chrono::time_point_cast<std::chrono::seconds>(chronoTime);
-				}
-				inline void cast_to_ms()
-				{
-					chronoTime = std::chrono::time_point_cast<std::chrono::milliseconds>(chronoTime);
-				}
+				inline void cast_to_sec() { chronoTime = std::chrono::time_point_cast<std::chrono::seconds>(chronoTime); }
+				inline void cast_to_ms() { chronoTime = std::chrono::time_point_cast<std::chrono::milliseconds>(chronoTime); }
 
-				inline origin_time_type get_origin_time() const
-				{
-					return chronoTime;
-				}
+				inline origin_time_type get_origin_time() const { return chronoTime; }
 
-				inline steady_flag_t toSteadyFlag() const
-				{
-					return chronoTime.time_since_epoch().count();
-				}
+				inline steady_flag_t toSteadyFlag() const { return chronoTime.time_since_epoch().count(); }
 
-				inline static SteadyClockImpl now()
-				{
-					return  Clock::now();
-				}
+				inline static SteadyClockImpl now() { return Clock::now(); }
 
-				inline static SteadyClockImpl min()
-				{
-					return  TimePoint::min();
-				}
+				inline static SteadyClockImpl min() { return TimePoint::min(); }
 
-				inline static SteadyClockImpl max()
-				{
-					return TimePoint::max();
-				}
+				inline static SteadyClockImpl max() { return TimePoint::max(); }
 
 			protected:
 				TimePoint chronoTime;
@@ -1165,10 +1040,7 @@ namespace tilogspace
 				using tilog_steady_flag_t = typename TimeImplType::steady_flag_t;
 
 			public:
-				inline ITiLogTime()
-				{
-					impl = TimeImplType::min();
-				}
+				inline ITiLogTime() { impl = TimeImplType::min(); }
 				inline ITiLogTime(EPlaceHolder)
 				{
 					impl = TimeImplType::now();
@@ -1178,10 +1050,7 @@ namespace tilogspace
 					cast_to_sec();
 #endif
 				}
-				inline ITiLogTime(const TimeImplType& t)
-				{
-					impl = t;
-				}
+				inline ITiLogTime(const TimeImplType& t) { impl = t; }
 
 				inline ITiLogTime(ELogTime e)
 				{
@@ -1202,55 +1071,25 @@ namespace tilogspace
 					}
 				}
 
-				inline bool operator<(const ITiLogTime& rhs) const
-				{
-					return impl < rhs.impl;
-				}
+				inline bool operator<(const ITiLogTime& rhs) const { return impl < rhs.impl; }
 
-				inline bool operator<=(const ITiLogTime& rhs) const
-				{
-					return impl <= rhs.impl;
-				}
+				inline bool operator<=(const ITiLogTime& rhs) const { return impl <= rhs.impl; }
 
 				inline ITiLogTime& operator=(const ITiLogTime& rhs) = default;
 
-				inline tilog_steady_flag_t toSteadyFlag() const
-				{
-					return impl.toSteadyFlag();
-				}
+				inline tilog_steady_flag_t toSteadyFlag() const { return impl.toSteadyFlag(); }
 
-				inline time_t to_time_t() const
-				{
-					return impl.to_time_t();
-				}
-				inline void cast_to_sec()
-				{
-					impl.cast_to_sec();
-				}
-				inline void cast_to_ms()
-				{
-					impl.cast_to_ms();
-				}
+				inline time_t to_time_t() const { return impl.to_time_t(); }
+				inline void cast_to_sec() { impl.cast_to_sec(); }
+				inline void cast_to_ms() { impl.cast_to_ms(); }
 
-				inline origin_time_type get_origin_time() const
-				{
-					return impl.get_origin_time();
-				}
+				inline origin_time_type get_origin_time() const { return impl.get_origin_time(); }
 
-				inline static TimeImplType now()
-				{
-					return TimeImplType::now();
-				}
+				inline static TimeImplType now() { return TimeImplType::now(); }
 
-				inline static TimeImplType min()
-				{
-					return TimeImplType::min();
-				}
+				inline static TimeImplType min() { return TimeImplType::min(); }
 
-				inline static TimeImplType max()
-				{
-					return TimeImplType::max();
-				}
+				inline static TimeImplType max() { return TimeImplType::max(); }
 
 			private:
 				TimeImplType impl;
@@ -1288,19 +1127,10 @@ namespace tilogspace
 			DEBUG_CANARY_UINT32(flag3)
 
 		public:
-			const TiLogTime& time() const
-			{
-				return tiLogTime;
-			}
+			const TiLogTime& time() const { return tiLogTime; }
 
-			TiLogTime& time()
-			{
-				return tiLogTime;
-			}
-			TiLogStringView str_view() const
-			{
-				return TiLogStringExtend<TiLogBean>::get_str_view_from_ext(this);
-			}
+			TiLogTime& time() { return tiLogTime; }
+			TiLogStringView str_view() const { return TiLogStringExtend<TiLogBean>::get_str_view_from_ext(this); }
 
 			inline static void DestroyInstance(TiLogBean* p)
 			{
@@ -1337,7 +1167,7 @@ namespace tilogspace
 	{
 		class TiLogPrinterManager;
 		class TiLogPrinterData;
-	}
+	}	 // namespace internal
 	TILOG_ABSTRACT class TiLogPrinter : public TiLogObject
 	{
 		friend class internal::TiLogPrinterManager;
@@ -1360,7 +1190,7 @@ namespace tilogspace
 		// sync with printer's dest
 		virtual void sync() = 0;
 
-		virtual EPrinterID getUniqueID()const=0;
+		virtual EPrinterID getUniqueID() const = 0;
 
 		TiLogPrinter();
 		virtual ~TiLogPrinter();
@@ -1406,10 +1236,7 @@ namespace tilogspace
 
 		static void setLogLevel(ELevel level) {}
 
-		static constexpr ELevel getDynamicLogLevel()
-		{
-			return ELevel::STATIC_LOG_LEVEL;
-		}
+		static constexpr ELevel getDynamicLogLevel() { return ELevel::STATIC_LOG_LEVEL; }
 #endif
 
 	private:
@@ -1517,6 +1344,7 @@ namespace tilogspace
 				break;
 			}
 		}
+
 	public:
 		inline TiLogStream& operator()(const char* fmt, ...)
 		{
@@ -1581,6 +1409,7 @@ namespace tilogspace
 		{
 			return append(s, N), *this;
 		}
+
 	private:
 		// force overwrite super destructor,do nothing
 		inline void do_overwrited_super_destructor() {}
@@ -1630,10 +1459,7 @@ namespace tilogspace
 		{
 			using ObjectType = TiLogStream;
 
-			inline static TiLogStream* get_no_used_stream()
-			{
-				return TiLogStream::s_pNoUsedStream;
-			}
+			inline static TiLogStream* get_no_used_stream() { return TiLogStream::s_pNoUsedStream; }
 			inline static void free_no_used_stream(TiLogStream* p)
 			{
 				p->ext()->level = (char)ELogLevelFlag::INVALID;
@@ -1719,9 +1545,9 @@ namespace NDBG
 namespace tilogspace
 {
 	static_assert(sizeof(size_type) <= sizeof(size_t), "fatal err!");
-	static_assert( true || TILOG_IS_AUTO_INIT , "this micro must be defined");
-	static_assert( true || TILOG_IS_WITH_MILLISECONDS , "this micro must be defined");
-	static_assert( true || TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL , "this micro must be defined");
+	static_assert(true || TILOG_IS_AUTO_INIT, "this micro must be defined");
+	static_assert(true || TILOG_IS_WITH_MILLISECONDS, "this micro must be defined");
+	static_assert(true || TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL, "this micro must be defined");
 
 	static_assert(TILOG_POLL_DEFAULT_THREAD_SLEEP_MS > 0, "fatal err!");
 	static_assert(TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE > 0, "fatal err!");

@@ -72,10 +72,10 @@
 
 #define TILOG_SIZE_OF_ARRAY(arr) (sizeof(arr) / sizeof(arr[0]))
 #define TILOG_STRING_LEN_OF_CHAR_ARRAY(char_str) ((sizeof(char_str) - 1) / sizeof(char_str[0]))
-#define TILOG_STRING_AND_LEN(char_str)   char_str,((sizeof(char_str) - 1) / sizeof(char_str[0]))
+#define TILOG_STRING_AND_LEN(char_str) char_str, ((sizeof(char_str) - 1) / sizeof(char_str[0]))
 
 #define TILOG_CTIME_MAX_LEN 32
-#define TILOG_PREFIX_RESERVE_LEN_L1 15	   // reserve for prefix static c-strings;
+#define TILOG_PREFIX_RESERVE_LEN_L1 15	  // reserve for prefix static c-strings;
 
 using SystemTimePoint = std::chrono::system_clock::time_point;
 using SystemClock = std::chrono::system_clock;
@@ -184,7 +184,7 @@ namespace tiloghelperspace
 		do
 		{
 			if (tmd == nullptr) { break; }
-			size_t len = strftime(dst, TILOG_CTIME_MAX_LEN, "%Y-%m-%d  %H:%M:%S", tmd); //24B
+			size_t len = strftime(dst, TILOG_CTIME_MAX_LEN, "%Y-%m-%d  %H:%M:%S", tmd);	   // 24B
 			// len without zero '\0'
 			if (len == 0) { break; }
 #if TILOG_IS_WITH_MILLISECONDS == TRUE
@@ -272,7 +272,7 @@ namespace tilogspace
 		{
 			StringStream os;
 			os << (std::this_thread::get_id());
-			String id = "/"+os.str()+" ";
+			String id = "/" + os.str() + " ";
 			DEBUG_PRINTI("GetNewThreadIDString, tid %s ,cap %llu\n", id.c_str(), (long long unsigned)id.capacity());
 			if_constexpr(TILOG_THREAD_ID_MAX_LEN != SIZE_MAX)
 			{
@@ -584,15 +584,9 @@ namespace tilogspace
 				rhs.pMem = nullptr;
 			}
 
-			~PodCircularQueue()
-			{
-				ezfree(pMem);
-			}
+			~PodCircularQueue() { ezfree(pMem); }
 
-			bool empty() const
-			{
-				return pFirst == pEnd;
-			}
+			bool empty() const { return pFirst == pEnd; }
 
 			bool full() const
 			{
@@ -607,10 +601,7 @@ namespace tilogspace
 				return sz;
 			}
 
-			constexpr size_t capacity() const
-			{
-				return CAPACITY;
-			}
+			constexpr size_t capacity() const { return CAPACITY; }
 
 			bool normalized() const
 			{
@@ -635,56 +626,17 @@ namespace tilogspace
 
 
 			//------------------------------------------sub queue------------------------------------------//
-			size_t first_sub_queue_size() const
-			{
-				return normalized() ? pEnd - pFirst : pMemEnd - pFirst;
-			}
+			size_t first_sub_queue_size() const { return normalized() ? pEnd - pFirst : pMemEnd - pFirst; }
+			const_iterator first_sub_queue_begin() const { return pFirst; }
+			iterator first_sub_queue_begin() { return pFirst; }
+			const_iterator first_sub_queue_end() const { return normalized() ? pEnd : pMemEnd; };
+			iterator first_sub_queue_end() { return normalized() ? pEnd : pMemEnd; }
 
-			const_iterator first_sub_queue_begin() const
-			{
-				return pFirst;
-			}
-
-			iterator first_sub_queue_begin()
-			{
-				return pFirst;
-			}
-
-			const_iterator first_sub_queue_end() const
-			{
-				return normalized() ? pEnd : pMemEnd;
-			};
-
-			iterator first_sub_queue_end()
-			{
-				return normalized() ? pEnd : pMemEnd;
-			}
-
-
-			size_t second_sub_queue_size() const
-			{
-				return normalized() ? 0 : pEnd - pMem;
-			}
-
-			const_iterator second_sub_queue_begin() const
-			{
-				return normalized() ? NULL : pMem;
-			}
-
-			iterator second_sub_queue_begin()
-			{
-				return normalized() ? NULL : pMem;
-			}
-
-			const_iterator second_sub_queue_end() const
-			{
-				return normalized() ? NULL : pEnd;
-			}
-
-			iterator second_sub_queue_end()
-			{
-				return normalized() ? NULL : pEnd;
-			}
+			size_t second_sub_queue_size() const { return normalized() ? 0 : pEnd - pMem; }
+			const_iterator second_sub_queue_begin() const { return normalized() ? NULL : pMem; }
+			iterator second_sub_queue_begin() { return normalized() ? NULL : pMem; }
+			const_iterator second_sub_queue_end() const { return normalized() ? NULL : pEnd; }
+			iterator second_sub_queue_end() { return normalized() ? NULL : pEnd; }
 			//------------------------------------------sub queue------------------------------------------//
 
 			void clear()
@@ -746,30 +698,11 @@ namespace tilogspace
 			}
 
 		private:
-			size_t mem_size() const
-			{
-				return (pMemEnd - pMem) * sizeof(T);
-			}
-
-			iterator begin()
-			{
-				return pFirst;
-			}
-
-			iterator end()
-			{
-				return pEnd;
-			}
-
-			const_iterator begin() const
-			{
-				return pFirst;
-			}
-
-			const_iterator end() const
-			{
-				return pEnd;
-			}
+			size_t mem_size() const { return (pMemEnd - pMem) * sizeof(T); }
+			iterator begin() { return pFirst; }
+			iterator end() { return pEnd; }
+			const_iterator begin() const { return pFirst; }
+			const_iterator end() const { return pEnd; }
 
 		private:
 			T* pMem;
@@ -814,10 +747,7 @@ namespace tilogspace
 		{
 		public:
 			TILOG_SINGLE_INSTANCE_DECLARE(TiLogNonePrinter)
-			EPrinterID getUniqueID() const override
-			{
-				return PRINTER_ID_NONE;
-			};
+			EPrinterID getUniqueID() const override { return PRINTER_ID_NONE; };
 			void onAcceptLogs(MetaData metaData) override {}
 			void sync() override{};
 
@@ -875,7 +805,7 @@ namespace tilogspace
 		struct ThreadStru : public TiLogObject
 		{
 			CrcQueueLogCache qCache;
-			ThreadLocalSpinMutex spinMtx;	  // protect cache
+			ThreadLocalSpinMutex spinMtx;	 // protect cache
 
 			TiLogStream* noUseStream;
 			const String* tid;
@@ -920,34 +850,13 @@ namespace tilogspace
 
 			size_t size() { return std::distance(mList.begin(), it_next); }
 
-			void clear()
-			{
-				it_next = mList.begin();
-			}
-			bool empty()
-			{
-				return it_next == mList.begin();
-			}
-			bool full()
-			{
-				return it_next == mList.end();
-			}
-			iterator begin()
-			{
-				return mList.begin();
-			};
-			iterator end()
-			{
-				return it_next;
-			}
-			const_iterator begin()const
-			{
-				return mList.begin();
-			};
-			const_iterator end()const
-			{
-				return it_next;
-			}
+			void clear() { it_next = mList.begin(); }
+			bool empty() { return it_next == mList.begin(); }
+			bool full() { return it_next == mList.end(); }
+			iterator begin() { return mList.begin(); };
+			iterator end() { return it_next; }
+			const_iterator begin() const { return mList.begin(); };
+			const_iterator end() const { return it_next; }
 			void swap(ContainerList& rhs)
 			{
 				std::swap(this->mList, rhs.mList);
@@ -1011,30 +920,21 @@ namespace tilogspace
 
 		struct TiLogBeanPtrComp
 		{
-			bool operator()(const TiLogBean* const lhs, const TiLogBean* const rhs) const
-			{
-				return lhs->tiLogTime < rhs->tiLogTime;
-			}
+			bool operator()(const TiLogBean* const lhs, const TiLogBean* const rhs) const { return lhs->tiLogTime < rhs->tiLogTime; }
 		};
 
 		struct VecLogCachePtrLesser
 		{
-			bool operator()(const VecLogCachePtr lhs, const VecLogCachePtr rhs) const
-			{
-				return rhs->size() < lhs->size();
-			}
+			bool operator()(const VecLogCachePtr lhs, const VecLogCachePtr rhs) const { return rhs->size() < lhs->size(); }
 		};
 
 		struct VecLogCacheFeat : TiLogObjectPoolFeat
 		{
-			inline void operator()(VecLogCache& x)
-			{
-				x.clear();
-			}
+			inline void operator()(VecLogCache& x) { x.clear(); }
 		};
 		using VecLogCachePool = TiLogObjectPool<VecLogCache, VecLogCacheFeat>;
 
-		template<typename MutexType=std::mutex,typename task_t = std::function<void()>>
+		template <typename MutexType = std::mutex, typename task_t = std::function<void()>>
 		class TiLogTaskQueueBasic
 		{
 		public:
@@ -1125,10 +1025,10 @@ namespace tilogspace
 		struct CoreThrdStruBase : public TiLogObject
 		{
 			bool mExist = false;
-			virtual ~CoreThrdStruBase()= default;;
+			virtual ~CoreThrdStruBase() = default;
 			virtual const char* GetName() = 0;
 			virtual CoreThrdEntryFuncType GetThrdEntryFunc() = 0;
-			virtual bool IsBusy(){ return false; };
+			virtual bool IsBusy() { return false; };
 		};
 		struct CoreThrdStru : CoreThrdStruBase
 		{
@@ -1144,7 +1044,7 @@ namespace tilogspace
 			bool mCompleted = false;
 		};
 
-		using VecLogCachePtrPriorQueue =PriorQueue <VecLogCachePtr,Vector<VecLogCachePtr>, VecLogCachePtrLesser>;
+		using VecLogCachePtrPriorQueue = PriorQueue<VecLogCachePtr, Vector<VecLogCachePtr>, VecLogCachePtrLesser>;
 
 		class TiLogCore : public TiLogObject
 		{
@@ -1223,9 +1123,9 @@ namespace tilogspace
 			atomic_uint64_t mPrintedLogs{ 0 };
 
 			ThreadStruQueue mThreadStruQueue;
-			//only all of logs of dead thread have been delivered,
-			//the ThreadStru will be move to toDelQueue
-			atomic_uint32_t mWaitDeliverDeadThreads{0};
+			// only all of logs of dead thread have been delivered,
+			// the ThreadStru will be move to toDelQueue
+			atomic_uint32_t mWaitDeliverDeadThreads{ 0 };
 
 			struct PollStru : public CoreThrdStruBase
 			{
@@ -1238,8 +1138,8 @@ namespace tilogspace
 
 			struct MergeStru : public CoreThrdStru
 			{
-				MergeList mList;						  // input
-				VecLogCache mMergeCaches{ GLOBAL_SIZE };	  // output
+				MergeList mList;							// input
+				VecLogCache mMergeCaches{ GLOBAL_SIZE };	// output
 
 				VecLogCache mInsertToSetVec{};					   // temp vector
 				VecLogCache mMergeSortVec{};					   // temp vector
@@ -1273,7 +1173,6 @@ namespace tilogspace
 				CoreThrdEntryFuncType GetThrdEntryFunc() override { return &TiLogCore::thrdFuncGarbageCollection; }
 				bool IsBusy() override { return mGCList.full(); }
 			} mGC;
-
 		};
 
 		// clang-format off
@@ -1291,6 +1190,7 @@ namespace tilogspace
 		class TiLogPrinterData
 		{
 			friend class TiLogPrinterManager;
+
 		public:
 			explicit TiLogPrinterData(TiLogPrinter* p) : mTaskQueue(), mpPrinter(p) {}
 
@@ -1442,23 +1342,11 @@ namespace tilogspace
 #ifdef __________________________________________________TiLogTerminalPrinter__________________________________________________
 		TILOG_SINGLE_INSTANCE_DECLARE_OUTER(TiLogTerminalPrinter)
 
-		TiLogTerminalPrinter::TiLogTerminalPrinter()
-		{
-			std::ios::sync_with_stdio(false);
-		};
-		void TiLogTerminalPrinter::onAcceptLogs(MetaData metaData)
-		{
-			std::cout.write(metaData->logs, metaData->logs_size);
-		}
+		TiLogTerminalPrinter::TiLogTerminalPrinter() { std::ios::sync_with_stdio(false); };
+		void TiLogTerminalPrinter::onAcceptLogs(MetaData metaData) { std::cout.write(metaData->logs, metaData->logs_size); }
 
-		void TiLogTerminalPrinter::sync()
-		{
-			std::cout.flush();
-		}
-		EPrinterID TiLogTerminalPrinter::getUniqueID() const
-		{
-			return PRINTER_TILOG_TERMINAL;
-		}
+		void TiLogTerminalPrinter::sync() { std::cout.flush(); }
+		EPrinterID TiLogTerminalPrinter::getUniqueID() const { return PRINTER_TILOG_TERMINAL; }
 
 #endif
 
@@ -1490,7 +1378,7 @@ namespace tilogspace
 			}
 			if (mFile)
 			{
-				mFile.write(TiLogStringView{metaData->logs,metaData->logs_size});
+				mFile.write(TiLogStringView{ metaData->logs, metaData->logs_size });
 				singleFilePrintedLogSize += metaData->logs_size;
 			}
 		}
@@ -1514,14 +1402,8 @@ namespace tilogspace
 			mFile.open({ s.data(), s.size() }, "a");
 		}
 
-		void TiLogFilePrinter::sync()
-		{
-			mFile.sync();
-		}
-		EPrinterID TiLogFilePrinter::getUniqueID() const
-		{
-			return PRINTER_TILOG_FILE;
-		}
+		void TiLogFilePrinter::sync() { mFile.sync(); }
+		EPrinterID TiLogFilePrinter::getUniqueID() const { return PRINTER_TILOG_FILE; }
 #endif
 
 #ifdef __________________________________________________PrinterRegister__________________________________________________
@@ -1553,7 +1435,8 @@ namespace tilogspace
 
 #ifdef __________________________________________________TiLogPrinterManager__________________________________________________
 		TILOG_SINGLE_INSTANCE_DECLARE_OUTER(TiLogPrinterManager)
-		TiLogPrinterManager::TiLogPrinterManager() : m_printers(GetPrinterNum()), m_dest(DEFAULT_ENABLED_PRINTERS), m_level(STATIC_LOG_LEVEL)
+		TiLogPrinterManager::TiLogPrinterManager()
+			: m_printers(GetPrinterNum()), m_dest(DEFAULT_ENABLED_PRINTERS), m_level(STATIC_LOG_LEVEL)
 		{
 			for (TiLogPrinter*& x : m_printers)
 			{
@@ -1570,19 +1453,10 @@ namespace tilogspace
 			}
 		}
 
-		void TiLogPrinterManager::enablePrinter(EPrinterID printer)
-		{
-			getInstance()->m_dest |= ((printer_ids_t)printer);
-		}
-		void TiLogPrinterManager::disablePrinter(EPrinterID printer)
-		{
-			getInstance()->m_dest &= (~(printer_ids_t)printer);
-		}
+		void TiLogPrinterManager::enablePrinter(EPrinterID printer) { getInstance()->m_dest |= ((printer_ids_t)printer); }
+		void TiLogPrinterManager::disablePrinter(EPrinterID printer) { getInstance()->m_dest &= (~(printer_ids_t)printer); }
 
-		void TiLogPrinterManager::setPrinter(printer_ids_t printerIds)
-		{
-			getInstance()->m_dest = printerIds;
-		}
+		void TiLogPrinterManager::setPrinter(printer_ids_t printerIds) { getInstance()->m_dest = printerIds; }
 
 		void TiLogPrinterManager::addPrinter(TiLogPrinter* printer)
 		{
@@ -1606,15 +1480,9 @@ namespace tilogspace
 			}
 		}
 
-		void TiLogPrinterManager::setLogLevel(ELevel level)
-		{
-			getInstance()->m_level = level;
-		}
+		void TiLogPrinterManager::setLogLevel(ELevel level) { getInstance()->m_level = level; }
 
-		ELevel TiLogPrinterManager::getDynamicLogLevel()
-		{
-			return getInstance()->m_level;
-		}
+		ELevel TiLogPrinterManager::getDynamicLogLevel() { return getInstance()->m_level; }
 
 		Vector<TiLogPrinter*> TiLogPrinterManager::getAllValidPrinters()
 		{
@@ -1659,15 +1527,16 @@ namespace tilogspace
 			mInited = true;
 		}
 
-		inline void TiLogCore::CreateCoreThread(CoreThrdStruBase& thrd) {
-			thrd.mExist=true;
+		inline void TiLogCore::CreateCoreThread(CoreThrdStruBase& thrd)
+		{
+			thrd.mExist = true;
 			thread th(thrd.GetThrdEntryFunc(), this);
 			th.detach();
 		}
 
 		inline bool TiLogCore::LocalCircularQueuePushBack(TiLogBean* obj)
 		{
-			//DEBUG_ASSERT(!s_pThreadLocalStru->qCache.full());
+			// DEBUG_ASSERT(!s_pThreadLocalStru->qCache.full());
 			s_pThreadLocalStru->qCache.emplace_back(obj);
 			return s_pThreadLocalStru->qCache.full();
 		}
@@ -1684,8 +1553,8 @@ namespace tilogspace
 
 		inline ThreadStru* TiLogCore::initForEveryThread()
 		{
-			DEBUG_ASSERT(getInstance() != nullptr);	   // must call init() first
-			DEBUG_ASSERT(s_pThreadLocalStru== nullptr);//must be called only once
+			DEBUG_ASSERT(getInstance() != nullptr);			// must call init() first
+			DEBUG_ASSERT(s_pThreadLocalStru == nullptr);	// must be called only once
 			return getRInstance().InitForEveryThread();
 		}
 
@@ -1710,7 +1579,7 @@ namespace tilogspace
 		void TiLogCore::AtExit()
 		{
 			DEBUG_PRINTI("exit,wait poll\n");
-			mPoll.s_pollPeriodus = 1;	   // make poll faster
+			mPoll.s_pollPeriodus = 1;	 // make poll faster
 
 			DEBUG_PRINTI("prepare to exit\n");
 			mToExit = true;
@@ -1746,14 +1615,14 @@ namespace tilogspace
 			{
 				std::unique_lock<std::mutex> lk_merge = GetMergeLock();
 				lk_local.lock();	// maybe judge full again?
-				//if (!s_pThreadLocalStru->qCache.full()) { return; }
+				// if (!s_pThreadLocalStru->qCache.full()) { return; }
 				bool isGlobalFull = MoveLocalCacheToGlobal(*s_pThreadLocalStru);
 				lk_local.unlock();
 				if (isGlobalFull)
 				{
 					mMerge.mDoing = true;	 //此时本地缓存和全局缓存已满
 					lk_merge.unlock();
-					mMerge.mCV.notify_all();	   //这个通知后，锁可能会被另一个工作线程拿到
+					mMerge.mCV.notify_all();	//这个通知后，锁可能会被另一个工作线程拿到
 				}
 			}
 		}
@@ -1820,7 +1689,7 @@ namespace tilogspace
 				DEBUG_RUN(sorted_judge_func());
 				auto p = mMerge.mVecPool.acquire();
 				std::swap(*p, v);
-				mMerge.mThreadStruPriorQueue.emplace(p);	   // insert for every thread
+				mMerge.mThreadStruPriorQueue.emplace(p);	// insert for every thread
 				DEBUG_ASSERT2(v.size() <= qCachePreSize, v.size(), qCachePreSize);
 			}
 		}
@@ -1832,7 +1701,7 @@ namespace tilogspace
 			v.clear();
 			DEBUG_PRINTI("Begin of MergeSortForGlobalQueue\n");
 			TiLogBean referenceBean;
-			referenceBean.time() = mPoll.s_log_last_time = TiLogTime::now();  //referenceBean's time is the biggest up to now
+			referenceBean.time() = mPoll.s_log_last_time = TiLogTime::now();	// referenceBean's time is the biggest up to now
 
 			mMerge.mVecPool.release_all();
 			synchronized(mThreadStruQueue)
@@ -1880,8 +1749,6 @@ namespace tilogspace
 			mDeliver.mDoing = true;
 			lk_deliver.unlock();
 			mDeliver.mCV.notify_all();
-
-
 		}
 
 		inline TiLogStringView& TiLogCore::GetTimeStrFromSystemClock(const TiLogBean& bean)
@@ -2188,7 +2055,7 @@ namespace tilogspace
 				}
 
 				// find all of the dead thread and move these to waitMergeQueue
-				uint32_t deadThreads =0;
+				uint32_t deadThreads = 0;
 				for (auto it = mThreadStruQueue.availQueue.begin(); it != mThreadStruQueue.availQueue.end();)
 				{
 					ThreadStru& threadStru = *(*it);
@@ -2219,7 +2086,7 @@ namespace tilogspace
 
 		inline void TiLogCore::InitInternalThreadBeforeRun()
 		{
-			while (!mInited)	 // make sure all variables are inited
+			while (!mInited)	// make sure all variables are inited
 			{
 				this_thread::yield();
 			}
@@ -2251,15 +2118,9 @@ namespace tilogspace
 			t->mCV.notify_all();
 		}
 
-		inline uint64_t TiLogCore::getPrintedLogs()
-		{
-			return getRInstance().mPrintedLogs;
-		}
+		inline uint64_t TiLogCore::getPrintedLogs() { return getRInstance().mPrintedLogs; }
 
-		inline void TiLogCore::clearPrintedLogs()
-		{
-			getRInstance().mPrintedLogs = 0;
-		}
+		inline void TiLogCore::clearPrintedLogs() { getRInstance().mPrintedLogs = 0; }
 
 #endif
 
@@ -2274,33 +2135,12 @@ namespace tilogspace
 	TiLogPrinter::~TiLogPrinter() { delete mData; }
 #ifdef __________________________________________________TiLog__________________________________________________
 
-	void TiLog::enablePrinter(EPrinterID printer)
-	{
-		TiLogPrinterManager::enablePrinter(printer);
-	}
-	void TiLog::disablePrinter(EPrinterID printer)
-	{
-		TiLogPrinterManager::disablePrinter(printer);
-	}
-	void TiLog::setPrinter(printer_ids_t printerIds)
-	{
-		TiLogPrinterManager::setPrinter(printerIds);
-	}
-
-	void TiLog::pushLog(TiLogBean* pBean)
-	{
-		TiLogCore::pushLog(pBean);
-	}
-
-	uint64_t TiLog::getPrintedLogs()
-	{
-		return TiLogCore::getPrintedLogs();
-	}
-
-	void TiLog::clearPrintedLogs()
-	{
-		TiLogCore::clearPrintedLogs();
-	}
+	void TiLog::enablePrinter(EPrinterID printer) { TiLogPrinterManager::enablePrinter(printer); }
+	void TiLog::disablePrinter(EPrinterID printer) { TiLogPrinterManager::disablePrinter(printer); }
+	void TiLog::setPrinter(printer_ids_t printerIds) { TiLogPrinterManager::setPrinter(printerIds); }
+	void TiLog::pushLog(TiLogBean* pBean) { TiLogCore::pushLog(pBean); }
+	uint64_t TiLog::getPrintedLogs() { return TiLogCore::getPrintedLogs(); }
+	void TiLog::clearPrintedLogs() { TiLogCore::clearPrintedLogs(); }
 
 #if !TILOG_IS_AUTO_INIT
 	void TiLog::init()
@@ -2320,15 +2160,8 @@ namespace tilogspace
 	}
 
 #if TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL == TRUE
-	void TiLog::setLogLevel(ELevel level)
-	{
-		TiLogPrinterManager::setLogLevel(level);
-	}
-
-	ELevel TiLog::getDynamicLogLevel()
-	{
-		return TiLogPrinterManager::getDynamicLogLevel();
-	}
+	void TiLog::setLogLevel(ELevel level) { TiLogPrinterManager::setLogLevel(level); }
+	ELevel TiLog::getDynamicLogLevel() { return TiLogPrinterManager::getDynamicLogLevel(); }
 #endif
 
 #endif
