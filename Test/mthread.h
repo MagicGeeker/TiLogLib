@@ -1,5 +1,5 @@
-#ifndef EZLOG_MTHREAD_H
-#define EZLOG_MTHREAD_H
+#ifndef TILOG_MTHREAD_H
+#define TILOG_MTHREAD_H
 
 #include <type_traits>
 #include <thread>
@@ -25,4 +25,4 @@ public:
 	using Thread::operator=;
 };
 
-#endif	  // EZLOG_MTHREAD_H
+#endif	  // TILOG_MTHREAD_H

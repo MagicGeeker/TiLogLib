@@ -8,7 +8,7 @@
 #include "../depend_libs/catch/catch.hpp"
 
 using namespace std;
-using namespace ezlogspace;
+using namespace tilogspace;
 //__________________________________________________major test__________________________________________________//
 #define single_thread_log_test_____________________
 #define multi_thread_log_test_____________________
@@ -35,14 +35,14 @@ using namespace ezlogspace;
 
 
 //__________________________________________________other test__________________________________________________//
-//#define ezlog_string_extend_test_____________________
+//#define tilog_string_extend_test_____________________
 
 
 
 
 //__________________________________________________special test__________________________________________________//
 //#define special_log_test_____________________
-//#define ezlog_string_test_____________________  //enable if define in header
+//#define tilog_string_test_____________________  //enable if define in header
 //#define file_multi_thread_close_print_benchmark_test_____________________
 //#define file_multi_thread_print_level_test_____________________
 //#define static_log_level_multi_thread_benchmark_test_____________________
@@ -52,7 +52,7 @@ bool s_test_init = InitFunc();
 
 struct ThreadIniter
 {
-	void operator()() { EzLog::initForThisThread(); }
+	void operator()() { TiLog::initForThisThread(); }
 };
 using TestThread = MThread<ThreadIniter>;
 
@@ -74,7 +74,7 @@ TEST_CASE("multi_thread_log_test_____________________")
 
 	TestThread([]() -> void {
 		this_thread::sleep_for(std::chrono::milliseconds(10));
-		EZLOGD << "scccc";
+		TILOGD << "scccc";
 	}).join();
 }
 
@@ -85,13 +85,13 @@ TEST_CASE("multi_thread_log_test_____________________")
 
 TEST_CASE("file_multi_thread_log_test_____________________")
 {
-	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_FILE);
+	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
 	EZCOUT << "file_multi_thread_log_test_____________________";
-	EZLOGI << "adcc";
+	TILOGI << "adcc";
 
 	TestThread([]() -> void {
 		this_thread::sleep_for(std::chrono::milliseconds(10));
-		EZLOGD << "scccc";
+		TILOGD << "scccc";
 	}).join();
 }
 
@@ -140,7 +140,7 @@ TEST_CASE("terminal_many_thread_cout_test_____________________")
 
 TEST_CASE("terminal_many_thread_log_test_____________________")
 {
-	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_TERMINAL);
+	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
 
 	EZCOUT << "terminal_many_thread_log_test_____________________";
 
@@ -155,9 +155,9 @@ TEST_CASE("terminal_many_thread_log_test_____________________")
 			int a = 0;
 			shared_lock<shared_mutex> slck(smtx);
 			cva.wait(slck, []() -> bool { return begin; });
-			EZLOGI << "LOGI thr " << index << " " << &a;
-			EZLOGD << "LOGD thr " << index << " " << &a;
-			EZLOGV << "LOGV thr " << index << " " << &a;
+			TILOGI << "LOGI thr " << index << " " << &a;
+			TILOGD << "LOGD thr " << index << " " << &a;
+			TILOGV << "LOGV thr " << index << " " << &a;
 		}, i));
 	}
 	unique_lock<shared_mutex> ulk(smtx);
@@ -177,7 +177,7 @@ TEST_CASE("terminal_many_thread_log_test_____________________")
 
 TEST_CASE("file_many_thread_log_test_____________________")
 {
-	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_FILE);
+	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
 
 	EZCOUT << "file_many_thread_log_test_____________________";
 
@@ -192,9 +192,9 @@ TEST_CASE("file_many_thread_log_test_____________________")
 			int a = 0;
 			shared_lock<shared_mutex> slck(smtx);
 			cva.wait(slck, []() -> bool { return begin; });
-			EZLOGI << "LOGI thr " << index << " " << &a;
-			EZLOGD << "LOGD thr " << index << " " << &a;
-			EZLOGV << "LOGV thr " << index << " " << &a;
+			TILOGI << "LOGI thr " << index << " " << &a;
+			TILOGD << "LOGD thr " << index << " " << &a;
+			TILOGV << "LOGV thr " << index << " " << &a;
 		}, i));
 	}
 	unique_lock<shared_mutex> ulk(smtx);
@@ -214,7 +214,7 @@ TEST_CASE("file_many_thread_log_test_____________________")
 
 TEST_CASE("file_time_many_thread_log_test_with_sleep_____________________")
 {
-	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_FILE);
+	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
 
 	EZCOUT << "file_time_many_thread_log_test_with_sleep_____________________";
 
@@ -231,7 +231,7 @@ TEST_CASE("file_time_many_thread_log_test_with_sleep_____________________")
 			shared_lock<shared_mutex> slck(smtx);
 			cva.wait(slck, []() -> bool { return begin; });
 			this_thread::sleep_for(std::chrono::milliseconds(100 * index));
-			EZLOGD << "LOGD thr " << index << " " << &a;
+			TILOGD << "LOGD thr " << index << " " << &a;
 		}, i));
 	}
 	unique_lock<shared_mutex> ulk(smtx);
@@ -251,7 +251,7 @@ TEST_CASE("file_time_many_thread_log_test_with_sleep_____________________")
 
 TEST_CASE("file_time_multi_thread_simulation__log_test_____________________")
 {
-	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_FILE);
+	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
 	EZCOUT << "file_time_multi_thread_simulation__log_test_____________________";
 
 	double ns0 = SingleLoopTimeTestFunc<false>();
@@ -270,7 +270,7 @@ TEST_CASE("file_time_multi_thread_simulation__log_test_____________________")
 
 TEST_CASE("file_single_thread_benchmark_test_____________________")
 {
-	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_FILE);
+	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
 	EZCOUT << "file_single_thread_benchmark_test_____________________";
 #ifdef NDEBUG
 	constexpr uint64_t loops = (1 << 22);
@@ -280,11 +280,11 @@ TEST_CASE("file_single_thread_benchmark_test_____________________")
 	SimpleTimer s1m;
 	for (uint64_t i = 0; i < loops; i++)
 	{
-		EZLOGD << " i= " << i;
+		TILOGD << " i= " << i;
 	}
 	uint64_t ms = s1m.GetMillisecondsUpToNOW();
-	EZLOGI << (1000.0 * loops / ms) << " logs per second";
-	EZLOGI << 1.0 * ms / loops << " milliseconds per log";
+	TILOGI << (1000.0 * loops / ms) << " logs per second";
+	TILOGI << 1.0 * ms / loops << " milliseconds per log";
 }
 
 #endif
@@ -294,7 +294,7 @@ TEST_CASE("file_single_thread_benchmark_test_____________________")
 
 TEST_CASE("file_multi_thread_benchmark_test_____________________")
 {
-	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_FILE);
+	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
 	EZCOUT << "file_multi_thread_benchmark_test_____________________";
 #ifdef NDEBUG
 	constexpr uint64_t loops = 10000 + 2*(1 << 20);
@@ -319,7 +319,7 @@ TEST_CASE("file_multi_thread_benchmark_test_____________________")
 
 			for (uint64_t j = 0; j < loops; j++)
 			{
-				EZLOGD << "index= " << index << " j= " << j;
+				TILOGD << "index= " << index << " j= " << j;
 			}
 		}, i));
 	}
@@ -344,9 +344,9 @@ TEST_CASE("file_multi_thread_benchmark_test_____________________")
 
 TEST_CASE("file_multi_thread_close_print_benchmark_test_____________________")
 {
-	static_assert(EZLOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL,"fatal error,enable it to begin test");
-	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_FILE);
-	EzLog::clearPrintedLogs();
+	static_assert(TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL,"fatal error,enable it to begin test");
+	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
+	TiLog::clearPrintedLogs();
 	EZCOUT << "file_multi_thread_close_print_benchmark_test_____________________";
 #ifdef NDEBUG
 	constexpr uint64_t loops = 10000 + 2*(1 << 20);
@@ -371,14 +371,14 @@ TEST_CASE("file_multi_thread_close_print_benchmark_test_____________________")
 
 			for (uint64_t j = 0; j < loops; j++)
 			{
-				EZLOGD << "index= " << index << " j= " << j ;
+				TILOGD << "index= " << index << " j= " << j ;
 				if(j==loops/4)
 				{
-					EzLog::setLogLevel(ezlogspace::CLOSED);
+					TiLog::setLogLevel(tilogspace::CLOSED);
 				}
 				if(j==loops*3/4)
 				{
-					EzLog::setLogLevel(ezlogspace::OPEN);
+					TiLog::setLogLevel(tilogspace::OPEN);
 				}
 			}
 		}, i));
@@ -393,8 +393,8 @@ TEST_CASE("file_multi_thread_close_print_benchmark_test_____________________")
 		th.join();
 	}
 	uint64_t us = s1m.GetMicrosecondsUpToNOW();
-	EZCOUT << (1000.0 * EzLog::getPrintedLogs() / us) << " logs per millisecond\n";
-	EZCOUT << 1.0 * us / (EzLog::getPrintedLogs()) << " us per log\n";
+	EZCOUT << (1000.0 * TiLog::getPrintedLogs() / us) << " logs per millisecond\n";
+	EZCOUT << 1.0 * us / (TiLog::getPrintedLogs()) << " us per log\n";
 }
 
 #endif
@@ -404,7 +404,7 @@ TEST_CASE("file_multi_thread_close_print_benchmark_test_____________________")
 
 TEST_CASE("file_single_thread_operator_test_____________________")
 {
-	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_FILE);
+	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
 	EZCOUT << "file_single_thread_operator_test_____________________";
 	constexpr uint64_t loops = 10000 + 1*(1 << 10);
 	constexpr int32_t threads = 1;
@@ -425,9 +425,9 @@ TEST_CASE("file_single_thread_operator_test_____________________")
 
 			for (uint64_t j = 0; j < loops; j++)
 			{
-				EZLOGD("index= %d, j= %lld",index,(long long int)j);
-				EZLOGD("666");
-				EZLOGD("$$ %%D test %%D");
+				TILOGD("index= %d, j= %lld",index,(long long int)j);
+				TILOGD("666");
+				TILOGD("$$ %%D test %%D");
 			}
 		}, i));
 	}
@@ -449,7 +449,7 @@ TEST_CASE("file_single_thread_operator_test_____________________")
 
 TEST_CASE("terminal_multi_thread_poll__log_test_____________________")
 {
-	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_TERMINAL);
+	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
 
 	EZCOUT << "file_multi_thread_benchmark_test_____________________";
 	constexpr uint64_t loops = 10000;
@@ -472,7 +472,7 @@ TEST_CASE("terminal_multi_thread_poll__log_test_____________________")
 			for (uint64_t j = 0; j < loops; j++)
 			{
 				this_thread::sleep_for(chrono::milliseconds(50));
-				EZLOGD << "index= " << index << " j= " << j;
+				TILOGD << "index= " << index << " j= " << j;
 			}
 		}, i));
 	}
@@ -496,7 +496,7 @@ TEST_CASE("terminal_multi_thread_poll__log_test_____________________")
 
 TEST_CASE("file_multi_thread_memory_leak_stress_test_____________________")
 {
-	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_FILE);
+	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
 	EZCOUT << "file_multi_thread_memory_leak_stress_test_____________________";
 #ifdef NDEBUG
 	constexpr int32_t threads = 20000;
@@ -516,7 +516,7 @@ TEST_CASE("file_multi_thread_memory_leak_stress_test_____________________")
 		TestThread([=, &tt]() -> void {
 			for (uint64_t j = 0; j < loops; j++)
 			{
-				EZLOGD << "loop= " << loops << " j= " << j;
+				TILOGD << "loop= " << loops << " j= " << j;
 			}
 			tt--;
 			EZCOUT << " " << i << " to exit \n";
@@ -532,13 +532,13 @@ TEST_CASE("file_multi_thread_memory_leak_stress_test_____________________")
 #endif
 
 
-#ifdef ezlog_string_test_____________________
+#ifdef tilog_string_test_____________________
 
-TEST_CASE("ezlog_string_test_____________________")
+TEST_CASE("tilog_string_test_____________________")
 {
-	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_TERMINAL);
-	EZCOUT << "ezlog_string_test_____________________";
-	using String = ezlogspace::internal::EzLogString;
+	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
+	EZCOUT << "tilog_string_test_____________________";
+	using String = tilogspace::internal::TiLogString;
 	String str;
 	str.reserve(100);
 	str.resize(200);
@@ -554,7 +554,7 @@ TEST_CASE("ezlog_string_test_____________________")
 	String str3 ("asyindfafa");
 	str3 += str2;
 
-	String str4(ezlogspace::internal::EPlaceHolder{}, 100 );
+	String str4(tilogspace::internal::EPlaceHolder{}, 100 );
 	str4 = "dascvda";
 
 	str3 = str4;
@@ -581,17 +581,17 @@ TEST_CASE("ezlog_string_test_____________________")
 #endif
 
 
-#ifdef ezlog_string_extend_test_____________________
+#ifdef tilog_string_extend_test_____________________
 
-TEST_CASE( "ezlog_string_extend_test_____________________" )
+TEST_CASE( "tilog_string_extend_test_____________________" )
 {
-	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_TERMINAL);
-	EZCOUT << "ezlog_string_extend_test_____________________";
+	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
+	EZCOUT << "tilog_string_extend_test_____________________";
 	struct ext_t
 	{
 		char s[50];
 	};
-	using String = ezlogspace::internal::EzLogStringExtend< ext_t >;
+	using String = tilogspace::internal::TiLogStringExtend< ext_t >;
 	String str;
 	str.reserve( 100 );
 	str.resize( 200 );
@@ -607,7 +607,7 @@ TEST_CASE( "ezlog_string_extend_test_____________________" )
 	String str3( "asyindfafa" );
 	str3 += str2;
 
-	String str4( ezlogspace::internal::EPlaceHolder{}, 100 );
+	String str4( tilogspace::internal::EPlaceHolder{}, 100 );
 	str4 = "dascvda";
 
 	str3 = str4;
@@ -637,7 +637,7 @@ TEST_CASE( "ezlog_string_extend_test_____________________" )
 	}
 	std::cout<<"\n longStr:\n"<<longStr<<std::endl;
 
-	ezlogspace::internal::EzLogStringExtend<int> longStr2("long string 2  ");
+	tilogspace::internal::TiLogStringExtend<int> longStr2("long string 2  ");
 	for( uint32_t i = 0; i < 10000; i++ )
 	{
 		longStr2.append(char('R' + i % 11));
@@ -651,13 +651,13 @@ TEST_CASE( "ezlog_string_extend_test_____________________" )
 #ifdef terminal_single_thread_long_string_log_test_____________________
 TEST_CASE("terminal_single_thread_long_string_log_test_____________________")
 {
-	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_TERMINAL);
+	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
 	EZCOUT << "terminal_single_thread_long_string_log_test_____________________";
 	constexpr uint64_t loops = (1 << 8);
 	SimpleTimer s1m;
 	for (uint64_t i = 0; i < loops; i++)
 	{
-		auto x=EZLOGD;
+		auto x=TILOGD;
 		for( uint32_t j = 0; j < 1000; j++ )
 		{
 			x<<(char('R' + j % 11));
@@ -665,13 +665,13 @@ TEST_CASE("terminal_single_thread_long_string_log_test_____________________")
 		x << "\n";
 	}
 	{
-		auto s = std::move(EZLOGI<<"dsad");
+		auto s = std::move(TILOGI<<"dsad");
 		auto s2 = std::move(s);
 	}
 
 
 	uint64_t ms = s1m.GetMillisecondsUpToNOW();
-	EZLOGI << "end terminal_single_thread_long_string_log_test_____________________";
+	TILOGI << "end terminal_single_thread_long_string_log_test_____________________";
 
 }
 #endif
@@ -680,9 +680,9 @@ TEST_CASE("terminal_single_thread_long_string_log_test_____________________")
 
 TEST_CASE("file_multi_thread_print_level_test_____________________")
 {
-	static_assert(EZLOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL,"fatal error,enable it to begin test");
-	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_FILE);
-	EzLog::clearPrintedLogs();
+	static_assert(TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL,"fatal error,enable it to begin test");
+	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
+	TiLog::clearPrintedLogs();
 	EZCOUT << "file_multi_thread_print_level_test_____________________";
 #ifdef NDEBUG
 	constexpr uint64_t loops = 10000 + 2 * (1 << 20);
@@ -706,11 +706,11 @@ TEST_CASE("file_multi_thread_print_level_test_____________________")
 
 			for (uint64_t j = 1; j <= loops; j++)
 			{
-				EZLOG(index) << "index= " << index << " j= " << j;
+				TILOG(index) << "index= " << index << " j= " << j;
 				if (index == ELevel::ALWAYS && (j * 8) % loops == 0)
 				{
 					uint64_t v = j * 8 / loops;	   // 1-8
-					EzLog::setLogLevel((ezlogspace::ELevel) (9 - v));
+					TiLog::setLogLevel((tilogspace::ELevel) (9 - v));
 				}
 			}
 		}, i));
@@ -725,10 +725,10 @@ TEST_CASE("file_multi_thread_print_level_test_____________________")
 		th.join();
 	}
 	uint64_t us = s1m.GetMicrosecondsUpToNOW();
-	EzLog::setLogLevel(ezlogspace::ELevel::VERBOSE);
-	EZCOUT << (1000.0 * EzLog::getPrintedLogs() / us) << " logs per millisecond\n";
-	EZCOUT << 1.0 * us / (EzLog::getPrintedLogs()) << " us per log\n";
-	EZLOG(ezlogspace::ELevel::VERBOSE) << "Complete!\n";
+	TiLog::setLogLevel(tilogspace::ELevel::VERBOSE);
+	EZCOUT << (1000.0 * TiLog::getPrintedLogs() / us) << " logs per millisecond\n";
+	EZCOUT << 1.0 * us / (TiLog::getPrintedLogs()) << " us per log\n";
+	TILOG(tilogspace::ELevel::VERBOSE) << "Complete!\n";
 }
 
 #endif
@@ -736,10 +736,10 @@ TEST_CASE("file_multi_thread_print_level_test_____________________")
 
 #ifdef file_static_log_test_____________________
 static bool b0_file_static_log_test = []() {
-	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_TERMINAL);
+	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
 	EZCOUT << "Prepare file_static_log_test_____________________";
 
-	auto s= std::move( EZLOGD ("long string \n") );
+	auto s= std::move( TILOGD ("long string \n") );
 	for (uint32_t i = 0; i < 10000; i++)
 	{
 		s<<(char('a' + i % 26));
@@ -759,26 +759,26 @@ TEST_CASE("file_static_log_test_____________________")
 TEST_CASE("terminal_multi_way_log_test_____________________")
 {
 	EZCOUT << "terminal_multi_way_log_test_____________________";
-	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_TERMINAL);
-	EZLOGE << true;
-	EZLOGE << 'e';
-	EZLOGE << 101;
-	EZLOGE << 8295934959567868956LL;
-	EZLOGE << nullptr;
-	EZLOGE << NULL;
-	EZLOGE << "e0";
+	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
+	TILOGE << true;
+	TILOGE << 'e';
+	TILOGE << 101;
+	TILOGE << 8295934959567868956LL;
+	TILOGE << nullptr;
+	TILOGE << NULL;
+	TILOGE << "e0";
 	const char* pe1 = "e1";
-	EZLOGE << pe1;
-	EZLOGE("e2");
-	EZLOGE << 54231.0f;
-	EZLOGE << 54231.0e6;
-	EZLOGE << std::string("e3");
-	EZLOGE.appends("e4", "e5");
-	EZLOGV.appends(" e6 ", 'e', 101, " e7 ", 00.123f, " e8 ", 54231.0e6);
-	EZLOGV("%d %s %llf", 888, " e9 ", 0.3556);
-	(EZLOGV << " e10 ")("abc %d %lld", 123, 456LL);
-	(EZLOGV << "666")("abc %0999999999999999d %", 123, 456LL);	  // TODO error?
-	(EZLOGV << "6601000010000000000100000000100000000000230100000000000230002300000000236")(
+	TILOGE << pe1;
+	TILOGE("e2");
+	TILOGE << 54231.0f;
+	TILOGE << 54231.0e6;
+	TILOGE << std::string("e3");
+	TILOGE.appends("e4", "e5");
+	TILOGV.appends(" e6 ", 'e', 101, " e7 ", 00.123f, " e8 ", 54231.0e6);
+	TILOGV("%d %s %llf", 888, " e9 ", 0.3556);
+	(TILOGV << " e10 ")("abc %d %lld", 123, 456LL);
+	(TILOGV << "666")("abc %0999999999999999d %", 123, 456LL);	  // TODO error?
+	(TILOGV << "6601000010000000000100000000100000000000230100000000000230002300000000236")(
 		"abc 0100000000010000000000101000000000002300000000000023002301000000000002300023 %d %lld", 123, 456LL);
 }
 #endif
@@ -786,47 +786,47 @@ TEST_CASE("terminal_multi_way_log_test_____________________")
 #ifdef special_log_test_____________________
 TEST_CASE("special_log_test_____________________")
 {
-	static_assert(EZLOG_STATIC_LOG__LEVEL == EZLOG_INTERNAL_LEVEL_WARN, "set warn to begin test");
+	static_assert(TILOG_STATIC_LOG__LEVEL == TILOG_INTERNAL_LEVEL_WARN, "set warn to begin test");
 	EZCOUT << "special_log_test_____________________";
-	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_TERMINAL);
+	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
 	{
-		auto& ezlogcout = EZCOUT;
-		ezlogcout << "ezlogcout test__";
+		auto& tilogcout = EZCOUT;
+		tilogcout << "tilogcout test__";
 	}
 	{
-		auto ezlog001 = EZLOGW;
-		ezlog001 << "ezlog001 test__";
+		auto tilog001 = TILOGW;
+		tilog001 << "tilog001 test__";
 	}
 	{
-		EZLOGV << "ezlog003";
+		TILOGV << "tilog003";
 	}
 	{
-		auto ezlog004 = std::move(EZLOGV << "ezlog004");
+		auto tilog004 = std::move(TILOGV << "tilog004");
 	}
 	{
-		EzLogStream ezlogv = std::move(EZLOGV << "ezlogv test__");
-		ezlogv << "ezlogv test__ 123";
-		ezlogv << "ezlogv test__ 456";
+		TiLogStream tilogv = std::move(TILOGV << "tilogv test__");
+		tilogv << "tilogv test__ 123";
+		tilogv << "tilogv test__ 456";
 	}
 	{
-		EzLogStream ezlogd = std::move(EZLOGD << "ezlogd test__");
-		ezlogd << "ezlogd test__ 123";
-		ezlogd << "ezlogd test__ 456";
+		TiLogStream tilogd = std::move(TILOGD << "tilogd test__");
+		tilogd << "tilogd test__ 123";
+		tilogd << "tilogd test__ 456";
 	}
 	{
-		EzLogStream ezlogi = std::move(EZLOGI << "ezlogi test__");
-		ezlogi << "ezlogi test__ 123";
-		ezlogi << "ezlogi test__ 456";
+		TiLogStream tilogi = std::move(TILOGI << "tilogi test__");
+		tilogi << "tilogi test__ 123";
+		tilogi << "tilogi test__ 456";
 	}
 	{
-		EzLogStream ezlogw = std::move(EZLOGW << "ezlogw test__");
-		ezlogw << "ezlogw test__ 123";
-		ezlogw << "ezlogw test__ 456";
+		TiLogStream tilogw = std::move(TILOGW << "tilogw test__");
+		tilogw << "tilogw test__ 123";
+		tilogw << "tilogw test__ 456";
 	}
 	{
-		EzLogStream ezloge = std::move(EZLOGE << "ezloge test__");
-		ezloge << "ezloge test__ 123";
-		ezloge << "ezloge test__ 456";
+		TiLogStream tiloge = std::move(TILOGE << "tiloge test__");
+		tiloge << "tiloge test__ 123";
+		tiloge << "tiloge test__ 456";
 	}
 }
 #endif
@@ -835,10 +835,10 @@ TEST_CASE("special_log_test_____________________")
 #ifdef static_log_level_multi_thread_benchmark_test_____________________
 TEST_CASE("static_log_level_multi_thread_benchmark_test_____________________")
 {
-	static_assert(EZLOG_STATIC_LOG__LEVEL == EZLOG_INTERNAL_LEVEL_WARN, "set warn to begin test");
-	static_assert(!EZLOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL, "disable it to test");
+	static_assert(TILOG_STATIC_LOG__LEVEL == TILOG_INTERNAL_LEVEL_WARN, "set warn to begin test");
+	static_assert(!TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL, "disable it to test");
 
-	EZLOGI << "static_log_level_multi_thread_benchmark_test_____________________";
+	TILOGI << "static_log_level_multi_thread_benchmark_test_____________________";
 #ifdef NDEBUG
 	constexpr uint64_t loops = (uint64_t)3e7;
 #else
@@ -863,7 +863,7 @@ TEST_CASE("static_log_level_multi_thread_benchmark_test_____________________")
 
 				for (uint64_t j = 0; j < loops; j++)
 				{
-					EZLOGD << "index= " << index << " j= " << j;
+					TILOGD << "index= " << index << " j= " << j;
 				}
 			},
 			i));
@@ -886,8 +886,8 @@ TEST_CASE("static_log_level_multi_thread_benchmark_test_____________________")
 #ifdef dynamic_log_level_multi_thread_benchmark_test_____________________
 TEST_CASE("dynamic_log_level_multi_thread_benchmark_test_____________________")
 {
-	static_assert(EZLOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL, "enable it to test");
-	EZLOGI << "dynamic_log_level_multi_thread_benchmark_test_____________________";
+	static_assert(TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL, "enable it to test");
+	TILOGI << "dynamic_log_level_multi_thread_benchmark_test_____________________";
 #ifdef NDEBUG
 	constexpr uint64_t loops = (uint64_t)3e7;
 #else
@@ -903,7 +903,7 @@ TEST_CASE("dynamic_log_level_multi_thread_benchmark_test_____________________")
 
 	std::vector<TestThread> vec;
 
-	EzLog::setLogLevel(ELevel::INFO);
+	TiLog::setLogLevel(ELevel::INFO);
 	for (int i = 1; i <= threads; i++)
 	{
 		vec.emplace_back(TestThread(
@@ -913,7 +913,7 @@ TEST_CASE("dynamic_log_level_multi_thread_benchmark_test_____________________")
 
 				for (uint64_t j = 0; j < loops; j++)
 				{
-					EZLOG(ELevel::DEBUG) << "index= " << index << " j= " << j;
+					TILOG(ELevel::DEBUG) << "index= " << index << " j= " << j;
 				}
 			},
 			i));

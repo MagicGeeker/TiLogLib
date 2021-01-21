@@ -1,5 +1,5 @@
-#ifndef EZLOG_FUNC_H
-#define EZLOG_FUNC_H
+#ifndef TILOG_FUNC_H
+#define TILOG_FUNC_H
 
 #include "inc.h"
 #include "SimpleTimer.h"
@@ -45,7 +45,7 @@ static double SingleLoopTimeTestFunc()
 	for (int i = 1; i <= threads; i++)
 	{
 		auto tdf = [&](int index) -> void {
-			ezlogspace::EzLog::initForThisThread();
+			tilogspace::TiLog::initForThisThread();
 
 			int a = 0;
 			shared_lock<shared_mutex> slck(smtx);
@@ -54,7 +54,7 @@ static double SingleLoopTimeTestFunc()
 			for (uint64_t loops = LOOPS; loops; loops--)
 			{
 				m += ComplexCalFunc<N>(loops);
-				if_constexpr(WITH_LOG) { EZLOGD << "LOGD thr " << index << " loop " << loops << " " << &a; }
+				if_constexpr(WITH_LOG) { TILOGD << "LOGD thr " << index << " loop " << loops << " " << &a; }
 			}
 		};
 		std::thread td = std::thread(tdf, i);
@@ -75,4 +75,4 @@ static double SingleLoopTimeTestFunc()
 	return ns;
 }
 
-#endif	  // EZLOG_FUNC_H
+#endif	  // TILOG_FUNC_H

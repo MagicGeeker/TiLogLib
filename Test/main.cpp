@@ -4,8 +4,8 @@
 bool InitFunc()
 {
 	static bool r = []() {
-		ezlogspace::EzLog::init();
-		ezlogspace::EzLog::initForThisThread();
+		tilogspace::TiLog::init();
+		tilogspace::TiLog::initForThisThread();
 		return true;
 	}();
 	return r;
@@ -31,18 +31,18 @@ bool s_main_init = InitFunc();
 #include "inc.h"
 #include "SimpleTimer.h"
 using namespace std;
-using namespace ezlogspace;
+using namespace tilogspace;
 
 #define FUN_MAIN  2
 int main()
 {
 #if FUN_MAIN==-1
-	(EZLOGV<<"main.cpp")("abc %d %lld",123,456LL);
-	(EZLOGV<<"666")("abc %0999999999999999d %",123,456LL);
-	(EZLOGV<<"6601000010000000000100000000100000000000230100000000000230002300000000236")
+	(TILOGV<<"main.cpp")("abc %d %lld",123,456LL);
+	(TILOGV<<"666")("abc %0999999999999999d %",123,456LL);
+	(TILOGV<<"6601000010000000000100000000100000000000230100000000000230002300000000236")
 		("abc 0100000000010000000000101000000000002300000000000023002301000000000002300023 %d %lld",123,456LL);
 #elif FUN_MAIN==0
-	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_FILE);
+	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
 	EZCOUT << "file_time_multi_thread_simulation__log_test_____________________";
 
 	double ns0 = SingleLoopTimeTestFunc<false>();
@@ -55,7 +55,7 @@ int main()
 #elif FUN_MAIN== 1
 
 
-	EzLog::setPrinter(ezlogspace::EPrinterID::PRINTER_EZLOG_FILE);
+	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
 	EZCOUT << "file_multi_thread_memory_leak_stress_test_____________________";
 #ifdef NDEBUG
 	constexpr int32_t threads = 20000;
@@ -73,10 +73,10 @@ int main()
 	for (int i = 1; i <= threads; i++)
 	{
 		thread([=, &tt]() -> void {
-			EzLog::initForThisThread();
+			TiLog::initForThisThread();
 			for (uint64_t j = 0; j < loops; j++)
 			{
-				EZLOGD << "loop= " << loops << " j= " << j;
+				TILOGD << "loop= " << loops << " j= " << j;
 			}
 			tt--;
 			EZCOUT << " " << i << " to exit \n";
@@ -91,7 +91,7 @@ int main()
 
 #else
 
-	EZLOGI << "file_multi_thread_benchmark_test_____________________";
+	TILOGI << "file_multi_thread_benchmark_test_____________________";
 #ifdef NDEBUG
 	constexpr uint64_t loops = 10000 + 3*(1 << 20);
 #else
@@ -110,13 +110,13 @@ int main()
 	for (int i = 1; i <= threads; i++)
 	{
 		vec.emplace_back(thread([&](int index) -> void {
-			EzLog::initForThisThread();
+			TiLog::initForThisThread();
 			shared_lock<shared_mutex> slck(smtx);
 			cva.wait(slck, []() -> bool { return begin; });
 
 			for (uint64_t j = 0; j < loops; j++)
 			{
-				EZLOGD << "index= " << index << " j= " << j;
+				TILOGD << "index= " << index << " j= " << j;
 			}
 		}, i));
 	}
@@ -132,8 +132,8 @@ int main()
 	uint64_t us = s1m.GetMicrosecondsUpToNOW();
 	EZCOUT << (1000 * threads * loops / us) << " logs per millisecond\n";
 	EZCOUT << 1.0 * us / (loops * threads) << " us per log\n";
-	EZLOGI << (1000 * threads * loops / us) << " logs per millisecond\n";
-	EZLOGI << 1.0 * us / (loops * threads) << " us per log\n";
+	TILOGI << (1000 * threads * loops / us) << " logs per millisecond\n";
+	TILOGI << 1.0 * us / (loops * threads) << " us per log\n";
 #endif
 }
 

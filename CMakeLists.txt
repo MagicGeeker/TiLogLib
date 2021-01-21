@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.2)
-project(EzLog)
+project(TiLog)
 
 set(CMAKE_CXX_STANDARD 11)
 
@@ -10,7 +10,7 @@ if(MSVC)
 endif()
 
 add_subdirectory(depend_libs)
-add_subdirectory(EzLog)
+add_subdirectory(TiLog)
 add_subdirectory(Test)
 
 

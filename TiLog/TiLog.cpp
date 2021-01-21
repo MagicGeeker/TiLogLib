@@ -14,44 +14,44 @@
 #include <atomic>
 #include <utility>
 
-#include "EzLog.h"
-#ifdef EZLOG_OS_WIN
+#include "TiLog.h"
+#ifdef TILOG_OS_WIN
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include <windows.h>
-#elif defined(EZLOG_OS_POSIX)
+#elif defined(TILOG_OS_POSIX)
 #include <fcntl.h>
 #include <unistd.h>
 #endif
 
-#define __________________________________________________EzLogCircularQueue__________________________________________________
-#define __________________________________________________EzLogFile__________________________________________________
-#define __________________________________________________EzLogTerminalPrinter__________________________________________________
-#define __________________________________________________EzLogFilePrinter__________________________________________________
+#define __________________________________________________TiLogCircularQueue__________________________________________________
+#define __________________________________________________TiLogFile__________________________________________________
+#define __________________________________________________TiLogTerminalPrinter__________________________________________________
+#define __________________________________________________TiLogFilePrinter__________________________________________________
 #define __________________________________________________PrinterRegister__________________________________________________
-#define __________________________________________________EzLogPrinterManager__________________________________________________
-#define __________________________________________________EzLogCore__________________________________________________
+#define __________________________________________________TiLogPrinterManager__________________________________________________
+#define __________________________________________________TiLogCore__________________________________________________
 
-#define __________________________________________________EzLog__________________________________________________
+#define __________________________________________________TiLog__________________________________________________
 
 
-//#define EZLOG_ENABLE_PRINT_ON_RELEASE
+//#define TILOG_ENABLE_PRINT_ON_RELEASE
 
-#define EZLOG_INTERNAL_LOG_MAX_LEN 200
-#define EZLOG_INTERNAL_LOG_FILE_PATH "ezlogs.txt"
+#define TILOG_INTERNAL_LOG_MAX_LEN 200
+#define TILOG_INTERNAL_LOG_FILE_PATH "tilogs.txt"
 
-#if defined(NDEBUG) && !defined(EZLOG_ENABLE_PRINT_ON_RELEASE)
+#if defined(NDEBUG) && !defined(TILOG_ENABLE_PRINT_ON_RELEASE)
 #define DEBUG_PRINT(lv, fmt, ...)
 #else
 #define DEBUG_PRINT(lv, ...)                                                                                                               \
 	do                                                                                                                                     \
 	{                                                                                                                                      \
-		if_constexpr(lv <= EZLOG_STATIC_LOG__LEVEL)                                                                                        \
+		if_constexpr(lv <= TILOG_STATIC_LOG__LEVEL)                                                                                        \
 		{                                                                                                                                  \
-			char _s_log_[EZLOG_INTERNAL_LOG_MAX_LEN];                                                                                      \
-			int _s_len = sprintf(_s_log_, " %u ", ezloghelperspace::GetInternalLogFlag()++);                                               \
-			int _limit_len_with_zero = EZLOG_INTERNAL_LOG_MAX_LEN - _s_len;                                                                \
+			char _s_log_[TILOG_INTERNAL_LOG_MAX_LEN];                                                                                      \
+			int _s_len = sprintf(_s_log_, " %u ", tiloghelperspace::GetInternalLogFlag()++);                                               \
+			int _limit_len_with_zero = TILOG_INTERNAL_LOG_MAX_LEN - _s_len;                                                                \
 			int _suppose_len = snprintf(_s_log_ + _s_len, _limit_len_with_zero, __VA_ARGS__);                                              \
 			FILE* _pFile = getInternalFilePtr();                                                                                           \
 			if (_pFile != NULL)                                                                                                            \
@@ -62,40 +62,40 @@
 
 
 
-#define EZLOG_SIZE_OF_ARRAY(arr) (sizeof(arr) / sizeof(arr[0]))
-#define EZLOG_STRING_LEN_OF_CHAR_ARRAY(char_str) ((sizeof(char_str) - 1) / sizeof(char_str[0]))
-#define EZLOG_STRING_AND_LEN(char_str)   char_str,((sizeof(char_str) - 1) / sizeof(char_str[0]))
+#define TILOG_SIZE_OF_ARRAY(arr) (sizeof(arr) / sizeof(arr[0]))
+#define TILOG_STRING_LEN_OF_CHAR_ARRAY(char_str) ((sizeof(char_str) - 1) / sizeof(char_str[0]))
+#define TILOG_STRING_AND_LEN(char_str)   char_str,((sizeof(char_str) - 1) / sizeof(char_str[0]))
 
-#define EZLOG_CTIME_MAX_LEN 32
-#define EZLOG_PREFIX_RESERVE_LEN_L1 15	   // reserve for prefix static c-strings;
+#define TILOG_CTIME_MAX_LEN 32
+#define TILOG_PREFIX_RESERVE_LEN_L1 15	   // reserve for prefix static c-strings;
 
 using SystemTimePoint = std::chrono::system_clock::time_point;
 using SystemClock = std::chrono::system_clock;
 using SteadyTimePoint = std::chrono::steady_clock::time_point;
 using SteadyClock = std::chrono::steady_clock;
-using EzLogTime = ezlogspace::internal::EzLogBean::EzLogTime;
+using TiLogTime = tilogspace::internal::TiLogBean::TiLogTime;
 
 
 
 
 using namespace std;
-using namespace ezlogspace;
+using namespace tilogspace;
 
-namespace ezlogspace
+namespace tilogspace
 {
 	namespace internal
 	{
-		namespace ezlogtimespace
+		namespace tilogtimespace
 		{
-			EZLOG_SINGLE_INSTANCE_DECLARE_OUTER(steady_flag_helper)
+			TILOG_SINGLE_INSTANCE_DECLARE_OUTER(steady_flag_helper)
 			SteadyClockImpl::SystemTimePoint SteadyClockImpl::initSystemTime{};
 			SteadyClockImpl::TimePoint SteadyClockImpl::initSteadyTime{};
-		}	 // namespace ezlogtimespace
+		}	 // namespace tilogtimespace
 	}		 // namespace internal
-	thread_local EzLogStream* EzLogStream::s_pNoUsedStream = new EzLogStream(EPlaceHolder{}, false);
-};	  // namespace ezlogspace
+	thread_local TiLogStream* TiLogStream::s_pNoUsedStream = new TiLogStream(EPlaceHolder{}, false);
+};	  // namespace tilogspace
 
-namespace ezloghelperspace
+namespace tiloghelperspace
 {
 	inline static atomic_uint32_t& GetInternalLogFlag()
 	{
@@ -119,17 +119,17 @@ namespace ezloghelperspace
 	static FILE* getInternalFilePtr()
 	{
 		static FILE* s_pInternalFile = []() -> FILE* {
-			constexpr size_t len_folder = EZLOG_STRING_LEN_OF_CHAR_ARRAY(EZLOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER);
-			constexpr size_t len_file = EZLOG_STRING_LEN_OF_CHAR_ARRAY(EZLOG_INTERNAL_LOG_FILE_PATH);
+			constexpr size_t len_folder = TILOG_STRING_LEN_OF_CHAR_ARRAY(TILOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER);
+			constexpr size_t len_file = TILOG_STRING_LEN_OF_CHAR_ARRAY(TILOG_INTERNAL_LOG_FILE_PATH);
 			constexpr size_t len_s = len_folder + len_file;
-			char s[1 + len_s] = EZLOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER;
-			memcpy(s + len_folder, EZLOG_INTERNAL_LOG_FILE_PATH, len_file);
+			char s[1 + len_s] = TILOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER;
+			memcpy(s + len_folder, TILOG_INTERNAL_LOG_FILE_PATH, len_file);
 			s[len_s] = '\0';
 			FILE* p = fopen(s, "a");
 			if (p)
 			{
 				char s2[] = "\n\n\ncreate new internal log\n";
-				fwrite(s2, sizeof(char), EZLOG_STRING_LEN_OF_CHAR_ARRAY(s2), p);
+				fwrite(s2, sizeof(char), TILOG_STRING_LEN_OF_CHAR_ARRAY(s2), p);
 			}
 			return p;
 		}();
@@ -176,15 +176,15 @@ namespace ezloghelperspace
 		do
 		{
 			if (tmd == nullptr) { break; }
-			size_t len = strftime(dst, EZLOG_CTIME_MAX_LEN, "%Y-%m-%d  %H:%M:%S", tmd); //24B
+			size_t len = strftime(dst, TILOG_CTIME_MAX_LEN, "%Y-%m-%d  %H:%M:%S", tmd); //24B
 			// len without zero '\0'
 			if (len == 0) { break; }
-#if EZLOG_IS_WITH_MILLISECONDS == TRUE
+#if TILOG_IS_WITH_MILLISECONDS == TRUE
 			auto since_epoch = nowTime.time_since_epoch();
 			std::chrono::seconds s = std::chrono::duration_cast<std::chrono::seconds>(since_epoch);
 			since_epoch -= s;
 			std::chrono::milliseconds milli = std::chrono::duration_cast<std::chrono::milliseconds>(since_epoch);
-			size_t n_with_zero = EZLOG_CTIME_MAX_LEN - len;
+			size_t n_with_zero = TILOG_CTIME_MAX_LEN - len;
 			DEBUG_ASSERT((int32_t)n_with_zero > 0);
 			int len2 = snprintf(dst + len, n_with_zero, ".%03u", (unsigned)milli.count());	  // len2 without zero
 			DEBUG_ASSERT(len2 > 0);
@@ -198,7 +198,7 @@ namespace ezloghelperspace
 
 	static size_t TimePointToTimeCStr(char* dst, SteadyTimePoint nowTime)
 	{
-		using namespace ezlogspace::internal::ezlogtimespace;
+		using namespace tilogspace::internal::tilogtimespace;
 		auto duration = nowTime - SteadyClockImpl::getInitSteadyTime();
 		auto t = SteadyClockImpl::getInitSystemTime() + std::chrono::duration_cast<SystemClock::duration>(duration);
 		return TimePointToTimeCStr(dst, t);
@@ -219,7 +219,7 @@ namespace ezloghelperspace
 		char* ss = (char*)src;
 		switch (size)
 		{
-#if EZLOG_IS_64BIT_OS
+#if TILOG_IS_64BIT_OS
 		case 16:
 			*(uint64_t*)dd = *(uint64_t*)ss;
 			dd += 8, ss += 8;
@@ -248,14 +248,14 @@ namespace ezloghelperspace
 		return (uint32_t)sizeof...(Args);
 	}
 
-}	 // namespace ezloghelperspace
+}	 // namespace tiloghelperspace
 
-using namespace ezloghelperspace;
+using namespace tiloghelperspace;
 
 
-namespace ezlogspace
+namespace tilogspace
 {
-	class EzLogStream;
+	class TiLogStream;
 	using MiniSpinMutex = OptimisticMutex;
 
 	namespace internal
@@ -265,10 +265,10 @@ namespace ezlogspace
 			StringStream os;
 			os << (std::this_thread::get_id());
 			String id = "/"+os.str()+" ";
-			DEBUG_PRINT(EZLOG_INTERNAL_LEVEL_INFO, "GetNewThreadIDString, tid %s ,cap %llu\n", id.c_str(), (long long unsigned)id.capacity());
-			if_constexpr(EZLOG_THREAD_ID_MAX_LEN != SIZE_MAX)
+			DEBUG_PRINT(TILOG_INTERNAL_LEVEL_INFO, "GetNewThreadIDString, tid %s ,cap %llu\n", id.c_str(), (long long unsigned)id.capacity());
+			if_constexpr(TILOG_THREAD_ID_MAX_LEN != SIZE_MAX)
 			{
-				if (id.size() > EZLOG_THREAD_ID_MAX_LEN) { id.resize(EZLOG_THREAD_ID_MAX_LEN); }
+				if (id.size() > TILOG_THREAD_ID_MAX_LEN) { id.resize(TILOG_THREAD_ID_MAX_LEN); }
 			}
 			return new String(std::move(id));
 		}
@@ -293,12 +293,12 @@ namespace ezlogspace
 		// if you want to use c-style function on this object, such as strlen(&this->front())
 		// you must call c_str() function before to ensure end with the '\0'
 		// see ensureZero
-		class EzLogString : public EzLogObject
+		class TiLogString : public TiLogObject
 		{
-			friend class ezlogspace::EzLogStream;
+			friend class tilogspace::TiLogStream;
 
 		public:
-			inline ~EzLogString()
+			inline ~TiLogString()
 			{
 				DEBUG_ASSERT(m_front <= m_end);
 				DEBUG_ASSERT(m_end <= m_cap);
@@ -308,20 +308,20 @@ namespace ezlogspace
 #endif
 			}
 
-			explicit inline EzLogString()
+			explicit inline TiLogString()
 			{
 				create();
 			}
 
 			// init with capacity n
-			inline EzLogString(EPlaceHolder, positive_size_t n)
+			inline TiLogString(EPlaceHolder, positive_size_t n)
 			{
 				do_malloc(0, n);
 				ensureZero();
 			}
 
 			// init with n count of c
-			inline EzLogString(positive_size_t n, char c)
+			inline TiLogString(positive_size_t n, char c)
 			{
 				do_malloc(n, n);
 				memset(m_front, c, n);
@@ -329,43 +329,43 @@ namespace ezlogspace
 			}
 
 			// length without '\0'
-			inline EzLogString(const char* s, size_t length)
+			inline TiLogString(const char* s, size_t length)
 			{
 				do_malloc(length, get_better_cap(length));
 				memcpy(m_front, s, length);
 				ensureZero();
 			}
 
-			explicit inline EzLogString(const char* s) : EzLogString(s, strlen(s)) {}
+			explicit inline TiLogString(const char* s) : TiLogString(s, strlen(s)) {}
 
-			inline EzLogString(const EzLogString& x) : EzLogString(x.data(), x.size()) {}
+			inline TiLogString(const TiLogString& x) : TiLogString(x.data(), x.size()) {}
 
-			inline EzLogString(EzLogString&& x) noexcept
+			inline TiLogString(TiLogString&& x) noexcept
 			{
 				makeThisInvalid();
 				*this = std::move(x);
 			}
 
-			inline EzLogString& operator=(const String& str)
+			inline TiLogString& operator=(const String& str)
 			{
 				clear();
 				return append(str.data(), str.size());
 			}
 
-			inline EzLogString& operator=(const EzLogString& str)
+			inline TiLogString& operator=(const TiLogString& str)
 			{
 				clear();
 				return append(str.data(), str.size());
 			}
 
-			inline EzLogString& operator=(EzLogString&& str) noexcept
+			inline TiLogString& operator=(TiLogString&& str) noexcept
 			{
 				swap(str);
 				str.clear();
 				return *this;
 			}
 
-			inline void swap(EzLogString& str) noexcept
+			inline void swap(TiLogString& str) noexcept
 			{
 				std::swap(this->m_front, str.m_front);
 				std::swap(this->m_end, str.m_end);
@@ -450,19 +450,19 @@ namespace ezlogspace
 				return "";
 			}
 
-			inline EzLogString& append(char c)
+			inline TiLogString& append(char c)
 			{
 				request_new_size(sizeof(char));
 				return append_unsafe(c);
 			}
 
-			inline EzLogString& append(unsigned char c)
+			inline TiLogString& append(unsigned char c)
 			{
 				request_new_size(sizeof(unsigned char));
 				return append_unsafe(c);
 			}
 
-			inline EzLogString& append(const char* cstr)
+			inline TiLogString& append(const char* cstr)
 			{
 				char* p = (char*)cstr;
 				size_t off = size();
@@ -486,20 +486,20 @@ namespace ezlogspace
 			}
 
 			// length without '\0'
-			inline EzLogString& append(const char* cstr, size_t length)
+			inline TiLogString& append(const char* cstr, size_t length)
 			{
 				request_new_size(length);
 				return append_unsafe(cstr, length);
 			}
 
-			inline EzLogString& append(const String& str)
+			inline TiLogString& append(const String& str)
 			{
 				size_t length = str.length();
 				request_new_size(length);
 				return append_unsafe(str);
 			}
 
-			inline EzLogString& append(const EzLogString& str)
+			inline TiLogString& append(const TiLogString& str)
 			{
 				size_t length = str.length();
 				request_new_size(length);
@@ -507,39 +507,39 @@ namespace ezlogspace
 			}
 
 
-			inline EzLogString& append(uint64_t x)
+			inline TiLogString& append(uint64_t x)
 			{
-				request_new_size(EZLOG_UINT64_MAX_CHAR_LEN);
+				request_new_size(TILOG_UINT64_MAX_CHAR_LEN);
 				return append_unsafe(x);
 			}
 
-			inline EzLogString& append(int64_t x)
+			inline TiLogString& append(int64_t x)
 			{
-				request_new_size(EZLOG_INT64_MAX_CHAR_LEN);
+				request_new_size(TILOG_INT64_MAX_CHAR_LEN);
 				return append_unsafe(x);
 			}
 
-			inline EzLogString& append(uint32_t x)
+			inline TiLogString& append(uint32_t x)
 			{
-				request_new_size(EZLOG_UINT32_MAX_CHAR_LEN);
+				request_new_size(TILOG_UINT32_MAX_CHAR_LEN);
 				return append_unsafe(x);
 			}
 
-			inline EzLogString& append(int32_t x)
+			inline TiLogString& append(int32_t x)
 			{
-				request_new_size(EZLOG_INT32_MAX_CHAR_LEN);
+				request_new_size(TILOG_INT32_MAX_CHAR_LEN);
 				return append_unsafe(x);
 			}
 
-			inline EzLogString& append(double x)
+			inline TiLogString& append(double x)
 			{
-				request_new_size(EZLOG_DOUBLE_MAX_CHAR_LEN);
+				request_new_size(TILOG_DOUBLE_MAX_CHAR_LEN);
 				return append_unsafe(x);
 			}
 
-			inline EzLogString& append(float x)
+			inline TiLogString& append(float x)
 			{
-				request_new_size(EZLOG_FLOAT_MAX_CHAR_LEN);
+				request_new_size(TILOG_FLOAT_MAX_CHAR_LEN);
 				return append_unsafe(x);
 			}
 
@@ -547,28 +547,28 @@ namespace ezlogspace
 
 			//*********  Warning!!!You must reserve enough capacity ,then append is safe ******************************//
 
-			inline EzLogString& append_unsafe(char c)
+			inline TiLogString& append_unsafe(char c)
 			{
 				*m_end++ = c;
 				ensureZero();
 				return *this;
 			}
 
-			inline EzLogString& append_unsafe(unsigned char c)
+			inline TiLogString& append_unsafe(unsigned char c)
 			{
 				*m_end++ = c;
 				ensureZero();
 				return *this;
 			}
 
-			inline EzLogString& append_unsafe(const char* cstr)
+			inline TiLogString& append_unsafe(const char* cstr)
 			{
 				size_t length = strlen(cstr);
 				return append_unsafe(cstr, length);
 			}
 
 			// length without '\0'
-			inline EzLogString& append_unsafe(const char* cstr, size_t length)
+			inline TiLogString& append_unsafe(const char* cstr, size_t length)
 			{
 				memcpy(m_end, cstr, length);
 				m_end += length;
@@ -578,7 +578,7 @@ namespace ezlogspace
 
 			// length without '\0'
 			template <size_t length>
-			inline EzLogString& append_smallstr_unsafe(const char* cstr)
+			inline TiLogString& append_smallstr_unsafe(const char* cstr)
 			{
 				memcpy_small<length>(m_end, cstr);
 				m_end += length;
@@ -586,7 +586,7 @@ namespace ezlogspace
 				return *this;
 			}
 
-			inline EzLogString& append_unsafe(const String& str)
+			inline TiLogString& append_unsafe(const String& str)
 			{
 				size_t length = str.length();
 				memcpy(m_end, str.data(), length);
@@ -595,7 +595,7 @@ namespace ezlogspace
 				return *this;
 			}
 
-			inline EzLogString& append_unsafe(const EzLogString& str)
+			inline TiLogString& append_unsafe(const TiLogString& str)
 			{
 				size_t length = str.length();
 				memcpy(m_end, str.data(), length);
@@ -605,7 +605,7 @@ namespace ezlogspace
 			}
 
 
-			inline EzLogString& append_unsafe(uint64_t x)
+			inline TiLogString& append_unsafe(uint64_t x)
 			{
 				size_t off = u64toa_sse2(x, m_end);
 				m_end += off;
@@ -613,7 +613,7 @@ namespace ezlogspace
 				return *this;
 			}
 
-			inline EzLogString& append_unsafe(int64_t x)
+			inline TiLogString& append_unsafe(int64_t x)
 			{
 				size_t off = i64toa_sse2(x, m_end);
 				m_end += off;
@@ -621,7 +621,7 @@ namespace ezlogspace
 				return *this;
 			}
 
-			inline EzLogString& append_unsafe(uint32_t x)
+			inline TiLogString& append_unsafe(uint32_t x)
 			{
 				size_t off = u32toa_sse2(x, m_end);
 				m_end += off;
@@ -629,7 +629,7 @@ namespace ezlogspace
 				return *this;
 			}
 
-			inline EzLogString& append_unsafe(int32_t x)
+			inline TiLogString& append_unsafe(int32_t x)
 			{
 				uint32_t off = i32toa_sse2(x, m_end);
 				m_end += off;
@@ -637,7 +637,7 @@ namespace ezlogspace
 				return *this;
 			}
 
-			inline EzLogString& append_unsafe(double x)
+			inline TiLogString& append_unsafe(double x)
 			{
 				char* _end = rapidjson::internal::dtoa(x, m_end);
 				m_end = _end;
@@ -645,7 +645,7 @@ namespace ezlogspace
 				return *this;
 			}
 
-			inline EzLogString& append_unsafe(float x)
+			inline TiLogString& append_unsafe(float x)
 			{
 				size_t off = ftoa(m_end, x, NULL);
 				m_end += off;
@@ -681,62 +681,62 @@ namespace ezlogspace
 			inline void clear() { resetsize(0); }
 
 		public:
-			inline EzLogString& operator+=(char c)
+			inline TiLogString& operator+=(char c)
 			{
 				return append(c);
 			}
 
-			inline EzLogString& operator+=(unsigned char c)
+			inline TiLogString& operator+=(unsigned char c)
 			{
 				return append(c);
 			}
 
-			inline EzLogString& operator+=(const char* cstr)
+			inline TiLogString& operator+=(const char* cstr)
 			{
 				return append(cstr);
 			}
 
-			inline EzLogString& operator+=(const String& str)
+			inline TiLogString& operator+=(const String& str)
 			{
 				return append(str);
 			}
 
-			inline EzLogString& operator+=(const EzLogString& str)
+			inline TiLogString& operator+=(const TiLogString& str)
 			{
 				return append(str);
 			}
 
-			inline EzLogString& operator+=(uint64_t x)
+			inline TiLogString& operator+=(uint64_t x)
 			{
 				return append(x);
 			}
 
-			inline EzLogString& operator+=(int64_t x)
+			inline TiLogString& operator+=(int64_t x)
 			{
 				return append(x);
 			}
 
-			inline EzLogString& operator+=(uint32_t x)
+			inline TiLogString& operator+=(uint32_t x)
 			{
 				return append(x);
 			}
 
-			inline EzLogString& operator+=(int32_t x)
+			inline TiLogString& operator+=(int32_t x)
 			{
 				return append(x);
 			}
 
-			inline EzLogString& operator+=(double x)
+			inline TiLogString& operator+=(double x)
 			{
 				return append(x);
 			}
 
-			inline EzLogString& operator+=(float x)
+			inline TiLogString& operator+=(float x)
 			{
 				return append(x);
 			}
 
-			friend std::ostream& operator<<(std::ostream& os, const EzLogString& internal);
+			friend std::ostream& operator<<(std::ostream& os, const TiLogString& internal);
 
 		protected:
 			inline size_t size_with_zero()
@@ -816,7 +816,7 @@ namespace ezlogspace
 			// ptr is m_front
 			inline void do_free()
 			{
-				EZLOG_FREE_FUNCTION(this->m_front);
+				TILOG_FREE_FUNCTION(this->m_front);
 			}
 
 		protected:
@@ -831,33 +831,33 @@ namespace ezlogspace
 				(RESERVE_RATE_DEFAULT >> RESERVE_RATE_BASE) >= 1, "fatal error, see constructor capacity must bigger than length");
 		};
 
-		inline std::ostream& operator<<(std::ostream& os, const EzLogString& internal)
+		inline std::ostream& operator<<(std::ostream& os, const TiLogString& internal)
 		{
 			return os << internal.c_str();
 		}
 
-		inline String operator+(const String& lhs, const EzLogString& rhs)
+		inline String operator+(const String& lhs, const TiLogString& rhs)
 		{
 			return String(lhs + rhs.c_str());
 		}
 
 		template <typename T, typename = typename std::enable_if<std::is_arithmetic<T>::value, void>::type>
-		inline EzLogString operator+(EzLogString&& lhs, T rhs)
+		inline TiLogString operator+(TiLogString&& lhs, T rhs)
 		{
 			return std::move(lhs += rhs);
 		}
 
-		inline EzLogString operator+(EzLogString&& lhs, EzLogString& rhs)
+		inline TiLogString operator+(TiLogString&& lhs, TiLogString& rhs)
 		{
 			return std::move(lhs += rhs);
 		}
 
-		inline EzLogString operator+(EzLogString&& lhs, EzLogString&& rhs)
+		inline TiLogString operator+(TiLogString&& lhs, TiLogString&& rhs)
 		{
 			return std::move(lhs += rhs);
 		}
 
-		inline EzLogString operator+(EzLogString&& lhs, const char* rhs)
+		inline TiLogString operator+(TiLogString&& lhs, const char* rhs)
 		{
 			return std::move(lhs += rhs);
 		}
@@ -868,10 +868,10 @@ namespace ezlogspace
 	namespace internal
 	{
 
-#ifdef __________________________________________________EzLogCircularQueue__________________________________________________
+#ifdef __________________________________________________TiLogCircularQueue__________________________________________________
 
 		template <typename T, size_t CAPACITY>
-		class PodCircularQueue : public EzLogObject
+		class PodCircularQueue : public TiLogObject
 		{
 			static_assert(std::is_pod<T>::value, "fatal error");
 
@@ -1097,40 +1097,40 @@ namespace ezlogspace
 
 #endif
 
-#ifdef EZLOG_OS_WIN
+#ifdef TILOG_OS_WIN
 		static const auto nullfd = INVALID_HANDLE_VALUE;
-#elif defined(EZLOG_OS_POSIX)
+#elif defined(TILOG_OS_POSIX)
 		static constexpr int nullfd = -1;
 #else
 		static constexpr FILE* nullfd = nullptr;
 #endif
-		struct fctx_t : EzLogObject
+		struct fctx_t : TiLogObject
 		{
-			EzLogStringView fpath{};
+			TiLogStringView fpath{};
 			std::remove_const<decltype(nullfd)>::type fd{ nullfd };
 		} fctx;
 
-		class EzLogFile : public EzLogObject
+		class TiLogFile : public TiLogObject
 		{
 		public:
-			inline EzLogFile() = default;
-			inline ~EzLogFile();
-			inline EzLogFile(EzLogStringView fpath, const char mode[3]);
+			inline TiLogFile() = default;
+			inline ~TiLogFile();
+			inline TiLogFile(TiLogStringView fpath, const char mode[3]);
 			inline operator bool() const;
 			inline bool valid() const;
-			inline bool open(EzLogStringView fpath, const char mode[3]);
+			inline bool open(TiLogStringView fpath, const char mode[3]);
 			inline void close();
 			inline void sync();
-			inline int64_t write(EzLogStringView buf);
+			inline int64_t write(TiLogStringView buf);
 
 		private:
 			fctx_t fctx;
 		};
 
-		class EzLogNonePrinter : public EzLogPrinter
+		class TiLogNonePrinter : public TiLogPrinter
 		{
 		public:
-			EZLOG_SINGLE_INSTANCE_DECLARE(EzLogNonePrinter)
+			TILOG_SINGLE_INSTANCE_DECLARE(TiLogNonePrinter)
 			EPrinterID getUniqueID() const override
 			{
 				return PRINTER_ID_NONE;
@@ -1139,84 +1139,84 @@ namespace ezlogspace
 			void sync() override{};
 
 		protected:
-			EzLogNonePrinter() = default;
-			~EzLogNonePrinter() = default;
+			TiLogNonePrinter() = default;
+			~TiLogNonePrinter() = default;
 		};
 
-		class EzLogTerminalPrinter : public EzLogPrinter
+		class TiLogTerminalPrinter : public TiLogPrinter
 		{
 
 		public:
-			EZLOG_SINGLE_INSTANCE_DECLARE(EzLogTerminalPrinter)
+			TILOG_SINGLE_INSTANCE_DECLARE(TiLogTerminalPrinter)
 
 			void onAcceptLogs(MetaData metaData) override;
 			void sync() override;
 			EPrinterID getUniqueID() const override;
 
 		protected:
-			EzLogTerminalPrinter();
+			TiLogTerminalPrinter();
 		};
 
-		class EzLogFilePrinter : public EzLogPrinter
+		class TiLogFilePrinter : public TiLogPrinter
 		{
 
 		public:
-			EZLOG_SINGLE_INSTANCE_DECLARE(EzLogFilePrinter)
+			TILOG_SINGLE_INSTANCE_DECLARE(TiLogFilePrinter)
 
 			void onAcceptLogs(MetaData metaData) override;
 			void sync() override;
 			EPrinterID getUniqueID() const override;
 
 		protected:
-			EzLogFilePrinter();
+			TiLogFilePrinter();
 
-			~EzLogFilePrinter() override;
+			~TiLogFilePrinter() override;
 			void CreateNewFile(MetaData metaData);
 			size_t singleFilePrintedLogSize = SIZE_MAX;
 			uint64_t s_printedLogsLength = 0;
 
 		protected:
-			const String folderPath = EZLOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER;
-			EzLogFile mFile;
+			const String folderPath = TILOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER;
+			TiLogFile mFile;
 			uint32_t index = 1;
 		};
 
 
-		using CrcQueueLogCache = PodCircularQueue<EzLogBean*, EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE - 1>;
-		using VecLogCache = Vector<EzLogBean*>;
+		using CrcQueueLogCache = PodCircularQueue<TiLogBean*, TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE - 1>;
+		using VecLogCache = Vector<TiLogBean*>;
 		using VecLogCachePtr = VecLogCache*;
-		using EzLogCoreString = EzLogString;
+		using TiLogCoreString = TiLogString;
 
 		using ThreadLocalSpinMutex = OptimisticMutex;
 
-		struct ThreadStru : public EzLogObject
+		struct ThreadStru : public TiLogObject
 		{
 			CrcQueueLogCache qCache;
 			ThreadLocalSpinMutex spinMtx;	  // protect cache
 
-			EzLogStream* noUseStream;
+			TiLogStream* noUseStream;
 			const String* tid;
 			std::mutex thrdExistMtx;
 			std::condition_variable thrdExistCV;
 
 			explicit ThreadStru(size_t cacheSize)
-				: qCache(), spinMtx(), noUseStream(EzLogStreamHelper::get_no_used_stream()), tid(GetThreadIDString()), thrdExistMtx(),
+				: qCache(), spinMtx(), noUseStream(TiLogStreamHelper::get_no_used_stream()), tid(GetThreadIDString()), thrdExistMtx(),
 				  thrdExistCV()
 			{
-				DEBUG_PRINT(EZLOG_INTERNAL_LEVEL_INFO, "ThreadStru new tid %p %s\n", tid, tid->c_str());
+				DEBUG_PRINT(TILOG_INTERNAL_LEVEL_INFO, "ThreadStru new tid %p %s\n", tid, tid->c_str());
 			};
 
 			~ThreadStru()
 			{
-				EzLogStreamHelper::free_no_used_stream(noUseStream);
-				DEBUG_PRINT(EZLOG_INTERNAL_LEVEL_INFO, "ThreadStru delete tid %p %s\n", tid, tid->c_str());
+				TiLogStreamHelper::free_no_used_stream(noUseStream);
+				DEBUG_PRINT(TILOG_INTERNAL_LEVEL_INFO, "ThreadStru delete tid %p %s\n", tid, tid->c_str());
 				delete (tid);
 				// DEBUG_RUN(tid = NULL);
 			}
 		};
 
 		template <typename Container, size_t CAPACITY = 4>
-		struct ContainerList : public EzLogObject
+		struct ContainerList : public TiLogObject
 		{
 			static_assert(CAPACITY >= 1, "fatal error");
 			using iterator = typename List<Container>::iterator;
@@ -1276,49 +1276,49 @@ namespace ezlogspace
 			iterator it_next;
 		};
 
-		class EzLogCore;
-		struct MergeList : public ContainerList<VecLogCache, EZLOG_MERGE_QUEUE_RATE>
+		class TiLogCore;
+		struct MergeList : public ContainerList<VecLogCache, TILOG_MERGE_QUEUE_RATE>
 		{
 		};
 
-		struct DeliverList : public ContainerList<VecLogCache, EZLOG_DELIVER_QUEUE_SIZE>
+		struct DeliverList : public ContainerList<VecLogCache, TILOG_DELIVER_QUEUE_SIZE>
 		{
 		};
 
-		struct IOBean : public EzLogCoreString
+		struct IOBean : public TiLogCoreString
 		{
-			EzLogTime mTime;
-			using EzLogCoreString::EzLogCoreString;
-			using EzLogCoreString::operator=;
+			TiLogTime mTime;
+			using TiLogCoreString::TiLogCoreString;
+			using TiLogCoreString::operator=;
 		};
 		using IOBeanSharedPtr = std::shared_ptr<IOBean>;
 
-		struct IOBeanPoolFeat : EzLogSyncedObjectPoolFeat<IOBean>
+		struct IOBeanPoolFeat : TiLogSyncedObjectPoolFeat<IOBean>
 		{
 			using mutex_type = OptimisticMutex;
-			constexpr static uint32_t MAX_SIZE = EZLOG_IO_STRING_DATA_POOL_SIZE;
+			constexpr static uint32_t MAX_SIZE = TILOG_IO_STRING_DATA_POOL_SIZE;
 			inline static void recreate(IOBean* p) { p->clear(); }
 		};
 
-		using SyncedIOBeanPool = EzLogSyncedObjectPool<IOBean, IOBeanPoolFeat>;
+		using SyncedIOBeanPool = TiLogSyncedObjectPool<IOBean, IOBeanPoolFeat>;
 
-		struct GCList : public ContainerList<VecLogCache, EZLOG_GARBAGE_COLLECTION_QUEUE_RATE>
+		struct GCList : public ContainerList<VecLogCache, TILOG_GARBAGE_COLLECTION_QUEUE_RATE>
 		{
 			void gc()
 			{
 				for (auto it = mList.begin(); it != it_next; ++it)
 				{
 					auto& v = *it;
-					for (EzLogBean* pBean : v)
+					for (TiLogBean* pBean : v)
 					{
-						DestroyPushedEzLogBean(pBean);
+						DestroyPushedTiLogBean(pBean);
 					}
 				}
 				clear();
 			}
 		};
 
-		struct ThreadStruQueue : public EzLogObject, public std::mutex
+		struct ThreadStruQueue : public TiLogObject, public std::mutex
 		{
 			List<ThreadStru*> availQueue;		 // thread is live
 			List<ThreadStru*> waitMergeQueue;	 // thread is dead, but some logs have not merge to global print string
@@ -1326,11 +1326,11 @@ namespace ezlogspace
 		};
 
 
-		struct EzLogBeanPtrComp
+		struct TiLogBeanPtrComp
 		{
-			bool operator()(const EzLogBean* const lhs, const EzLogBean* const rhs) const
+			bool operator()(const TiLogBean* const lhs, const TiLogBean* const rhs) const
 			{
-				return lhs->ezLogTime < rhs->ezLogTime;
+				return lhs->tiLogTime < rhs->tiLogTime;
 			}
 		};
 
@@ -1342,32 +1342,32 @@ namespace ezlogspace
 			}
 		};
 
-		struct VecLogCacheFeat : EzLogObjectPoolFeat
+		struct VecLogCacheFeat : TiLogObjectPoolFeat
 		{
 			inline void operator()(VecLogCache& x)
 			{
 				x.clear();
 			}
 		};
-		using VecLogCachePool = EzLogObjectPool<VecLogCache, VecLogCacheFeat>;
+		using VecLogCachePool = TiLogObjectPool<VecLogCache, VecLogCacheFeat>;
 
 		template<typename MutexType=std::mutex,typename task_t = std::function<void()>>
-		class EzLogTaskQueueBasic
+		class TiLogTaskQueueBasic
 		{
 		public:
-			EzLogTaskQueueBasic(const EzLogTaskQueueBasic& rhs) = delete;
-			EzLogTaskQueueBasic(EzLogTaskQueueBasic&& rhs) = delete;
+			TiLogTaskQueueBasic(const TiLogTaskQueueBasic& rhs) = delete;
+			TiLogTaskQueueBasic(TiLogTaskQueueBasic&& rhs) = delete;
 
-			explicit EzLogTaskQueueBasic(bool runAtOnce = true)
+			explicit TiLogTaskQueueBasic(bool runAtOnce = true)
 			{
 				stat = RUN;
-				DEBUG_PRINT(INFO, "Create EzLogTaskQueueBasic %p\n", this);
+				DEBUG_PRINT(INFO, "Create TiLogTaskQueueBasic %p\n", this);
 				if (runAtOnce) { start(); }
 			}
-			~EzLogTaskQueueBasic() { wait_stop(); }
+			~TiLogTaskQueueBasic() { wait_stop(); }
 			void start()
 			{
-				loopThread = std::thread(&EzLogTaskQueueBasic::loop, this);
+				loopThread = std::thread(&TiLogTaskQueueBasic::loop, this);
 				looptid = GetStringByStdThreadID(loopThread.get_id());
 				DEBUG_PRINT(INFO, "loop %p start loop, thread id %s\n", this, looptid.c_str());
 			}
@@ -1416,7 +1416,7 @@ namespace ezlogspace
 			std::thread loopThread;
 			Deque<task_t> taskDeque;
 			String looptid;
-			EZLOG_MUTEXABLE_CLASS_MACRO_WITH_CV(MutexType, mtx, CondType, cv)
+			TILOG_MUTEXABLE_CLASS_MACRO_WITH_CV(MutexType, mtx, CondType, cv)
 			enum
 			{
 				RUN,
@@ -1425,21 +1425,21 @@ namespace ezlogspace
 			} stat;
 		};
 
-		class EzLogTaskQueue : public EzLogTaskQueueBasic<OptimisticMutex>
+		class TiLogTaskQueue : public TiLogTaskQueueBasic<OptimisticMutex>
 		{
 		};
 
-		struct EzLogTaskQueueFeat : EzLogObjectPoolFeat
+		struct TiLogTaskQueueFeat : TiLogObjectPoolFeat
 		{
-			void operator()(EzLogTaskQueue& q) {}
+			void operator()(TiLogTaskQueue& q) {}
 		};
 
-		using EzLogThreadPool = EzLogObjectPool<EzLogTaskQueue, EzLogTaskQueueFeat>;
+		using TiLogThreadPool = TiLogObjectPool<TiLogTaskQueue, TiLogTaskQueueFeat>;
 
 
-		class EzLogCore;
-		using CoreThrdEntryFuncType = void (EzLogCore::*)();
-		struct CoreThrdStruBase : public EzLogObject
+		class TiLogCore;
+		using CoreThrdEntryFuncType = void (TiLogCore::*)();
+		struct CoreThrdStruBase : public TiLogObject
 		{
 			bool mExist = false;
 			virtual ~CoreThrdStruBase()= default;;
@@ -1463,21 +1463,21 @@ namespace ezlogspace
 
 		using VecLogCachePtrPriorQueue =PriorQueue <VecLogCachePtr,Vector<VecLogCachePtr>, VecLogCachePtrLesser>;
 
-		class EzLogCore : public EzLogObject
+		class TiLogCore : public TiLogObject
 		{
 		public:
-			inline static void pushLog(EzLogBean* pBean);
+			inline static void pushLog(TiLogBean* pBean);
 
 			inline static uint64_t getPrintedLogs();
 
 			inline static void clearPrintedLogs();
 
-			EZLOG_SINGLE_INSTANCE_DECLARE(EzLogCore)
+			TILOG_SINGLE_INSTANCE_DECLARE(TiLogCore)
 
 			inline static ThreadStru* initForEveryThread();
 
 		private:
-			EzLogCore();
+			TiLogCore();
 
 			inline void CreateCoreThread(CoreThrdStruBase& thrd);
 
@@ -1485,13 +1485,13 @@ namespace ezlogspace
 
 			inline ThreadStru* InitForEveryThread();
 
-			void IPushLog(EzLogBean* pBean);
+			void IPushLog(TiLogBean* pBean);
 
-			inline EzLogStringView& GetTimeStrFromSystemClock(const EzLogBean& bean);
+			inline TiLogStringView& GetTimeStrFromSystemClock(const TiLogBean& bean);
 
-			inline EzLogStringView AppendToMergeCacheByMetaData(const EzLogBean& bean);
+			inline TiLogStringView AppendToMergeCacheByMetaData(const TiLogBean& bean);
 
-			void MergeThreadStruQueueToSet(List<ThreadStru*>& thread_queue, EzLogBean& bean);
+			void MergeThreadStruQueueToSet(List<ThreadStru*>& thread_queue, TiLogBean& bean);
 
 			void MergeSortForGlobalQueue();
 
@@ -1514,7 +1514,7 @@ namespace ezlogspace
 
 			void thrdFuncPoll();
 
-			EzLogTime mergeLogsToOneString(VecLogCache& deliverCache);
+			TiLogTime mergeLogsToOneString(VecLogCache& deliverCache);
 
 			void pushLogsToPrinters(IOBean* pIObean);
 
@@ -1524,12 +1524,12 @@ namespace ezlogspace
 
 			inline void InitInternalThreadBeforeRun();
 
-			inline bool LocalCircularQueuePushBack(EzLogBean* obj);
+			inline bool LocalCircularQueuePushBack(TiLogBean* obj);
 
 			inline bool MoveLocalCacheToGlobal(ThreadStru& bean);
 
 		private:
-			static constexpr size_t GLOBAL_SIZE = EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE * EZLOG_MERGE_QUEUE_RATE;
+			static constexpr size_t GLOBAL_SIZE = TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE * TILOG_MERGE_QUEUE_RATE;
 
 			thread_local static ThreadStru* s_pThreadLocalStru;
 
@@ -1547,10 +1547,10 @@ namespace ezlogspace
 			struct PollStru : public CoreThrdStruBase
 			{
 				static constexpr uint32_t s_pollPeriodSplitNum = 100;
-				atomic_uint32_t s_pollPeriodus{ EZLOG_POLL_DEFAULT_THREAD_SLEEP_MS * 1000 / s_pollPeriodSplitNum };
-				EzLogTime s_log_last_time{ ezlogtimespace::ELogTime::MAX };
+				atomic_uint32_t s_pollPeriodus{ TILOG_POLL_DEFAULT_THREAD_SLEEP_MS * 1000 / s_pollPeriodSplitNum };
+				TiLogTime s_log_last_time{ tilogtimespace::ELogTime::MAX };
 				const char* GetName() override { return "poll"; }
-				CoreThrdEntryFuncType GetThrdEntryFunc() override { return &EzLogCore::thrdFuncPoll; }
+				CoreThrdEntryFuncType GetThrdEntryFunc() override { return &TiLogCore::thrdFuncPoll; }
 			} mPoll;
 
 			struct MergeStru : public CoreThrdStru
@@ -1563,7 +1563,7 @@ namespace ezlogspace
 				VecLogCachePtrPriorQueue mThreadStruPriorQueue;	   // prior queue of ThreadStru cache
 				VecLogCachePool mVecPool;
 				const char* GetName() override { return "merge"; }
-				CoreThrdEntryFuncType GetThrdEntryFunc() override { return &EzLogCore::thrdFuncMergeLogs; }
+				CoreThrdEntryFuncType GetThrdEntryFunc() override { return &TiLogCore::thrdFuncMergeLogs; }
 				bool IsBusy() override { return mList.full(); }
 			} mMerge;
 
@@ -1572,13 +1572,13 @@ namespace ezlogspace
 				DeliverList mDeliverCache;	  // input
 				DeliverList mNeedGCCache;	  // output
 
-				EzLogTime::origin_time_type mPreLogTime{};
-				char mctimestr[EZLOG_CTIME_MAX_LEN] = { 0 };
-				EzLogStringView mLogTimeStringView{ mctimestr, EZLOG_CTIME_MAX_LEN - 1 };
+				TiLogTime::origin_time_type mPreLogTime{};
+				char mctimestr[TILOG_CTIME_MAX_LEN] = { 0 };
+				TiLogStringView mLogTimeStringView{ mctimestr, TILOG_CTIME_MAX_LEN - 1 };
 				IOBean mIoBean;
 				SyncedIOBeanPool mIOBeanPool;
 				const char* GetName() override { return "deliver"; }
-				CoreThrdEntryFuncType GetThrdEntryFunc() override { return &EzLogCore::thrdFuncDeliverLogs; }
+				CoreThrdEntryFuncType GetThrdEntryFunc() override { return &TiLogCore::thrdFuncDeliverLogs; }
 				bool IsBusy() override { return mDeliverCache.full(); }
 			} mDeliver;
 
@@ -1587,7 +1587,7 @@ namespace ezlogspace
 				GCList mGCList;	   // input
 
 				const char* GetName() override { return "gc"; }
-				CoreThrdEntryFuncType GetThrdEntryFunc() override { return &EzLogCore::thrdFuncGarbageCollection; }
+				CoreThrdEntryFuncType GetThrdEntryFunc() override { return &TiLogCore::thrdFuncGarbageCollection; }
 				bool IsBusy() override { return mGCList.full(); }
 			} mGC;
 
@@ -1605,78 +1605,78 @@ namespace ezlogspace
 		};
 		// clang-format on
 
-		class EzLogPrinterData
+		class TiLogPrinterData
 		{
-			friend class EzLogPrinterManager;
+			friend class TiLogPrinterManager;
 		public:
-			explicit EzLogPrinterData(EzLogPrinter* p) : mTaskQueue(), mpPrinter(p) {}
+			explicit TiLogPrinterData(TiLogPrinter* p) : mTaskQueue(), mpPrinter(p) {}
 
 			void pushLogs(IOBeanSharedPtr bufPtr)
 			{
 				auto printTask = [this, bufPtr] {
-					EzLogPrinter::buf_t buf{ bufPtr->data(), bufPtr->size(), bufPtr->mTime };
-					mpPrinter->onAcceptLogs(EzLogPrinter::MetaData{ &buf });
+					TiLogPrinter::buf_t buf{ bufPtr->data(), bufPtr->size(), bufPtr->mTime };
+					mpPrinter->onAcceptLogs(TiLogPrinter::MetaData{ &buf });
 				};
 				mTaskQueue.pushTask(printTask);
 			}
 
 		private:
-			using buf_t = EzLogPrinter::buf_t;
-			using EzLogPrinterTask = EzLogTaskQueueBasic<std::mutex>;
+			using buf_t = TiLogPrinter::buf_t;
+			using TiLogPrinterTask = TiLogTaskQueueBasic<std::mutex>;
 
-			EzLogPrinterTask mTaskQueue;
-			EzLogPrinter* mpPrinter;
+			TiLogPrinterTask mTaskQueue;
+			TiLogPrinter* mpPrinter;
 		};
 
-		class EzLogPrinterManager : public EzLogObject
+		class TiLogPrinterManager : public TiLogObject
 		{
 
-			friend class EzLogCore;
+			friend class TiLogCore;
 
-			friend class ezlogspace::EzLogStream;
+			friend class tilogspace::TiLogStream;
 
 		public:
-			EZLOG_SINGLE_INSTANCE_DECLARE(EzLogPrinterManager)
+			TILOG_SINGLE_INSTANCE_DECLARE(TiLogPrinterManager)
 
 			static void enablePrinter(EPrinterID printer);
 			static void disablePrinter(EPrinterID printer);
 			static void setPrinter(printer_ids_t printerIds);
 
-			EzLogPrinterManager();
-			~EzLogPrinterManager();
+			TiLogPrinterManager();
+			~TiLogPrinterManager();
 
 		public:	   // internal public
-			void addPrinter(EzLogPrinter* printer);
+			void addPrinter(TiLogPrinter* printer);
 			static void pushLogsToPrinters(IOBeanSharedPtr spLogs);
 
 		public:
 			static void setLogLevel(ELevel level);
 			static ELevel getDynamicLogLevel();
 
-			static Vector<EzLogPrinter*> getAllValidPrinters();
-			static Vector<EzLogPrinter*> getCurrentPrinters();
+			static Vector<TiLogPrinter*> getAllValidPrinters();
+			static Vector<TiLogPrinter*> getCurrentPrinters();
 
 		protected:
-			constexpr static uint32_t GetPrinterNum() { return GetArgsNum<EZLOG_REGISTER_PRINTERS>(); }
+			constexpr static uint32_t GetPrinterNum() { return GetArgsNum<TILOG_REGISTER_PRINTERS>(); }
 
 			constexpr static int32_t GetIndexFromPUID(EPrinterID e) { return e > 128 ? _ : log2table[(uint32_t)e]; }
 
 		private:
-			Vector<EzLogPrinter*> m_printers;
+			Vector<TiLogPrinter*> m_printers;
 			std::atomic<printer_ids_t> m_dest;
 			std::atomic<ELevel> m_level;
 		};
 
 	}	 // namespace internal
-}	 // namespace ezlogspace
+}	 // namespace tilogspace
 
 
-namespace ezlogspace
+namespace tilogspace
 {
 	namespace internal
 	{
-#ifdef __________________________________________________EzLogFile__________________________________________________
-#ifdef EZLOG_OS_WIN
+#ifdef __________________________________________________TiLogFile__________________________________________________
+#ifdef TILOG_OS_WIN
 		inline static HANDLE func_open(const char* path, const char mode[3])
 		{
 			HANDLE fd = nullfd;
@@ -1696,13 +1696,13 @@ namespace ezlogspace
 		}
 		inline static void func_close(HANDLE fd) { CloseHandle(fd); }
 		inline static void func_sync(HANDLE fd) { FlushFileBuffers(fd); }
-		inline static int64_t func_write(HANDLE fd, EzLogStringView buf)
+		inline static int64_t func_write(HANDLE fd, TiLogStringView buf)
 		{
 			DWORD r = 0;
 			WriteFile(fd, buf.data(), (DWORD)buf.size(), &r, 0);
 			return (int64_t)r;
 		}
-#elif defined(EZLOG_OS_POSIX)
+#elif defined(TILOG_OS_POSIX)
 		inline static int func_open(const char* path, const char mode[3])
 		{
 			int fd = nullfd;
@@ -1722,25 +1722,25 @@ namespace ezlogspace
 		}
 		inline static void func_close(int fd) { ::close(fd); }
 		inline static void func_sync(int fd) { ::fsync(fd); }
-		inline static int64_t func_write(int fd, EzLogStringView buf) { return ::write(fd, buf.data(), buf.size()); }
+		inline static int64_t func_write(int fd, TiLogStringView buf) { return ::write(fd, buf.data(), buf.size()); }
 #else
 		inline static FILE* func_open(const char* path, const char mode[3]) { return fopen(path, mode); }
 		inline static void func_close(FILE* fd) { fclose(fd); }
 		inline static void func_sync(FILE* fd) { fflush(fd); }
-		inline static int64_t func_write(FILE* fd, EzLogStringView buf) { return (int64_t)fwrite(buf.data(), buf.size(), 1, fd); }
+		inline static int64_t func_write(FILE* fd, TiLogStringView buf) { return (int64_t)fwrite(buf.data(), buf.size(), 1, fd); }
 #endif
 
-		inline EzLogFile::~EzLogFile() { close(); }
-		inline EzLogFile::EzLogFile(EzLogStringView fpath, const char mode[3]) { open(fpath, mode); }
-		inline EzLogFile::operator bool() const { return fctx.fd != nullfd; }
-		inline bool EzLogFile::valid() const { return fctx.fd != nullfd; }
-		inline bool EzLogFile::open(EzLogStringView fpath, const char mode[3])
+		inline TiLogFile::~TiLogFile() { close(); }
+		inline TiLogFile::TiLogFile(TiLogStringView fpath, const char mode[3]) { open(fpath, mode); }
+		inline TiLogFile::operator bool() const { return fctx.fd != nullfd; }
+		inline bool TiLogFile::valid() const { return fctx.fd != nullfd; }
+		inline bool TiLogFile::open(TiLogStringView fpath, const char mode[3])
 		{
 			this->close();
 			fctx.fpath = fpath;
 			return (fctx.fd = func_open(fpath.data(), mode)) != nullfd;
 		}
-		inline void EzLogFile::close()
+		inline void TiLogFile::close()
 		{
 			if (valid())
 			{
@@ -1748,73 +1748,73 @@ namespace ezlogspace
 				fctx.fd = nullfd;
 			}
 		}
-		inline void EzLogFile::sync() { valid() ? func_sync(fctx.fd) : void(0); }
-		inline int64_t EzLogFile::write(EzLogStringView buf) { return valid() ? func_write(fctx.fd, buf) : -1; }
+		inline void TiLogFile::sync() { valid() ? func_sync(fctx.fd) : void(0); }
+		inline int64_t TiLogFile::write(TiLogStringView buf) { return valid() ? func_write(fctx.fd, buf) : -1; }
 
 #endif
 
 
-		EZLOG_SINGLE_INSTANCE_DECLARE_OUTER(EzLogNonePrinter)
+		TILOG_SINGLE_INSTANCE_DECLARE_OUTER(TiLogNonePrinter)
 
-#ifdef __________________________________________________EzLogTerminalPrinter__________________________________________________
-		EZLOG_SINGLE_INSTANCE_DECLARE_OUTER(EzLogTerminalPrinter)
+#ifdef __________________________________________________TiLogTerminalPrinter__________________________________________________
+		TILOG_SINGLE_INSTANCE_DECLARE_OUTER(TiLogTerminalPrinter)
 
-		EzLogTerminalPrinter::EzLogTerminalPrinter()
+		TiLogTerminalPrinter::TiLogTerminalPrinter()
 		{
 			std::ios::sync_with_stdio(false);
 		};
-		void EzLogTerminalPrinter::onAcceptLogs(MetaData metaData)
+		void TiLogTerminalPrinter::onAcceptLogs(MetaData metaData)
 		{
 			std::cout.write(metaData->logs, metaData->logs_size);
 		}
 
-		void EzLogTerminalPrinter::sync()
+		void TiLogTerminalPrinter::sync()
 		{
 			std::cout.flush();
 		}
-		EPrinterID EzLogTerminalPrinter::getUniqueID() const
+		EPrinterID TiLogTerminalPrinter::getUniqueID() const
 		{
-			return PRINTER_EZLOG_TERMINAL;
+			return PRINTER_TILOG_TERMINAL;
 		}
 
 #endif
 
 
-#ifdef __________________________________________________EzLogFilePrinter__________________________________________________
-		EZLOG_SINGLE_INSTANCE_DECLARE_OUTER(EzLogFilePrinter)
+#ifdef __________________________________________________TiLogFilePrinter__________________________________________________
+		TILOG_SINGLE_INSTANCE_DECLARE_OUTER(TiLogFilePrinter)
 
-		EzLogFilePrinter::EzLogFilePrinter()
+		TiLogFilePrinter::TiLogFilePrinter()
 		{
 			DEBUG_ASSERT(!folderPath.empty());
 			DEBUG_ASSERT(folderPath.back() == '/');
 		}
 
-		EzLogFilePrinter::~EzLogFilePrinter() {}
+		TiLogFilePrinter::~TiLogFilePrinter() {}
 
-		void EzLogFilePrinter::onAcceptLogs(MetaData metaData)
+		void TiLogFilePrinter::onAcceptLogs(MetaData metaData)
 		{
-			if (singleFilePrintedLogSize > EZLOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE)
+			if (singleFilePrintedLogSize > TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE)
 			{
 				s_printedLogsLength += singleFilePrintedLogSize;
 				singleFilePrintedLogSize = 0;
 				if (mFile)
 				{
 					mFile.close();
-					DEBUG_PRINT(EZLOG_INTERNAL_LEVEL_VERBOSE, "sync and write index=%u \n", (unsigned)index);
+					DEBUG_PRINT(TILOG_INTERNAL_LEVEL_VERBOSE, "sync and write index=%u \n", (unsigned)index);
 				}
 
 				CreateNewFile(metaData);
 			}
 			if (mFile)
 			{
-				mFile.write(EzLogStringView{metaData->logs,metaData->logs_size});
+				mFile.write(TiLogStringView{metaData->logs,metaData->logs_size});
 				singleFilePrintedLogSize += metaData->logs_size;
 			}
 		}
 
-		void EzLogFilePrinter::CreateNewFile(MetaData metaData)
+		void TiLogFilePrinter::CreateNewFile(MetaData metaData)
 		{
-			char timeStr[EZLOG_CTIME_MAX_LEN];
+			char timeStr[TILOG_CTIME_MAX_LEN];
 			size_t size = TimePointToTimeCStr(timeStr, metaData->logTime.get_origin_time());
 			String s;
 			char indexs[9];
@@ -1831,13 +1831,13 @@ namespace ezlogspace
 			mFile.open({ s.data(), s.size() }, "a");
 		}
 
-		void EzLogFilePrinter::sync()
+		void TiLogFilePrinter::sync()
 		{
 			mFile.sync();
 		}
-		EPrinterID EzLogFilePrinter::getUniqueID() const
+		EPrinterID TiLogFilePrinter::getUniqueID() const
 		{
-			return PRINTER_EZLOG_FILE;
+			return PRINTER_TILOG_FILE;
 		}
 #endif
 
@@ -1845,7 +1845,7 @@ namespace ezlogspace
 		template <typename Args0, typename... Args>
 		struct PrinterRegister
 		{
-			static void RegisterForPrinter(EzLogPrinterManager& impl)
+			static void RegisterForPrinter(TiLogPrinterManager& impl)
 			{
 				PrinterRegister<Args0>::RegisterForPrinter(impl);
 				PrinterRegister<Args...>::RegisterForPrinter(impl);
@@ -1854,7 +1854,7 @@ namespace ezlogspace
 		template <typename Args0>
 		struct PrinterRegister<Args0>
 		{
-			static void RegisterForPrinter(EzLogPrinterManager& impl)
+			static void RegisterForPrinter(TiLogPrinterManager& impl)
 			{
 				Args0::init();	  // init printer
 				auto printer = Args0::getInstance();
@@ -1862,89 +1862,89 @@ namespace ezlogspace
 			}
 		};
 		template <typename... Args>
-		void DoRegisterForPrinter(EzLogPrinterManager& impl)
+		void DoRegisterForPrinter(TiLogPrinterManager& impl)
 		{
 			PrinterRegister<Args...>::RegisterForPrinter(impl);
 		}
 #endif
 
-#ifdef __________________________________________________EzLogPrinterManager__________________________________________________
-		EZLOG_SINGLE_INSTANCE_DECLARE_OUTER(EzLogPrinterManager)
-		EzLogPrinterManager::EzLogPrinterManager() : m_printers(GetPrinterNum()), m_dest(DEFAULT_ENABLED_PRINTERS), m_level(STATIC_LOG_LEVEL)
+#ifdef __________________________________________________TiLogPrinterManager__________________________________________________
+		TILOG_SINGLE_INSTANCE_DECLARE_OUTER(TiLogPrinterManager)
+		TiLogPrinterManager::TiLogPrinterManager() : m_printers(GetPrinterNum()), m_dest(DEFAULT_ENABLED_PRINTERS), m_level(STATIC_LOG_LEVEL)
 		{
-			for (EzLogPrinter*& x : m_printers)
+			for (TiLogPrinter*& x : m_printers)
 			{
-				x = EzLogNonePrinter::getInstance();
+				x = TiLogNonePrinter::getInstance();
 			}
-			DoRegisterForPrinter<EZLOG_REGISTER_PRINTERS>(*this);
+			DoRegisterForPrinter<TILOG_REGISTER_PRINTERS>(*this);
 		}
 
-		EzLogPrinterManager::~EzLogPrinterManager()
+		TiLogPrinterManager::~TiLogPrinterManager()
 		{
-			for (EzLogPrinter* x : m_printers)
+			for (TiLogPrinter* x : m_printers)
 			{
 				delete x;
 			}
 		}
 
-		void EzLogPrinterManager::enablePrinter(EPrinterID printer)
+		void TiLogPrinterManager::enablePrinter(EPrinterID printer)
 		{
 			getInstance()->m_dest |= ((printer_ids_t)printer);
 		}
-		void EzLogPrinterManager::disablePrinter(EPrinterID printer)
+		void TiLogPrinterManager::disablePrinter(EPrinterID printer)
 		{
 			getInstance()->m_dest &= (~(printer_ids_t)printer);
 		}
 
-		void EzLogPrinterManager::setPrinter(printer_ids_t printerIds)
+		void TiLogPrinterManager::setPrinter(printer_ids_t printerIds)
 		{
 			getInstance()->m_dest = printerIds;
 		}
 
-		void EzLogPrinterManager::addPrinter(EzLogPrinter* printer)
+		void TiLogPrinterManager::addPrinter(TiLogPrinter* printer)
 		{
 			EPrinterID e = printer->getUniqueID();
 			int32_t u = GetIndexFromPUID(e);
 			DEBUG_PRINT(
-				EZLOG_INTERNAL_LEVEL_ALWAYS, "addPrinter printer[addr: %p id: %d index: %d] taskqueue[addr %p]\n", printer, (int)e, (int)u,
+				TILOG_INTERNAL_LEVEL_ALWAYS, "addPrinter printer[addr: %p id: %d index: %d] taskqueue[addr %p]\n", printer, (int)e, (int)u,
 				&printer->mData->mTaskQueue);
 			DEBUG_ASSERT2(u >= 0, e, u);
 			DEBUG_ASSERT2(u < PRINTER_ID_MAX, e, u);
 			m_printers[u] = printer;
 		}
 
-		void EzLogPrinterManager::pushLogsToPrinters(IOBeanSharedPtr spLogs)
+		void TiLogPrinterManager::pushLogsToPrinters(IOBeanSharedPtr spLogs)
 		{
-			Vector<EzLogPrinter*> printers = EzLogPrinterManager::getCurrentPrinters();
+			Vector<TiLogPrinter*> printers = TiLogPrinterManager::getCurrentPrinters();
 			if (printers.empty()) { return; }
-			DEBUG_PRINT(EZLOG_INTERNAL_LEVEL_INFO, "prepare to push %u bytes\n", (unsigned)spLogs->size());
-			for (EzLogPrinter* printer : printers)
+			DEBUG_PRINT(TILOG_INTERNAL_LEVEL_INFO, "prepare to push %u bytes\n", (unsigned)spLogs->size());
+			for (TiLogPrinter* printer : printers)
 			{
 				printer->mData->pushLogs(std::move(spLogs));
 			}
 		}
 
-		void EzLogPrinterManager::setLogLevel(ELevel level)
+		void TiLogPrinterManager::setLogLevel(ELevel level)
 		{
 			getInstance()->m_level = level;
 		}
 
-		ELevel EzLogPrinterManager::getDynamicLogLevel()
+		ELevel TiLogPrinterManager::getDynamicLogLevel()
 		{
 			return getInstance()->m_level;
 		}
 
-		Vector<EzLogPrinter*> EzLogPrinterManager::getAllValidPrinters()
+		Vector<TiLogPrinter*> TiLogPrinterManager::getAllValidPrinters()
 		{
-			Vector<EzLogPrinter*>& v = getInstance()->m_printers;
-			return Vector<EzLogPrinter*>(v.begin() + 1, v.end());
+			Vector<TiLogPrinter*>& v = getInstance()->m_printers;
+			return Vector<TiLogPrinter*>(v.begin() + 1, v.end());
 		}
 
-		Vector<EzLogPrinter*> EzLogPrinterManager::getCurrentPrinters()
+		Vector<TiLogPrinter*> TiLogPrinterManager::getCurrentPrinters()
 		{
 			printer_ids_t dest = getInstance()->m_dest;
-			Vector<EzLogPrinter*>& arr = getInstance()->m_printers;
-			Vector<EzLogPrinter*> vec;
+			Vector<TiLogPrinter*>& arr = getInstance()->m_printers;
+			Vector<TiLogPrinter*> vec;
 			for (uint32_t i = 1, x = PRINTER_ID_BEGIN; x < PRINTER_ID_MAX; ++i, x <<= 1U)
 			{
 				if ((dest & x)) { vec.push_back(arr[i]); }
@@ -1957,16 +1957,16 @@ namespace ezlogspace
 
 	namespace internal
 	{
-#ifdef __________________________________________________EzLogCore__________________________________________________
-		EZLOG_SINGLE_INSTANCE_DECLARE_OUTER(EzLogCore)
-#if EZLOG_IS_AUTO_INIT
-		thread_local ThreadStru* EzLogCore::s_pThreadLocalStru = EzLogCore::getRInstance().InitForEveryThread();
+#ifdef __________________________________________________TiLogCore__________________________________________________
+		TILOG_SINGLE_INSTANCE_DECLARE_OUTER(TiLogCore)
+#if TILOG_IS_AUTO_INIT
+		thread_local ThreadStru* TiLogCore::s_pThreadLocalStru = TiLogCore::getRInstance().InitForEveryThread();
 #else
-		thread_local ThreadStru* EzLogCore::s_pThreadLocalStru = nullptr;
+		thread_local ThreadStru* TiLogCore::s_pThreadLocalStru = nullptr;
 #endif
-		EzLogCore::EzLogCore()
+		TiLogCore::TiLogCore()
 		{
-			ezlogspace::internal::ezlogtimespace::SteadyClockImpl::init();
+			tilogspace::internal::tilogtimespace::SteadyClockImpl::init();
 			CreateCoreThread(mPoll);
 			CreateCoreThread(mMerge);
 			CreateCoreThread(mDeliver);
@@ -1977,22 +1977,22 @@ namespace ezlogspace
 			mInited = true;
 		}
 
-		inline void EzLogCore::CreateCoreThread(CoreThrdStruBase& thrd) {
+		inline void TiLogCore::CreateCoreThread(CoreThrdStruBase& thrd) {
 			thrd.mExist=true;
 			thread th(thrd.GetThrdEntryFunc(), this);
 			th.detach();
 		}
 
-		inline bool EzLogCore::LocalCircularQueuePushBack(EzLogBean* obj)
+		inline bool TiLogCore::LocalCircularQueuePushBack(TiLogBean* obj)
 		{
 			//DEBUG_ASSERT(!s_pThreadLocalStru->qCache.full());
 			s_pThreadLocalStru->qCache.emplace_back(obj);
 			return s_pThreadLocalStru->qCache.full();
 		}
 
-		inline bool EzLogCore::MoveLocalCacheToGlobal(ThreadStru& bean)
+		inline bool TiLogCore::MoveLocalCacheToGlobal(ThreadStru& bean)
 		{
-			static_assert(EZLOG_MERGE_QUEUE_RATE >= 1, "fatal error!too small");
+			static_assert(TILOG_MERGE_QUEUE_RATE >= 1, "fatal error!too small");
 
 			CrcQueueLogCache::to_vector(mMerge.mMergeCaches, bean.qCache);
 			bean.qCache.clear();
@@ -2000,21 +2000,21 @@ namespace ezlogspace
 			return mMerge.mList.full();
 		}
 
-		inline ThreadStru* EzLogCore::initForEveryThread()
+		inline ThreadStru* TiLogCore::initForEveryThread()
 		{
 			DEBUG_ASSERT(getInstance() != nullptr);	   // must call init() first
 			DEBUG_ASSERT(s_pThreadLocalStru== nullptr);//must be called only once
 			return getRInstance().InitForEveryThread();
 		}
 
-		ThreadStru* EzLogCore::InitForEveryThread()
+		ThreadStru* TiLogCore::InitForEveryThread()
 		{
-			s_pThreadLocalStru = new ThreadStru(EZLOG_SINGLE_THREAD_QUEUE_MAX_SIZE);
+			s_pThreadLocalStru = new ThreadStru(TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE);
 			DEBUG_ASSERT(s_pThreadLocalStru != nullptr);
 			DEBUG_ASSERT(s_pThreadLocalStru->tid != nullptr);
 			synchronized(mThreadStruQueue)
 			{
-				DEBUG_PRINT(EZLOG_INTERNAL_LEVEL_VERBOSE, "availQueue insert thrd tid= %s\n", s_pThreadLocalStru->tid->c_str());
+				DEBUG_PRINT(TILOG_INTERNAL_LEVEL_VERBOSE, "availQueue insert thrd tid= %s\n", s_pThreadLocalStru->tid->c_str());
 				mThreadStruQueue.availQueue.emplace_back(s_pThreadLocalStru);
 			}
 			unique_lock<mutex> lk(s_pThreadLocalStru->thrdExistMtx);
@@ -2025,12 +2025,12 @@ namespace ezlogspace
 		//根据c++11标准，在atexit函数构造前的全局变量会在atexit函数结束后析构，
 		//在atexit后构造的函数会先于atexit函数析构，
 		// 故用到全局变量需要在此函数前构造
-		void EzLogCore::AtExit()
+		void TiLogCore::AtExit()
 		{
-			DEBUG_PRINT(EZLOG_INTERNAL_LEVEL_INFO, "exit,wait poll\n");
+			DEBUG_PRINT(TILOG_INTERNAL_LEVEL_INFO, "exit,wait poll\n");
 			mPoll.s_pollPeriodus = 1;	   // make poll faster
 
-			DEBUG_PRINT(EZLOG_INTERNAL_LEVEL_INFO, "prepare to exit\n");
+			DEBUG_PRINT(TILOG_INTERNAL_LEVEL_INFO, "prepare to exit\n");
 			mToExit = true;
 
 			while (mPoll.mExist)
@@ -2043,18 +2043,18 @@ namespace ezlogspace
 			{
 				this_thread::yield();
 			}
-			DEBUG_PRINT(EZLOG_INTERNAL_LEVEL_INFO, "exit\n");
-			EzLog::destroy();
+			DEBUG_PRINT(TILOG_INTERNAL_LEVEL_INFO, "exit\n");
+			TiLog::destroy();
 		}
 
-		inline void EzLogCore::pushLog(EzLogBean* pBean)
+		inline void TiLogCore::pushLog(TiLogBean* pBean)
 		{
 			DEBUG_ASSERT(getInstance() != nullptr);			// must call init() first
 			DEBUG_ASSERT(s_pThreadLocalStru != nullptr);	// must call initForEveryThread() first
 			getRInstance().IPushLog(pBean);
 		}
 
-		void EzLogCore::IPushLog(EzLogBean* pBean)
+		void TiLogCore::IPushLog(TiLogBean* pBean)
 		{
 			ThreadStru& stru = *s_pThreadLocalStru;
 			unique_lock<ThreadLocalSpinMutex> lk_local(stru.spinMtx);
@@ -2077,7 +2077,7 @@ namespace ezlogspace
 		}
 
 
-		void EzLogCore::MergeThreadStruQueueToSet(List<ThreadStru*>& thread_queue, EzLogBean& bean)
+		void TiLogCore::MergeThreadStruQueueToSet(List<ThreadStru*>& thread_queue, TiLogBean& bean)
 		{
 			// mMerge.mInsertToSetVec.clear();
 			auto& v = mMerge.mInsertToSetVec;
@@ -2091,13 +2091,13 @@ namespace ezlogspace
 					DEBUG_ASSERT(it_sub_beg <= it_sub_end);
 					size_t size = it_sub_end - it_sub_beg;
 					if (size == 0) { return it_sub_end; }
-					auto it_sub = std::upper_bound(it_sub_beg, it_sub_end, &bean, EzLogBeanPtrComp());
+					auto it_sub = std::upper_bound(it_sub_beg, it_sub_end, &bean, TiLogBeanPtrComp());
 					return it_sub;
 				};
 
 				size_t qCachePreSize = qCache.size();
 				DEBUG_PRINT(
-					EZLOG_INTERNAL_LEVEL_DEBUG, "MergeThreadStruQueueToSet ptid %p , tid %s , qCachePreSize= %u\n", threadStru.tid,
+					TILOG_INTERNAL_LEVEL_DEBUG, "MergeThreadStruQueueToSet ptid %p , tid %s , qCachePreSize= %u\n", threadStru.tid,
 					(threadStru.tid == nullptr ? "" : threadStru.tid->c_str()), (unsigned)qCachePreSize);
 				if (qCachePreSize == 0) { continue; }
 				if (bean.time() < (**qCache.first_sub_queue_begin()).time()) { continue; }
@@ -2125,7 +2125,7 @@ namespace ezlogspace
 				}
 
 				auto sorted_judge_func = [&v]() {
-					if (!std::is_sorted(v.begin(), v.end(), EzLogBeanPtrComp()))
+					if (!std::is_sorted(v.begin(), v.end(), TiLogBeanPtrComp()))
 					{
 						for (uint32_t index = 0; index != v.size(); index++)
 						{
@@ -2143,25 +2143,25 @@ namespace ezlogspace
 			}
 		}
 
-		void EzLogCore::MergeSortForGlobalQueue()
+		void TiLogCore::MergeSortForGlobalQueue()
 		{
 			auto& v = mMerge.mMergeSortVec;
 			auto& s = mMerge.mThreadStruPriorQueue;
 			v.clear();
-			DEBUG_PRINT(EZLOG_INTERNAL_LEVEL_INFO, "Begin of MergeSortForGlobalQueue\n");
-			EzLogBean referenceBean;
-			referenceBean.time() = mPoll.s_log_last_time = EzLogTime::now();  //referenceBean's time is the biggest up to now
+			DEBUG_PRINT(TILOG_INTERNAL_LEVEL_INFO, "Begin of MergeSortForGlobalQueue\n");
+			TiLogBean referenceBean;
+			referenceBean.time() = mPoll.s_log_last_time = TiLogTime::now();  //referenceBean's time is the biggest up to now
 
 			mMerge.mVecPool.release_all();
 			synchronized(mThreadStruQueue)
 			{
 				mMerge.mVecPool.resize(mThreadStruQueue.availQueue.size() + mThreadStruQueue.waitMergeQueue.size());
 				DEBUG_PRINT(
-					EZLOG_INTERNAL_LEVEL_INFO, "MergeThreadStruQueueToSet availQueue.size()= %u\n",
+					TILOG_INTERNAL_LEVEL_INFO, "MergeThreadStruQueueToSet availQueue.size()= %u\n",
 					(unsigned)mThreadStruQueue.availQueue.size());
 				MergeThreadStruQueueToSet(mThreadStruQueue.availQueue, referenceBean);
 				DEBUG_PRINT(
-					EZLOG_INTERNAL_LEVEL_INFO, "MergeThreadStruQueueToSet waitMergeQueue.size()= %u\n",
+					TILOG_INTERNAL_LEVEL_INFO, "MergeThreadStruQueueToSet waitMergeQueue.size()= %u\n",
 					(unsigned)mThreadStruQueue.waitMergeQueue.size());
 				MergeThreadStruQueueToSet(mThreadStruQueue.waitMergeQueue, referenceBean);
 			}
@@ -2173,7 +2173,7 @@ namespace ezlogspace
 				VecLogCachePtr it_sec_vec = s.top();
 				s.pop();
 				v.resize(it_fst_vec->size() + it_sec_vec->size());
-				std::merge(it_fst_vec->begin(), it_fst_vec->end(), it_sec_vec->begin(), it_sec_vec->end(), v.begin(), EzLogBeanPtrComp());
+				std::merge(it_fst_vec->begin(), it_fst_vec->end(), it_sec_vec->begin(), it_sec_vec->end(), v.begin(), TiLogBeanPtrComp());
 
 				std::swap(*it_sec_vec, v);
 				s.emplace(it_sec_vec);
@@ -2190,12 +2190,12 @@ namespace ezlogspace
 				}
 			}
 			DEBUG_PRINT(
-				EZLOG_INTERNAL_LEVEL_INFO, "End of MergeSortForGlobalQueue mMergeCaches size= %u\n", (unsigned)mMerge.mMergeCaches.size());
+				TILOG_INTERNAL_LEVEL_INFO, "End of MergeSortForGlobalQueue mMergeCaches size= %u\n", (unsigned)mMerge.mMergeCaches.size());
 		}
 
-		inline void EzLogCore::SwapMergeCacheAndDeliverCache()
+		inline void TiLogCore::SwapMergeCacheAndDeliverCache()
 		{
-			static_assert(EZLOG_DELIVER_QUEUE_SIZE >= 1, "fatal error!too small");
+			static_assert(TILOG_DELIVER_QUEUE_SIZE >= 1, "fatal error!too small");
 
 			std::unique_lock<std::mutex> lk_deliver = GetDeliverLock();
 			mDeliver.mDeliverCache.swap_insert(mMerge.mMergeCaches);
@@ -2207,26 +2207,26 @@ namespace ezlogspace
 
 		}
 
-		inline EzLogStringView& EzLogCore::GetTimeStrFromSystemClock(const EzLogBean& bean)
+		inline TiLogStringView& TiLogCore::GetTimeStrFromSystemClock(const TiLogBean& bean)
 		{
-			EzLogTime::origin_time_type oriTime = bean.time().get_origin_time();
+			TiLogTime::origin_time_type oriTime = bean.time().get_origin_time();
 			if (oriTime == mDeliver.mPreLogTime)
 			{
 				// time is equal to pre,no need to update
 			} else
 			{
 				size_t len = TimePointToTimeCStr(mDeliver.mctimestr, oriTime);
-				mDeliver.mPreLogTime = len == 0 ? EzLogTime::origin_time_type() : oriTime;
+				mDeliver.mPreLogTime = len == 0 ? TiLogTime::origin_time_type() : oriTime;
 				mDeliver.mLogTimeStringView.resize(len);
 			}
 			return mDeliver.mLogTimeStringView;
 		}
 
-		inline EzLogStringView
-		EzLogCore::AppendToMergeCacheByMetaData(const EzLogBean& bean)
+		inline TiLogStringView
+		TiLogCore::AppendToMergeCacheByMetaData(const TiLogBean& bean)
 		{
 #ifdef IUILS_DEBUG_WITH_ASSERT
-			constexpr size_t L3 = sizeof(' ') + EZLOG_UINT64_MAX_CHAR_LEN;
+			constexpr size_t L3 = sizeof(' ') + TILOG_UINT64_MAX_CHAR_LEN;
 #else
 			constexpr size_t L3 = 0;
 #endif	  // IUILS_DEBUG_WITH_ASSERT
@@ -2239,13 +2239,13 @@ namespace ezlogspace
 			auto beanSVSize = bean.str_view().size();
 			using llu = long long unsigned;
 			DEBUG_PRINT(
-				EZLOG_INTERNAL_LEVEL_VERBOSE, "preSize %llu, tid[size %llu,addr %p ,val %.6s], timeSVSize %llu, fileLen %llu, beanSVSize %llu\n",
+				TILOG_INTERNAL_LEVEL_VERBOSE, "preSize %llu, tid[size %llu,addr %p ,val %.6s], timeSVSize %llu, fileLen %llu, beanSVSize %llu\n",
 				(llu)preSize, (llu)tidSize, bean.tid, bean.tid->c_str(), (llu)timeSVSize, (llu)fileLen, (llu)beanSVSize);
-			size_t reserveSize = L3 + preSize + tidSize + timeSVSize + fileLen + beanSVSize + EZLOG_PREFIX_RESERVE_LEN_L1;
-			DEBUG_PRINT(EZLOG_INTERNAL_LEVEL_VERBOSE, "logs size %llu capacity %llu \n", (llu)logs.size(), (llu)logs.capacity());
+			size_t reserveSize = L3 + preSize + tidSize + timeSVSize + fileLen + beanSVSize + TILOG_PREFIX_RESERVE_LEN_L1;
+			DEBUG_PRINT(TILOG_INTERNAL_LEVEL_VERBOSE, "logs size %llu capacity %llu \n", (llu)logs.size(), (llu)logs.capacity());
 			logs.reserve(reserveSize);
 
-#define _SL(S) EZLOG_STRING_LEN_OF_CHAR_ARRAY(S)
+#define _SL(S) TILOG_STRING_LEN_OF_CHAR_ARRAY(S)
 			logs.append_unsafe('\n');												  // 1
 			DEBUG_RUN(logs.append_unsafe(bean.time().toSteadyFlag()));				  // L3_1
 			DEBUG_RUN(logs.append_unsafe(' '));										  // L3_2
@@ -2257,7 +2257,7 @@ namespace ezlogspace
 
 			logs.append_unsafe(bean.file, bean.fileLen);						   //----bean.fileLen
 			logs.append_unsafe(':');											   // 1
-			logs.append_unsafe((uint32_t)bean.line);							   // 5 see EZLOG_UINT16_MAX_CHAR_LEN
+			logs.append_unsafe((uint32_t)bean.line);							   // 5 see TILOG_UINT16_MAX_CHAR_LEN
 			logs.append_smallstr_unsafe<_SL("] ")>("] ");						   // 2
 			logs.append_unsafe(bean.str_view().data(), bean.str_view().size());	   //----bean.str_view()->size()
 #undef _SL
@@ -2266,10 +2266,10 @@ namespace ezlogspace
 			// dynamic L3= len of steady flag
 			// reserve L1+L2+L3 bytes
 			// clang-format on
-			return EzLogStringView(&logs[preSize], logs.end());
+			return TiLogStringView(&logs[preSize], logs.end());
 		}
 
-		inline std::unique_lock<std::mutex> EzLogCore::GetCoreThrdLock(CoreThrdStru& thrd)
+		inline std::unique_lock<std::mutex> TiLogCore::GetCoreThrdLock(CoreThrdStru& thrd)
 		{
 			std::unique_lock<std::mutex> lk(thrd.mMtx);
 			while (thrd.mDoing || thrd.IsBusy())
@@ -2286,16 +2286,16 @@ namespace ezlogspace
 			return lk;
 		}
 
-		inline std::unique_lock<std::mutex> EzLogCore::GetMergeLock() { return GetCoreThrdLock(mMerge); }
-		inline std::unique_lock<std::mutex> EzLogCore::GetDeliverLock() { return GetCoreThrdLock(mDeliver); }
-		inline std::unique_lock<std::mutex> EzLogCore::GetGCLock() { return GetCoreThrdLock(mGC); }
+		inline std::unique_lock<std::mutex> TiLogCore::GetMergeLock() { return GetCoreThrdLock(mMerge); }
+		inline std::unique_lock<std::mutex> TiLogCore::GetDeliverLock() { return GetCoreThrdLock(mDeliver); }
+		inline std::unique_lock<std::mutex> TiLogCore::GetGCLock() { return GetCoreThrdLock(mGC); }
 
-		inline void EzLogCore::NotifyGC()
+		inline void TiLogCore::NotifyGC()
 		{
-			static_assert(EZLOG_GARBAGE_COLLECTION_QUEUE_RATE >= EZLOG_DELIVER_QUEUE_SIZE, "fatal error!too small");
+			static_assert(TILOG_GARBAGE_COLLECTION_QUEUE_RATE >= TILOG_DELIVER_QUEUE_SIZE, "fatal error!too small");
 
 			unique_lock<mutex> ulk = GetGCLock();
-			DEBUG_PRINT(EZLOG_INTERNAL_LEVEL_INFO, "NotifyGC \n");
+			DEBUG_PRINT(TILOG_INTERNAL_LEVEL_INFO, "NotifyGC \n");
 			DEBUG_ASSERT1(mGC.mGCList.empty(), mGC.mGCList.size());
 			for (VecLogCache& c : mDeliver.mNeedGCCache)
 			{
@@ -2309,7 +2309,7 @@ namespace ezlogspace
 			mGC.mCV.notify_all();
 		}
 
-		void EzLogCore::thrdFuncMergeLogs()
+		void TiLogCore::thrdFuncMergeLogs()
 		{
 			InitInternalThreadBeforeRun();	  // this thread is no need log
 			while (true)
@@ -2345,32 +2345,32 @@ namespace ezlogspace
 			return;
 		}
 
-		EzLogTime EzLogCore::mergeLogsToOneString(VecLogCache& deliverCache)
+		TiLogTime TiLogCore::mergeLogsToOneString(VecLogCache& deliverCache)
 		{
 			DEBUG_ASSERT(!deliverCache.empty());
 
-			DEBUG_PRINT(EZLOG_INTERNAL_LEVEL_INFO, "mergeLogsToOneString,transform deliverCache to string\n");
-			for (EzLogBean* pBean : deliverCache)
+			DEBUG_PRINT(TILOG_INTERNAL_LEVEL_INFO, "mergeLogsToOneString,transform deliverCache to string\n");
+			for (TiLogBean* pBean : deliverCache)
 			{
-				DEBUG_RUN(EzLogBean::check(pBean));
-				EzLogBean& bean = *pBean;
+				DEBUG_RUN(TiLogBean::check(pBean));
+				TiLogBean& bean = *pBean;
 
 				GetTimeStrFromSystemClock(bean);
-				EzLogStringView&& log = AppendToMergeCacheByMetaData(bean);
+				TiLogStringView&& log = AppendToMergeCacheByMetaData(bean);
 			}
 			mPrintedLogs += deliverCache.size();
-			DEBUG_PRINT(EZLOG_INTERNAL_LEVEL_INFO, "End of mergeLogsToOneString,string size= %llu\n", (long long unsigned)mDeliver.mIoBean.size());
-			EzLogTime firstLogTime = deliverCache[0]->time();
+			DEBUG_PRINT(TILOG_INTERNAL_LEVEL_INFO, "End of mergeLogsToOneString,string size= %llu\n", (long long unsigned)mDeliver.mIoBean.size());
+			TiLogTime firstLogTime = deliverCache[0]->time();
 			mDeliver.mIoBean.mTime = firstLogTime;
 			return firstLogTime;
 		}
 
-		void EzLogCore::pushLogsToPrinters(IOBean* pIObean)
+		void TiLogCore::pushLogsToPrinters(IOBean* pIObean)
 		{
-			EzLogPrinterManager::pushLogsToPrinters({ pIObean, [this](IOBean* p) { mDeliver.mIOBeanPool.release(p); } });
+			TiLogPrinterManager::pushLogsToPrinters({ pIObean, [this](IOBean* p) { mDeliver.mIOBeanPool.release(p); } });
 		}
 
-		inline void EzLogCore::DeliverLogs()
+		inline void TiLogCore::DeliverLogs()
 		{
 			if (mDeliver.mDeliverCache.empty()) { return; }
 			for (VecLogCache& c : mDeliver.mDeliverCache)
@@ -2387,7 +2387,7 @@ namespace ezlogspace
 			}
 		}
 
-		void EzLogCore::thrdFuncDeliverLogs()
+		void TiLogCore::thrdFuncDeliverLogs()
 		{
 			InitInternalThreadBeforeRun();	  // this thread is no need log
 			while (true)
@@ -2411,8 +2411,8 @@ namespace ezlogspace
 				}
 				if (!mMerge.mExist)
 				{
-					Vector<EzLogPrinter*> printers = EzLogPrinterManager::getAllValidPrinters();
-					for (EzLogPrinter* printer : printers)
+					Vector<TiLogPrinter*> printers = TiLogPrinterManager::getAllValidPrinters();
+					for (TiLogPrinter* printer : printers)
 					{
 						printer->sync();
 					}
@@ -2423,7 +2423,7 @@ namespace ezlogspace
 			return;
 		}
 
-		void EzLogCore::thrdFuncGarbageCollection()
+		void TiLogCore::thrdFuncGarbageCollection()
 		{
 			InitInternalThreadBeforeRun();	  // this thread is no need log
 			while (true)
@@ -2462,28 +2462,28 @@ namespace ezlogspace
 		}
 
 		// return false when mToExit is true
-		inline bool EzLogCore::PollThreadSleep()
+		inline bool TiLogCore::PollThreadSleep()
 		{
 			for (uint32_t t = mPoll.s_pollPeriodSplitNum; t--;)
 			{
 				this_thread::sleep_for(chrono::microseconds(mPoll.s_pollPeriodus));
 				if (mToExit)
 				{
-					DEBUG_PRINT(EZLOG_INTERNAL_LEVEL_INFO, "poll thrd prepare to exit,try last poll\n");
+					DEBUG_PRINT(TILOG_INTERNAL_LEVEL_INFO, "poll thrd prepare to exit,try last poll\n");
 					return false;
 				}
 			}
 			return true;
 		}
 
-		void EzLogCore::thrdFuncPoll()
+		void TiLogCore::thrdFuncPoll()
 		{
 			InitInternalThreadBeforeRun();	  // this thread is no need log
 			do
 			{
 				unique_lock<mutex> lk_merge;
 				bool own_lk = tryLocks(lk_merge, mMerge.mMtx);
-				DEBUG_PRINT(EZLOG_INTERNAL_LEVEL_DEBUG, "thrdFuncPoll own lock? %d\n", (int)own_lk);
+				DEBUG_PRINT(TILOG_INTERNAL_LEVEL_DEBUG, "thrdFuncPoll own lock? %d\n", (int)own_lk);
 				if (own_lk)
 				{
 					mMerge.mDoing = true;
@@ -2505,7 +2505,7 @@ namespace ezlogspace
 					// no need to lock threadStru.spinMtx here because the thread of threadStru has died
 					if (threadStru.qCache.empty())
 					{
-						DEBUG_PRINT(EZLOG_INTERNAL_LEVEL_VERBOSE, "thrd %s exit and has been merged.move to toDelQueue\n", threadStru.tid->c_str());
+						DEBUG_PRINT(TILOG_INTERNAL_LEVEL_VERBOSE, "thrd %s exit and has been merged.move to toDelQueue\n", threadStru.tid->c_str());
 						mThreadStruQueue.toDelQueue.emplace_back(*it);
 						it = mThreadStruQueue.waitMergeQueue.erase(it);
 					} else
@@ -2525,7 +2525,7 @@ namespace ezlogspace
 					{
 						mtx.unlock();
 						++deadThreads;
-						DEBUG_PRINT(EZLOG_INTERNAL_LEVEL_VERBOSE, "thrd %s exit.move to waitMergeQueue\n", threadStru.tid->c_str());
+						DEBUG_PRINT(TILOG_INTERNAL_LEVEL_VERBOSE, "thrd %s exit.move to waitMergeQueue\n", threadStru.tid->c_str());
 						mThreadStruQueue.waitMergeQueue.emplace_back(*it);
 						it = mThreadStruQueue.availQueue.erase(it);
 					} else
@@ -2544,15 +2544,15 @@ namespace ezlogspace
 			return;
 		}
 
-		inline void EzLogCore::InitInternalThreadBeforeRun()
+		inline void TiLogCore::InitInternalThreadBeforeRun()
 		{
 			while (!mInited)	 // make sure all variables are inited
 			{
 				this_thread::yield();
 			}
 			if (s_pThreadLocalStru == nullptr) { return; }
-			EzLogStreamHelper::free_no_used_stream(s_pThreadLocalStru->noUseStream);
-			DEBUG_PRINT(EZLOG_INTERNAL_LEVEL_INFO, "free mem tid: %s\n", s_pThreadLocalStru->tid->c_str());
+			TiLogStreamHelper::free_no_used_stream(s_pThreadLocalStru->noUseStream);
+			DEBUG_PRINT(TILOG_INTERNAL_LEVEL_INFO, "free mem tid: %s\n", s_pThreadLocalStru->tid->c_str());
 			delete (s_pThreadLocalStru->tid);
 			s_pThreadLocalStru->tid = NULL;
 			synchronized(mThreadStruQueue)
@@ -2565,9 +2565,9 @@ namespace ezlogspace
 			}
 		}
 
-		inline void EzLogCore::AtInternalThreadExit(CoreThrdStruBase* thrd, CoreThrdStruBase* nextExitThrd)
+		inline void TiLogCore::AtInternalThreadExit(CoreThrdStruBase* thrd, CoreThrdStruBase* nextExitThrd)
 		{
-			DEBUG_PRINT(EZLOG_INTERNAL_LEVEL_INFO, "thrd %s exit.\n", thrd->GetName());
+			DEBUG_PRINT(TILOG_INTERNAL_LEVEL_INFO, "thrd %s exit.\n", thrd->GetName());
 			thrd->mExist = false;
 			mExistThreads--;
 			CoreThrdStru* t = dynamic_cast<CoreThrdStru*>(nextExitThrd);
@@ -2578,12 +2578,12 @@ namespace ezlogspace
 			t->mCV.notify_all();
 		}
 
-		inline uint64_t EzLogCore::getPrintedLogs()
+		inline uint64_t TiLogCore::getPrintedLogs()
 		{
 			return getRInstance().mPrintedLogs;
 		}
 
-		inline void EzLogCore::clearPrintedLogs()
+		inline void TiLogCore::clearPrintedLogs()
 		{
 			getRInstance().mPrintedLogs = 0;
 		}
@@ -2591,74 +2591,74 @@ namespace ezlogspace
 #endif
 
 	}	 // namespace internal
-}	 // namespace ezlogspace
-using namespace ezlogspace::internal;
+}	 // namespace tilogspace
+using namespace tilogspace::internal;
 
 
-namespace ezlogspace
+namespace tilogspace
 {
-	EzLogPrinter::EzLogPrinter() { mData = new EzLogPrinterData(this); }
-	EzLogPrinter::~EzLogPrinter() { delete mData; }
-#ifdef __________________________________________________EzLog__________________________________________________
+	TiLogPrinter::TiLogPrinter() { mData = new TiLogPrinterData(this); }
+	TiLogPrinter::~TiLogPrinter() { delete mData; }
+#ifdef __________________________________________________TiLog__________________________________________________
 
-	void EzLog::enablePrinter(EPrinterID printer)
+	void TiLog::enablePrinter(EPrinterID printer)
 	{
-		EzLogPrinterManager::enablePrinter(printer);
+		TiLogPrinterManager::enablePrinter(printer);
 	}
-	void EzLog::disablePrinter(EPrinterID printer)
+	void TiLog::disablePrinter(EPrinterID printer)
 	{
-		EzLogPrinterManager::disablePrinter(printer);
+		TiLogPrinterManager::disablePrinter(printer);
 	}
-	void EzLog::setPrinter(printer_ids_t printerIds)
+	void TiLog::setPrinter(printer_ids_t printerIds)
 	{
-		EzLogPrinterManager::setPrinter(printerIds);
-	}
-
-	void EzLog::pushLog(EzLogBean* pBean)
-	{
-		EzLogCore::pushLog(pBean);
+		TiLogPrinterManager::setPrinter(printerIds);
 	}
 
-	uint64_t EzLog::getPrintedLogs()
+	void TiLog::pushLog(TiLogBean* pBean)
 	{
-		return EzLogCore::getPrintedLogs();
+		TiLogCore::pushLog(pBean);
 	}
 
-	void EzLog::clearPrintedLogs()
+	uint64_t TiLog::getPrintedLogs()
 	{
-		EzLogCore::clearPrintedLogs();
+		return TiLogCore::getPrintedLogs();
 	}
 
-#if !EZLOG_IS_AUTO_INIT
-	void EzLog::init()
+	void TiLog::clearPrintedLogs()
 	{
-		ezlogspace::internal::ezlogtimespace::steady_flag_helper::init();
-		ezlogspace::internal::EzLogPrinterManager::init();
-		ezlogspace::internal::EzLogCore::init();
+		TiLogCore::clearPrintedLogs();
 	}
-	void EzLog::initForThisThread() { ezlogspace::internal::EzLogCore::initForEveryThread(); }
+
+#if !TILOG_IS_AUTO_INIT
+	void TiLog::init()
+	{
+		tilogspace::internal::tilogtimespace::steady_flag_helper::init();
+		tilogspace::internal::TiLogPrinterManager::init();
+		tilogspace::internal::TiLogCore::init();
+	}
+	void TiLog::initForThisThread() { tilogspace::internal::TiLogCore::initForEveryThread(); }
 #endif
 
-	void EzLog::destroy()
+	void TiLog::destroy()
 	{
-		delete ezlogspace::internal::ezlogtimespace::steady_flag_helper::getInstance();
-		delete ezlogspace::internal::EzLogPrinterManager::getInstance();
-		delete ezlogspace::internal::EzLogCore::getInstance();
+		delete tilogspace::internal::tilogtimespace::steady_flag_helper::getInstance();
+		delete tilogspace::internal::TiLogPrinterManager::getInstance();
+		delete tilogspace::internal::TiLogCore::getInstance();
 	}
 
-#if EZLOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL == TRUE
-	void EzLog::setLogLevel(ELevel level)
+#if TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL == TRUE
+	void TiLog::setLogLevel(ELevel level)
 	{
-		EzLogPrinterManager::setLogLevel(level);
+		TiLogPrinterManager::setLogLevel(level);
 	}
 
-	ELevel EzLog::getDynamicLogLevel()
+	ELevel TiLog::getDynamicLogLevel()
 	{
-		return EzLogPrinterManager::getDynamicLogLevel();
+		return TiLogPrinterManager::getDynamicLogLevel();
 	}
 #endif
 
 #endif
 
 
-}	 // namespace ezlogspace
+}	 // namespace tilogspace
