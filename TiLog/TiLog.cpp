@@ -316,10 +316,7 @@ namespace tilogspace
 #endif
 			}
 
-			explicit inline TiLogString()
-			{
-				create();
-			}
+			explicit inline TiLogString() { create(); }
 
 			// init with capacity n
 			inline TiLogString(EPlaceHolder, positive_size_t n)
@@ -345,33 +342,11 @@ namespace tilogspace
 			}
 
 			explicit inline TiLogString(const char* s) : TiLogString(s, strlen(s)) {}
-
 			inline TiLogString(const TiLogString& x) : TiLogString(x.data(), x.size()) {}
-
-			inline TiLogString(TiLogString&& x) noexcept
-			{
-				makeThisInvalid();
-				*this = std::move(x);
-			}
-
-			inline TiLogString& operator=(const String& str)
-			{
-				clear();
-				return append(str.data(), str.size());
-			}
-
-			inline TiLogString& operator=(const TiLogString& str)
-			{
-				clear();
-				return append(str.data(), str.size());
-			}
-
-			inline TiLogString& operator=(TiLogString&& str) noexcept
-			{
-				swap(str);
-				str.clear();
-				return *this;
-			}
+			inline TiLogString(TiLogString&& x) noexcept { makeThisInvalid(), *this = std::move(x); }
+			inline TiLogString& operator=(const String& str) { return clear(), append(str.data(), str.size()); }
+			inline TiLogString& operator=(const TiLogString& str) { return clear(), append(str.data(), str.size()); }
+			inline TiLogString& operator=(TiLogString&& str) noexcept { return swap(str), str.clear(), *this; }
 
 			inline void swap(TiLogString& str) noexcept
 			{
@@ -380,288 +355,69 @@ namespace tilogspace
 				std::swap(this->m_cap, str.m_cap);
 			}
 
-			inline explicit operator String() const
-			{
-				return String(m_front, size());
-			}
+			inline explicit operator String() const { return String(m_front, size()); }
 
 		public:
-			inline char* begin() {
-				return m_front;
-			}
-			inline const char* begin()const
-			{
-				return m_front;
-			}
-			inline char* end()
-			{
-				return m_end;
-			}
-			inline const char* end()const
-			{
-				return m_end;
-			}
+			inline char* begin() { return m_front; }
+			inline const char* begin() const { return m_front; }
+			inline char* end() { return m_end; }
+			inline const char* end() const { return m_end; }
+
 		public:
 			inline bool empty() const { return size() == 0; }
-			inline size_t size() const
-			{
-				check();
-				return m_end - m_front;
-			}
-
-			inline size_t length() const
-			{
-				return size();
-			}
-
+			inline size_t size() const { return check(), m_end - m_front; }
+			inline size_t length() const { return size(); }
 			// exclude '\0'
-			inline size_t capacity() const
-			{
-				check();
-				return m_cap - m_front;
-			}
+			inline size_t capacity() const { return check(), m_cap - m_front; }
+			inline const char& front() const { return *m_front; }
+			inline char& front() { return *m_front; }
+			inline const char& operator[](size_t index) const { return m_front[index]; }
+			inline char& operator[](size_t index) { return m_front[index]; }
+			inline const char* data() const { return m_front; }
+			inline const char* c_str() const { return nullptr == m_front ? "" : (check(), *m_end = '\0', m_front); }
 
-			inline const char& front() const
-			{
-				return *m_front;
-			}
+		protected:
+			inline size_t size_with_zero() const { return size() + sizeof(char); }
 
-			inline char& front()
-			{
-				return *m_front;
-			}
-
-			inline const char& operator[](size_t index) const
-			{
-				return m_front[index];
-			}
-
-			inline char& operator[](size_t index)
-			{
-				return m_front[index];
-			}
-
-
-			inline const char* data() const
-			{
-				return m_front;
-			}
-
-			inline const char* c_str() const
-			{
-				if (m_front != nullptr)
-				{
-					check();
-					*m_end = '\0';
-					return m_front;
-				}
-				return "";
-			}
-
-			inline TiLogString& append(char c)
-			{
-				request_new_size(sizeof(char));
-				return append_unsafe(c);
-			}
-
-			inline TiLogString& append(unsigned char c)
-			{
-				request_new_size(sizeof(unsigned char));
-				return append_unsafe(c);
-			}
-
-			inline TiLogString& append(const char* cstr)
-			{
-				char* p = (char*)cstr;
-				size_t off = size();
-				while (*p != '\0')
-				{
-					if (m_end >= m_cap - 1)
-					{
-						request_new_size(size() / 8 + 8);
-						m_end = m_front + off;
-					}
-					*m_end = *p;
-					m_end++;
-					p++;
-					off++;
-				}
-				ensureZero();
-				return *this;
-
-				//                size_t length = strlen(cstr);
-				//                return append(cstr, length);
-			}
-
+		public:
 			// length without '\0'
-			inline TiLogString& append(const char* cstr, size_t length)
-			{
-				request_new_size(length);
-				return append_unsafe(cstr, length);
-			}
-
-			inline TiLogString& append(const String& str)
-			{
-				size_t length = str.length();
-				request_new_size(length);
-				return append_unsafe(str);
-			}
-
-			inline TiLogString& append(const TiLogString& str)
-			{
-				size_t length = str.length();
-				request_new_size(length);
-				return append_unsafe(str);
-			}
-
-
-			inline TiLogString& append(uint64_t x)
-			{
-				request_new_size(TILOG_UINT64_MAX_CHAR_LEN);
-				return append_unsafe(x);
-			}
-
-			inline TiLogString& append(int64_t x)
-			{
-				request_new_size(TILOG_INT64_MAX_CHAR_LEN);
-				return append_unsafe(x);
-			}
-
-			inline TiLogString& append(uint32_t x)
-			{
-				request_new_size(TILOG_UINT32_MAX_CHAR_LEN);
-				return append_unsafe(x);
-			}
-
-			inline TiLogString& append(int32_t x)
-			{
-				request_new_size(TILOG_INT32_MAX_CHAR_LEN);
-				return append_unsafe(x);
-			}
-
-			inline TiLogString& append(double x)
-			{
-				request_new_size(TILOG_DOUBLE_MAX_CHAR_LEN);
-				return append_unsafe(x);
-			}
-
-			inline TiLogString& append(float x)
-			{
-				request_new_size(TILOG_FLOAT_MAX_CHAR_LEN);
-				return append_unsafe(x);
-			}
-
-
+			inline TiLogString& append(const char* cstr, size_t length) { return append_s(length, cstr, length); }
+			inline TiLogString& append(const char* cstr) { return append(cstr, strlen(cstr)); }
+			inline TiLogString& append(const String& str) { return append(str.data(), (size_t)str.size()); }
+			inline TiLogString& append(const TiLogString& str) { return append(str.data(), str.size()); }
+			inline TiLogString& append(unsigned char x) { return append_s(sizeof(unsigned char), x); }
+			inline TiLogString& append(signed char x) { return append_s(sizeof(unsigned char), x); }
+			inline TiLogString& append(char x) { return append_s(sizeof(unsigned char), x); }
+			inline TiLogString& append(uint64_t x) { return append_s(TILOG_UINT64_MAX_CHAR_LEN, x); }
+			inline TiLogString& append(int64_t x) { return append_s(TILOG_INT64_MAX_CHAR_LEN, x); }
+			inline TiLogString& append(uint32_t x) { return append_s(TILOG_UINT32_MAX_CHAR_LEN, x); }
+			inline TiLogString& append(int32_t x) { return append_s(TILOG_INT32_MAX_CHAR_LEN, x); }
+			inline TiLogString& append(double x) { return append_s(TILOG_DOUBLE_MAX_CHAR_LEN, x); }
+			inline TiLogString& append(float x) { return append_s(TILOG_FLOAT_MAX_CHAR_LEN, x); }
 
 			//*********  Warning!!!You must reserve enough capacity ,then append is safe ******************************//
 
-			inline TiLogString& append_unsafe(char c)
-			{
-				*m_end++ = c;
-				ensureZero();
-				return *this;
-			}
-
-			inline TiLogString& append_unsafe(unsigned char c)
-			{
-				*m_end++ = c;
-				ensureZero();
-				return *this;
-			}
-
-			inline TiLogString& append_unsafe(const char* cstr)
-			{
-				size_t length = strlen(cstr);
-				return append_unsafe(cstr, length);
-			}
-
 			// length without '\0'
-			inline TiLogString& append_unsafe(const char* cstr, size_t length)
-			{
-				memcpy(m_end, cstr, length);
-				m_end += length;
-				ensureZero();
-				return *this;
-			}
-
+			inline TiLogString& append_unsafe(const char* cstr, size_t L) { return memcpy(m_end, cstr, L), inc_size_s(L); }
+			inline TiLogString& append_unsafe(unsigned char c) { return *m_end = c, inc_size_s(1); }
+			inline TiLogString& append_unsafe(signed char c) { return *m_end = c, inc_size_s(1); }
+			inline TiLogString& append_unsafe(char c) { return *m_end = c, inc_size_s(1); }
+			inline TiLogString& append_unsafe(uint64_t x) { return inc_size_s(u64toa_sse2(x, m_end)); }
+			inline TiLogString& append_unsafe(int64_t x) { return inc_size_s(i64toa_sse2(x, m_end)); }
+			inline TiLogString& append_unsafe(uint32_t x) { return inc_size_s(u32toa_sse2(x, m_end)); }
+			inline TiLogString& append_unsafe(int32_t x) { return inc_size_s(i32toa_sse2(x, m_end)); }
+			inline TiLogString& append_unsafe(float x) { return inc_size_s(ftoa(m_end, x, NULL)); }
+			inline TiLogString& append_unsafe(double x) { return inc_size_s((size_t)(rapidjson::internal::dtoa(x, m_end) - m_end)); }
 			// length without '\0'
 			template <size_t length>
-			inline TiLogString& append_smallstr_unsafe(const char* cstr)
+			inline TiLogString& append_smallstr_unsafe(const char (&cstr)[length])
 			{
 				memcpy_small<length>(m_end, cstr);
 				m_end += length;
-				ensureZero();
-				return *this;
+				return ensureZero();
 			}
 
-			inline TiLogString& append_unsafe(const String& str)
-			{
-				size_t length = str.length();
-				memcpy(m_end, str.data(), length);
-				m_end += length;
-				ensureZero();
-				return *this;
-			}
-
-			inline TiLogString& append_unsafe(const TiLogString& str)
-			{
-				size_t length = str.length();
-				memcpy(m_end, str.data(), length);
-				m_end += length;
-				ensureZero();
-				return *this;
-			}
-
-
-			inline TiLogString& append_unsafe(uint64_t x)
-			{
-				size_t off = u64toa_sse2(x, m_end);
-				m_end += off;
-				ensureZero();
-				return *this;
-			}
-
-			inline TiLogString& append_unsafe(int64_t x)
-			{
-				size_t off = i64toa_sse2(x, m_end);
-				m_end += off;
-				ensureZero();
-				return *this;
-			}
-
-			inline TiLogString& append_unsafe(uint32_t x)
-			{
-				size_t off = u32toa_sse2(x, m_end);
-				m_end += off;
-				ensureZero();
-				return *this;
-			}
-
-			inline TiLogString& append_unsafe(int32_t x)
-			{
-				uint32_t off = i32toa_sse2(x, m_end);
-				m_end += off;
-				ensureZero();
-				return *this;
-			}
-
-			inline TiLogString& append_unsafe(double x)
-			{
-				char* _end = rapidjson::internal::dtoa(x, m_end);
-				m_end = _end;
-				ensureZero();
-				return *this;
-			}
-
-			inline TiLogString& append_unsafe(float x)
-			{
-				size_t off = ftoa(m_end, x, NULL);
-				m_end += off;
-				ensureZero();
-				return *this;
-			}
-
-
+		public:
 			inline void reserve(size_t size)
 			{
 				ensureCap(size);
@@ -679,99 +435,42 @@ namespace tilogspace
 			}
 
 			// force set size
-			inline void resetsize(size_t sz)
-			{
-				DEBUG_ASSERT(sz <= capacity());
-				m_end = m_front + sz;
-				ensureZero();
-			}
+			inline void resetsize(size_t sz) { m_end = m_front + sz, ensureZero(); }
 
 			inline void clear() { resetsize(0); }
 
 		public:
-			inline TiLogString& operator+=(char c)
+			template <typename T>
+			inline TiLogString& operator+=(T&& val)
 			{
-				return append(c);
+				return append(std::forward<T>(val));
 			}
-
-			inline TiLogString& operator+=(unsigned char c)
-			{
-				return append(c);
-			}
-
-			inline TiLogString& operator+=(const char* cstr)
-			{
-				return append(cstr);
-			}
-
-			inline TiLogString& operator+=(const String& str)
-			{
-				return append(str);
-			}
-
-			inline TiLogString& operator+=(const TiLogString& str)
-			{
-				return append(str);
-			}
-
-			inline TiLogString& operator+=(uint64_t x)
-			{
-				return append(x);
-			}
-
-			inline TiLogString& operator+=(int64_t x)
-			{
-				return append(x);
-			}
-
-			inline TiLogString& operator+=(uint32_t x)
-			{
-				return append(x);
-			}
-
-			inline TiLogString& operator+=(int32_t x)
-			{
-				return append(x);
-			}
-
-			inline TiLogString& operator+=(double x)
-			{
-				return append(x);
-			}
-
-			inline TiLogString& operator+=(float x)
-			{
-				return append(x);
-			}
-
 			friend std::ostream& operator<<(std::ostream& os, const TiLogString& internal);
 
 		protected:
-			inline size_t size_with_zero()
+			template <typename... Args>
+			inline TiLogString& append_s(const size_t new_size, Args&&... args)
 			{
-				return size() + sizeof(char);
+				DEBUG_ASSERT(new_size < std::numeric_limits<size_t>::max());
+				DEBUG_ASSERT(size() + new_size < std::numeric_limits<size_t>::max());
+				request_new_size(new_size);
+				return append_unsafe(std::forward<Args>(args)...);
 			}
+			inline TiLogString& inc_size_s(size_t sz) { return m_end += sz, ensureZero(); }
 
-			inline void request_new_size(size_t new_size)
-			{
-				ensureCap(new_size + size());
-			}
+			inline void request_new_size(size_t new_size) { ensureCap(new_size + size()); }
 
 			inline void ensureCap(size_t ensure_cap)
 			{
 				size_t pre_cap = capacity();
 				if (pre_cap >= ensure_cap) { return; }
-				size_t new_cap = ((ensure_cap * RESERVE_RATE_DEFAULT) >> RESERVE_RATE_BASE);
+				size_t new_cap = ensure_cap * 2;
 				// you must ensure (ensure_cap * RESERVE_RATE_DEFAULT) will not over-flow size_t max
 				DEBUG_ASSERT2(new_cap > ensure_cap, new_cap, ensure_cap);
 				do_realloc(new_cap);
 			}
 
-			inline void create(size_t capacity = DEFAULT_CAPACITY)
-			{
-				do_malloc(0, capacity);
-				ensureZero();
-			}
+			inline void create(size_t capacity = DEFAULT_CAPACITY) { do_malloc(0, capacity), ensureZero(); }
 
 			inline void makeThisInvalid()
 			{
@@ -780,12 +479,13 @@ namespace tilogspace
 				m_cap = nullptr;
 			}
 
-			inline void ensureZero()
+			inline TiLogString& ensureZero()
 			{
 #ifndef NDEBUG
 				check();
 				if (m_end != nullptr) *m_end = '\0';
 #endif	  // !NDEBUG
+				return *this;
 			}
 
 			inline void check() const
@@ -794,10 +494,7 @@ namespace tilogspace
 				DEBUG_ASSERT(m_cap >= m_end);
 			}
 
-			inline static size_t get_better_cap(size_t cap)
-			{
-				return DEFAULT_CAPACITY > cap ? DEFAULT_CAPACITY : cap;
-			}
+			inline static size_t get_better_cap(size_t cap) { return DEFAULT_CAPACITY > cap ? DEFAULT_CAPACITY : cap; }
 
 			inline void do_malloc(const size_t size, const size_t cap)
 			{
@@ -822,32 +519,19 @@ namespace tilogspace
 			}
 
 			// ptr is m_front
-			inline void do_free()
-			{
-				TILOG_FREE_FUNCTION(this->m_front);
-			}
+			inline void do_free() { TILOG_FREE_FUNCTION(this->m_front); }
 
 		protected:
 			constexpr static size_t DEFAULT_CAPACITY = 32;
-			constexpr static uint32_t RESERVE_RATE_DEFAULT = 16;
-			constexpr static uint32_t RESERVE_RATE_BASE = 3;
+
 			char* m_front;	  // front of c-style str
 			char* m_end;	  // the next of the last char of c-style str,
 			char* m_cap;	  // the next of buf end,also the position of '\0'
-
-			static_assert(
-				(RESERVE_RATE_DEFAULT >> RESERVE_RATE_BASE) >= 1, "fatal error, see constructor capacity must bigger than length");
 		};
 
-		inline std::ostream& operator<<(std::ostream& os, const TiLogString& internal)
-		{
-			return os << internal.c_str();
-		}
+		inline std::ostream& operator<<(std::ostream& os, const TiLogString& internal) { return os << internal.c_str(); }
 
-		inline String operator+(const String& lhs, const TiLogString& rhs)
-		{
-			return String(lhs + rhs.c_str());
-		}
+		inline String operator+(const String& lhs, const TiLogString& rhs) { return String(lhs + rhs.c_str()); }
 
 		template <typename T, typename = typename std::enable_if<std::is_arithmetic<T>::value, void>::type>
 		inline TiLogString operator+(TiLogString&& lhs, T rhs)
@@ -855,20 +539,11 @@ namespace tilogspace
 			return std::move(lhs += rhs);
 		}
 
-		inline TiLogString operator+(TiLogString&& lhs, TiLogString& rhs)
-		{
-			return std::move(lhs += rhs);
-		}
+		inline TiLogString operator+(TiLogString&& lhs, TiLogString& rhs) { return std::move(lhs += rhs); }
 
-		inline TiLogString operator+(TiLogString&& lhs, TiLogString&& rhs)
-		{
-			return std::move(lhs += rhs);
-		}
+		inline TiLogString operator+(TiLogString&& lhs, TiLogString&& rhs) { return std::move(lhs += rhs); }
 
-		inline TiLogString operator+(TiLogString&& lhs, const char* rhs)
-		{
-			return std::move(lhs += rhs);
-		}
+		inline TiLogString operator+(TiLogString&& lhs, const char* rhs) { return std::move(lhs += rhs); }
 
 
 	}	 // namespace internal
@@ -2224,8 +1899,7 @@ namespace tilogspace
 			return mDeliver.mLogTimeStringView;
 		}
 
-		inline TiLogStringView
-		TiLogCore::AppendToMergeCacheByMetaData(const TiLogBean& bean)
+		inline TiLogStringView TiLogCore::AppendToMergeCacheByMetaData(const TiLogBean& bean)
 		{
 #ifdef IUILS_DEBUG_WITH_ASSERT
 			constexpr size_t L3 = sizeof(' ') + TILOG_UINT64_MAX_CHAR_LEN;
@@ -2246,7 +1920,6 @@ namespace tilogspace
 			DEBUG_PRINTV("logs size %llu capacity %llu \n", (llu)logs.size(), (llu)logs.capacity());
 			logs.reserve(reserveSize);
 
-#define _SL(S) TILOG_STRING_LEN_OF_CHAR_ARRAY(S)
 			logs.append_unsafe('\n');												  // 1
 			DEBUG_RUN(logs.append_unsafe(bean.time().toSteadyFlag()));				  // L3_1
 			DEBUG_RUN(logs.append_unsafe(' '));										  // L3_2
@@ -2254,14 +1927,13 @@ namespace tilogspace
 			logs.append_unsafe(bean.tid->c_str(), bean.tid->size());				  //----bean.tid->size()
 			logs.append_unsafe('[');													   // 1
 			logs.append_unsafe(mDeliver.mLogTimeStringView.data(), mDeliver.mLogTimeStringView.size());	   //----mLogTimeStringView.size()
-			logs.append_smallstr_unsafe<_SL("]  [")>("]  [");						  // 4
+			logs.append_smallstr_unsafe("]  [");						  // 4
 
 			logs.append_unsafe(bean.file, bean.fileLen);						   //----bean.fileLen
 			logs.append_unsafe(':');											   // 1
 			logs.append_unsafe((uint32_t)bean.line);							   // 5 see TILOG_UINT16_MAX_CHAR_LEN
-			logs.append_smallstr_unsafe<_SL("] ")>("] ");						   // 2
+			logs.append_smallstr_unsafe("] ");						   // 2
 			logs.append_unsafe(bean.str_view().data(), bean.str_view().size());	   //----bean.str_view()->size()
-#undef _SL
 			// static L1=1+1+1+4+1+5+2=15
 			// dynamic L2= bean.tid->size() + mLogTimeStringView.size() + bean.fileLen + bean.str_view().size()
 			// dynamic L3= len of steady flag
