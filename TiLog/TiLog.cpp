@@ -41,13 +41,17 @@
 #define TILOG_INTERNAL_LOG_MAX_LEN 200
 #define TILOG_INTERNAL_LOG_FILE_PATH "tilogs.txt"
 
+#define TILOG_INTERNAL_LOG_LEVEL TILOG_INTERNAL_LEVEL_DEBUG
+
+#define TILOG_INTERNAL_PRINT_STEADY_FLAG FALSE
+
 #if defined(NDEBUG) && !defined(TILOG_ENABLE_PRINT_ON_RELEASE)
 #define DEBUG_PRINT(lv, fmt, ...)
 #else
 #define DEBUG_PRINT(lv, ...)                                                                                                               \
 	do                                                                                                                                     \
 	{                                                                                                                                      \
-		if_constexpr(lv <= TILOG_STATIC_LOG__LEVEL)                                                                                        \
+		if_constexpr(lv <= TILOG_INTERNAL_LOG_LEVEL)                                                                                        \
 		{                                                                                                                                  \
 			char _s_log_[TILOG_INTERNAL_LOG_MAX_LEN];                                                                                      \
 			int _s_len = sprintf(_s_log_, " %u ", tiloghelperspace::GetInternalLogFlag()++);                                               \
@@ -698,6 +702,18 @@ namespace tilogspace
 				v.insert(v.end(), _beg, _end);
 			}
 
+			static void append_to_vector(Vector<T>& v, const PodCircularQueue& q)
+			{
+				v.insert(v.end(), q.first_sub_queue_begin(), q.first_sub_queue_end());
+				v.insert(v.end(), q.second_sub_queue_begin(), q.second_sub_queue_end());
+			}
+
+			static void append_to_vector(Vector<T>& v, PodCircularQueue::const_iterator _beg, PodCircularQueue::const_iterator _end)
+			{
+				DEBUG_ASSERT2(_beg <= _end, _beg, _end);
+				v.insert(v.end(), _beg, _end);
+			}
+
 		private:
 			size_t mem_size() const { return (pMemEnd - pMem) * sizeof(T); }
 			iterator begin() { return pFirst; }
@@ -870,8 +886,21 @@ namespace tilogspace
 		};
 
 		class TiLogCore;
-		struct MergeList : public ContainerList<VecLogCache, TILOG_MERGE_QUEUE_RATE>
+
+		struct MergeRawDatas : public TiLogObject, public UnorderedMap<const String*, VecLogCache>
 		{
+			using super = UnorderedMap<const String*, VecLogCache>;
+			inline bool full() const { return mSize >= TILOG_MERGE_QUEUE_RATE; }
+			inline void clear() { super::clear(), mSize = 0; }
+			template <bool INC_M_SIZE>
+			inline VecLogCache& get(const String* key)
+			{
+				if_constexpr(INC_M_SIZE) { ++mSize; }
+				return super::operator[](key);
+			}
+
+		protected:
+			size_t mSize{ 0 };
 		};
 
 		struct DeliverList : public ContainerList<VecLogCache, TILOG_DELIVER_QUEUE_SIZE>
@@ -1139,16 +1168,15 @@ namespace tilogspace
 
 			struct MergeStru : public CoreThrdStru
 			{
-				MergeList mList;							// input
+				MergeRawDatas mRawDatas;							// input
 				VecLogCache mMergeCaches{ GLOBAL_SIZE };	// output
 
-				VecLogCache mInsertToSetVec{};					   // temp vector
 				VecLogCache mMergeSortVec{};					   // temp vector
 				VecLogCachePtrPriorQueue mThreadStruPriorQueue;	   // prior queue of ThreadStru cache
 				VecLogCachePool mVecPool;
 				const char* GetName() override { return "merge"; }
 				CoreThrdEntryFuncType GetThrdEntryFunc() override { return &TiLogCore::thrdFuncMergeLogs; }
-				bool IsBusy() override { return mList.full(); }
+				bool IsBusy() override { return mRawDatas.full(); }
 			} mMerge;
 
 			struct DeliverStru : public CoreThrdStru
@@ -1546,10 +1574,10 @@ namespace tilogspace
 		{
 			static_assert(TILOG_MERGE_QUEUE_RATE >= 1, "fatal error!too small");
 
-			CrcQueueLogCache::to_vector(mMerge.mMergeCaches, bean.qCache);
+			VecLogCache& vec = mMerge.mRawDatas.get<true>(bean.tid);
+			CrcQueueLogCache::append_to_vector(vec, bean.qCache);
 			bean.qCache.clear();
-			mMerge.mList.swap_insert(mMerge.mMergeCaches);
-			return mMerge.mList.full();
+			return mMerge.mRawDatas.full();
 		}
 
 		inline ThreadStru* TiLogCore::initForEveryThread()
@@ -1631,8 +1659,6 @@ namespace tilogspace
 
 		void TiLogCore::MergeThreadStruQueueToSet(List<ThreadStru*>& thread_queue, TiLogBean& bean)
 		{
-			// mMerge.mInsertToSetVec.clear();
-			auto& v = mMerge.mInsertToSetVec;
 			for (auto it = thread_queue.begin(); it != thread_queue.end(); (void)((**it).spinMtx.unlock()), (void)++it)
 			{
 				ThreadStru& threadStru = **it;
@@ -1654,14 +1680,15 @@ namespace tilogspace
 				if (qCachePreSize == 0) { continue; }
 				if (bean.time() < (**qCache.first_sub_queue_begin()).time()) { continue; }
 
+				VecLogCache& v = mMerge.mRawDatas.get<false>(threadStru.tid);
 				if (!qCache.normalized())
 				{
 					if (bean.time() < (**qCache.second_sub_queue_begin()).time()) { goto one_sub; }
 					// bean.time() >= ( **qCache.second_sub_queue_begin() ).time()
 					// so bean.time() >= all first sub queue time
 					{
-						// trans circular queue to vector,v is a capture at this moment
-						CrcQueueLogCache::to_vector(v, qCache.first_sub_queue_begin(), qCache.first_sub_queue_end());
+						// append a capture of circular queue to vector
+						CrcQueueLogCache::append_to_vector(v, qCache.first_sub_queue_begin(), qCache.first_sub_queue_end());
 
 						// get iterator > bean
 						auto it_before_last_merge = func_to_vector(qCache.second_sub_queue_begin(), qCache.second_sub_queue_end());
@@ -1672,7 +1699,7 @@ namespace tilogspace
 				{
 				one_sub:
 					auto it_before_last_merge = func_to_vector(qCache.first_sub_queue_begin(), qCache.first_sub_queue_end());
-					CrcQueueLogCache::to_vector(v, qCache.first_sub_queue_begin(), it_before_last_merge);
+					CrcQueueLogCache::append_to_vector(v, qCache.first_sub_queue_begin(), it_before_last_merge);
 					qCache.erase_from_begin_to(it_before_last_merge);
 				}
 
@@ -1688,10 +1715,6 @@ namespace tilogspace
 					}
 				};
 				DEBUG_RUN(sorted_judge_func());
-				auto p = mMerge.mVecPool.acquire();
-				std::swap(*p, v);
-				mMerge.mThreadStruPriorQueue.emplace(p);	// insert for every thread
-				DEBUG_ASSERT2(v.size() <= qCachePreSize, v.size(), qCachePreSize);
 			}
 		}
 
@@ -1704,14 +1727,19 @@ namespace tilogspace
 			TiLogBean referenceBean;
 			referenceBean.time() = mPoll.s_log_last_time = TiLogTime::now();	// referenceBean's time is the biggest up to now
 
-			mMerge.mVecPool.release_all();
 			synchronized(mThreadStruQueue)
 			{
-				mMerge.mVecPool.resize(mThreadStruQueue.availQueue.size() + mThreadStruQueue.waitMergeQueue.size());
 				DEBUG_PRINTI("MergeThreadStruQueueToSet availQueue.size()= %u\n", (unsigned)mThreadStruQueue.availQueue.size());
 				MergeThreadStruQueueToSet(mThreadStruQueue.availQueue, referenceBean);
 				DEBUG_PRINTI("MergeThreadStruQueueToSet waitMergeQueue.size()= %u\n", (unsigned)mThreadStruQueue.waitMergeQueue.size());
 				MergeThreadStruQueueToSet(mThreadStruQueue.waitMergeQueue, referenceBean);
+			}
+
+			s = {};
+			for (auto& mRawData : mMerge.mRawDatas)
+			{
+				VecLogCache& caches = mRawData.second;
+				s.emplace(&caches);
 			}
 
 			while (s.size() >= 2)	 // merge sort and finally get one sorted vector
@@ -1789,8 +1817,10 @@ namespace tilogspace
 			logs.reserve(reserveSize);
 
 			logs.append_unsafe('\n');												  // 1
-			DEBUG_RUN(logs.append_unsafe(bean.time().toSteadyFlag()));				  // L3_1
-			DEBUG_RUN(logs.append_unsafe(' '));										  // L3_2
+#if TILOG_INTERNAL_PRINT_STEADY_FLAG
+			logs.append_unsafe(bean.time().toSteadyFlag());				  // L3_1
+			logs.append_unsafe(' ');										  // L3_2
+#endif
 			logs.append_unsafe(bean.level);											  // 1
 			logs.append_unsafe(bean.tid->c_str(), bean.tid->size());				  //----bean.tid->size()
 			logs.append_unsafe('[');													   // 1
@@ -1859,14 +1889,8 @@ namespace tilogspace
 				mMerge.mCV.wait(lk_merge, [this]() -> bool { return (mMerge.mDoing && mInited); });
 
 				{
-					mMerge.mThreadStruPriorQueue = {};
-					for (auto it = mMerge.mList.begin(); it != mMerge.mList.end(); ++it)
-					{
-						VecLogCache& caches = *it;
-						mMerge.mThreadStruPriorQueue.emplace(&caches);
-					}
 					MergeSortForGlobalQueue();
-					mMerge.mList.clear();
+					mMerge.mRawDatas.clear();
 				}
 
 				SwapMergeCacheAndDeliverCache();
