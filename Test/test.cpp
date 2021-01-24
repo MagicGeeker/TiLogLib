@@ -1,4 +1,4 @@
-#include<math.h>
+#include <math.h>
 #include "inc.h"
 #include "SimpleTimer.h"
 #include "func.h"
@@ -29,7 +29,7 @@ using namespace tilogspace;
 
 //__________________________________________________long time test__________________________________________________//
 //#define terminal_multi_thread_poll__log_test_____________________
-//#define file_multi_thread_memory_leak_stress_test_____________________
+//#define none_multi_thread_memory_leak_stress_test_____________________
 
 
 
@@ -50,11 +50,7 @@ using namespace tilogspace;
 
 bool s_test_init = InitFunc();
 
-struct ThreadIniter
-{
-	void operator()() { TiLog::initForThisThread(); }
-};
-using TestThread = MThread<ThreadIniter>;
+
 
 #ifdef single_thread_log_test_____________________
 
@@ -87,11 +83,12 @@ TEST_CASE("file_multi_thread_log_test_____________________")
 {
 	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
 	EZCOUT << "file_multi_thread_log_test_____________________";
+	TILOGI << "file_multi_thread_log_test_____________________";
 	TILOGI << "adcc";
 
 	TestThread([]() -> void {
 		this_thread::sleep_for(std::chrono::milliseconds(10));
-		TILOGD << "scccc";
+		TILOGD << "f m scccc";
 	}).join();
 }
 
@@ -102,35 +99,18 @@ TEST_CASE("file_multi_thread_log_test_____________________")
 
 TEST_CASE("terminal_many_thread_cout_test_____________________")
 {
-	std::mutex mtx;
-	static bool begin = false;
-	static condition_variable_any cva;
-	static shared_mutex smtx;
-	static condition_variable cv;
+	struct testLoop_t : multi_thread_test_loop_t
+	{
+		constexpr static int32_t THREADS() { return 100; }
+		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return 1; }
+	};
 
-	cout << "terminal_many_thread_cout_test_____________________" << endl;
-	std::vector<TestThread> vec;
-	for (int i = 1; i < 100; i++)
-	{
-		vec.emplace_back(TestThread([&](int index) -> void {
-			int a = 0;
-			shared_lock<shared_mutex> slck(smtx);
-			cva.wait(slck, []() -> bool { return begin; });
-			mtx.lock();
-			cout << "LOGD thr " << index << " " << &a << endl;
-			cout << "LOGI thr " << index << " " << &a << endl;
-			cout << "LOGV thr " << index << " " << &a << endl;
-			mtx.unlock();
-		}, i));
-	}
-	unique_lock<shared_mutex> ulk(smtx);
-	begin = true;
-	ulk.unlock();
-	cva.notify_all();
-	for (auto &th:vec)
-	{
-		th.join();
-	}
+	MultiThreadTest<testLoop_t>("terminal_many_thread_cout_test_____________________", [&](int index) -> void {
+		int a = 0;
+		EZCOUT << "LOGD thr " << index << " " << &a << endl;
+		EZCOUT << "LOGI thr " << index << " " << &a << endl;
+		EZCOUT << "LOGV thr " << index << " " << &a << endl;
+	});
 }
 
 #endif
@@ -140,34 +120,19 @@ TEST_CASE("terminal_many_thread_cout_test_____________________")
 
 TEST_CASE("terminal_many_thread_log_test_____________________")
 {
-	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
-
-	EZCOUT << "terminal_many_thread_log_test_____________________";
-
-	static bool begin = false;
-	static condition_variable_any cva;
-	static shared_mutex smtx;
-
-	std::vector<TestThread> vec;
-	for (int i = 1; i < 100; i++)
+	struct testLoop_t : multi_thread_test_loop_t
 	{
-		vec.emplace_back(TestThread([&](int index) -> void {
+		constexpr static int32_t THREADS() { return 100; }
+		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return 1; }
+	};
+
+	MultiThreadTest<testLoop_t>(
+		"terminal_many_thread_log_test_____________________", tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL, [&](int index) -> void {
 			int a = 0;
-			shared_lock<shared_mutex> slck(smtx);
-			cva.wait(slck, []() -> bool { return begin; });
 			TILOGI << "LOGI thr " << index << " " << &a;
 			TILOGD << "LOGD thr " << index << " " << &a;
 			TILOGV << "LOGV thr " << index << " " << &a;
-		}, i));
-	}
-	unique_lock<shared_mutex> ulk(smtx);
-	begin = true;
-	ulk.unlock();
-	cva.notify_all();
-	for (auto &th:vec)
-	{
-		th.join();
-	}
+		});
 }
 
 #endif
@@ -177,34 +142,19 @@ TEST_CASE("terminal_many_thread_log_test_____________________")
 
 TEST_CASE("file_many_thread_log_test_____________________")
 {
-	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
-
-	EZCOUT << "file_many_thread_log_test_____________________";
-
-	static bool begin = false;
-	static condition_variable_any cva;
-	static shared_mutex smtx;
-
-	std::vector<TestThread> vec;
-	for (int i = 1; i < 100; i++)
+	struct testLoop_t : multi_thread_test_loop_t
 	{
-		vec.emplace_back(TestThread([&](int index) -> void {
+		constexpr static int32_t THREADS() { return 100; }
+		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return 1; }
+	};
+
+	MultiThreadTest<testLoop_t>(
+		"file_many_thread_log_test_____________________", tilogspace::EPrinterID::PRINTER_TILOG_FILE, [&](int index) -> void {
 			int a = 0;
-			shared_lock<shared_mutex> slck(smtx);
-			cva.wait(slck, []() -> bool { return begin; });
 			TILOGI << "LOGI thr " << index << " " << &a;
 			TILOGD << "LOGD thr " << index << " " << &a;
 			TILOGV << "LOGV thr " << index << " " << &a;
-		}, i));
-	}
-	unique_lock<shared_mutex> ulk(smtx);
-	begin = true;
-	ulk.unlock();
-	cva.notify_all();
-	for (auto &th:vec)
-	{
-		th.join();
-	}
+		});
 }
 
 #endif
@@ -214,34 +164,19 @@ TEST_CASE("file_many_thread_log_test_____________________")
 
 TEST_CASE("file_time_many_thread_log_test_with_sleep_____________________")
 {
-	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
-
-	EZCOUT << "file_time_many_thread_log_test_with_sleep_____________________";
-
-	static bool begin = false;
-	static condition_variable_any cva;
-	static shared_mutex smtx;
-
-	std::vector<TestThread> vec;
-
-	for (int i = 1; i < 20; i++)
+	struct testLoop_t : multi_thread_test_loop_t
 	{
-		vec.emplace_back(TestThread([&](int index) -> void {
+		constexpr static int32_t THREADS() { return 20; }
+		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return 1; }
+	};
+
+	MultiThreadTest<testLoop_t>(
+		"file_time_many_thread_log_test_with_sleep_____________________", tilogspace::EPrinterID::PRINTER_TILOG_FILE,
+		[&](int index) -> void {
 			int a = 0;
-			shared_lock<shared_mutex> slck(smtx);
-			cva.wait(slck, []() -> bool { return begin; });
 			this_thread::sleep_for(std::chrono::milliseconds(100 * index));
-			TILOGD << "LOGD thr " << index << " " << &a;
-		}, i));
-	}
-	unique_lock<shared_mutex> ulk(smtx);
-	begin = true;
-	ulk.unlock();
-	cva.notify_all();
-	for (auto &th:vec)
-	{
-		th.join();
-	}
+			TILOGE << "LOGD thr " << index << " " << &a;
+		});
 }
 
 #endif
@@ -270,21 +205,18 @@ TEST_CASE("file_time_multi_thread_simulation__log_test_____________________")
 
 TEST_CASE("file_single_thread_benchmark_test_____________________")
 {
-	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
-	EZCOUT << "file_single_thread_benchmark_test_____________________";
-#ifdef NDEBUG
-	constexpr uint64_t loops = (1 << 22);
-#else
-	constexpr uint64_t loops = (1 << 10);
-#endif
-	SimpleTimer s1m;
-	for (uint64_t i = 0; i < loops; i++)
+	struct testLoop_t : single_thread_test_loop_t
 	{
-		TILOGD << " i= " << i;
-	}
-	uint64_t ms = s1m.GetMillisecondsUpToNOW();
-	TILOGI << (1000.0 * loops / ms) << " logs per second";
-	TILOGI << 1.0 * ms / loops << " milliseconds per log";
+		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return test_release ? testpow10(6) : testpow10(4); }
+	};
+
+	SingleThreadTest<testLoop_t>(
+		"file_single_thread_benchmark_test_____________________", tilogspace::EPrinterID::PRINTER_TILOG_FILE, [&](int index) -> void {
+			for (uint64_t i = 0; i < testLoop_t::GET_SINGLE_THREAD_LOOPS(); i++)
+			{
+				TILOGE << " i= " << i;
+			}
+		});
 }
 
 #endif
@@ -294,47 +226,20 @@ TEST_CASE("file_single_thread_benchmark_test_____________________")
 
 TEST_CASE("file_multi_thread_benchmark_test_____________________")
 {
-	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
-	EZCOUT << "file_multi_thread_benchmark_test_____________________";
-#ifdef NDEBUG
-	constexpr uint64_t loops = 10000 + 2*(1 << 20);
-#else
-	constexpr uint64_t loops = 10000 + 32*(1 << 10);
-#endif
-	constexpr int32_t threads = 10;
-
-	SimpleTimer s1m;
-
-	static bool begin = false;
-	static condition_variable_any cva;
-	static shared_mutex smtx;
-
-	std::vector<TestThread> vec;
-
-	for (int i = 1; i <= threads; i++)
+	struct testLoop_t : multi_thread_test_loop_t
 	{
-		vec.emplace_back(TestThread([&](int index) -> void {
-			shared_lock<shared_mutex> slck(smtx);
-			cva.wait(slck, []() -> bool { return begin; });
+		constexpr static int32_t THREADS() { return 10; }
+		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return test_release ? 100 * 100000 : 100000; }
+		constexpr static bool PRINT_LOOP_TIME() { return true; }
+	};
 
-			for (uint64_t j = 0; j < loops; j++)
+	MultiThreadTest<testLoop_t>(
+		"file_multi_thread_benchmark_test_____________________", tilogspace::EPrinterID::PRINTER_TILOG_FILE, [](int index) {
+			for (uint64_t j = 0; j < testLoop_t::GET_SINGLE_THREAD_LOOPS(); j++)
 			{
-				TILOGD << "index= " << index << " j= " << j;
+				TILOGE << "index= " << index << " j= " << j;
 			}
-		}, i));
-	}
-
-	unique_lock<shared_mutex> ulk(smtx);
-	begin = true;
-	ulk.unlock();
-	cva.notify_all();
-	for (auto &th : vec)
-	{
-		th.join();
-	}
-	uint64_t us = s1m.GetMicrosecondsUpToNOW();
-	EZCOUT << (1000.0 * threads * loops / us) << " logs per millisecond\n";
-	EZCOUT << 1.0 * us / (loops * threads) << " us per log\n";
+		});
 }
 
 #endif
@@ -344,57 +249,28 @@ TEST_CASE("file_multi_thread_benchmark_test_____________________")
 
 TEST_CASE("file_multi_thread_close_print_benchmark_test_____________________")
 {
-	static_assert(TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL,"fatal error,enable it to begin test");
-	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
+	static_assert(TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL, "fatal error,enable it to begin test");
 	TiLog::clearPrintedLogs();
-	EZCOUT << "file_multi_thread_close_print_benchmark_test_____________________";
-#ifdef NDEBUG
-	constexpr uint64_t loops = 10000 + 2*(1 << 20);
-#else
-	constexpr uint64_t loops = 10000 + 128*(1 << 10);
-#endif
-	constexpr int32_t threads = 10;
 
-	SimpleTimer s1m;
-
-	static bool begin = false;
-	static condition_variable_any cva;
-	static shared_mutex smtx;
-
-	std::vector<TestThread> vec;
-
-	for (int i = 1; i <= threads; i++)
+	struct testLoop_t : multi_thread_test_loop_t
 	{
-		vec.emplace_back(TestThread([&](int index) -> void {
-			shared_lock<shared_mutex> slck(smtx);
-			cva.wait(slck, []() -> bool { return begin; });
+		constexpr static int32_t THREADS() { return 10; }
+		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return test_release ? testApow10N(5, 6) : testpow10(5); }
+		constexpr static bool PRINT_LOOP_TIME() { return false; }
+	};
 
+	uint64_t ns = MultiThreadTest<testLoop_t>(
+		"file_multi_thread_close_print_benchmark_test_____________________", tilogspace::EPrinterID::PRINTER_TILOG_FILE, [](int index) {
+			constexpr uint64_t loops = testLoop_t::GET_SINGLE_THREAD_LOOPS();
 			for (uint64_t j = 0; j < loops; j++)
 			{
-				TILOGD << "index= " << index << " j= " << j ;
-				if(j==loops/4)
-				{
-					TiLog::setLogLevel(tilogspace::CLOSED);
-				}
-				if(j==loops*3/4)
-				{
-					TiLog::setLogLevel(tilogspace::OPEN);
-				}
+				TILOGD << "index= " << index << " j= " << j;
+				if (j == loops / 4) { TiLog::setLogLevel(tilogspace::CLOSED); }
+				if (j == loops * 3 / 4) { TiLog::setLogLevel(tilogspace::OPEN); }
 			}
-		}, i));
-	}
-
-	unique_lock<shared_mutex> ulk(smtx);
-	begin = true;
-	ulk.unlock();
-	cva.notify_all();
-	for (auto &th : vec)
-	{
-		th.join();
-	}
-	uint64_t us = s1m.GetMicrosecondsUpToNOW();
-	EZCOUT << (1000.0 * TiLog::getPrintedLogs() / us) << " logs per millisecond\n";
-	EZCOUT << 1.0 * us / (TiLog::getPrintedLogs()) << " us per log\n";
+		});
+	EZCOUT << (1e6 * TiLog::getPrintedLogs() / ns) << " logs per millisecond\n";
+	EZCOUT << 1.0 * ns / (TiLog::getPrintedLogs()) << " ns per log\n";
 }
 
 #endif
@@ -404,42 +280,19 @@ TEST_CASE("file_multi_thread_close_print_benchmark_test_____________________")
 
 TEST_CASE("file_single_thread_operator_test_____________________")
 {
-	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
-	EZCOUT << "file_single_thread_operator_test_____________________";
-	constexpr uint64_t loops = 10000 + 1*(1 << 10);
-	constexpr int32_t threads = 1;
-
-	SimpleTimer s1m;
-
-	static bool begin = false;
-	static condition_variable_any cva;
-	static shared_mutex smtx;
-
-	std::vector<TestThread> vec;
-
-	for (int i = 1; i <= threads; i++)
+	struct testLoop_t : single_thread_test_loop_t
 	{
-		vec.emplace_back(TestThread([&](int index) -> void {
-			shared_lock<shared_mutex> slck(smtx);
-			cva.wait(slck, []() -> bool { return begin; });
-
+		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return test_release ? testApow10N(5, 6) : testpow10(5); }
+		constexpr static bool PRINT_LOOP_TIME() { return true; }
+	};
+	SingleThreadTest<testLoop_t>(
+		"file_single_thread_operator_test_____________________", tilogspace::EPrinterID::PRINTER_TILOG_FILE, [](int index) {
+			constexpr uint64_t loops = testLoop_t::GET_SINGLE_THREAD_LOOPS();
 			for (uint64_t j = 0; j < loops; j++)
 			{
-				TILOGD("index= %d, j= %lld",index,(long long int)j);
-				TILOGD("666");
-				TILOGD("$$ %%D test %%D");
+				TILOGE("index= %d, j= %lld 666 $$ %%D test %%D", index, (long long int)j);
 			}
-		}, i));
-	}
-
-	unique_lock<shared_mutex> ulk(smtx);
-	begin = true;
-	ulk.unlock();
-	cva.notify_all();
-	for (auto &th : vec)
-	{
-		th.join();
-	}
+		});
 }
 
 #endif
@@ -449,84 +302,44 @@ TEST_CASE("file_single_thread_operator_test_____________________")
 
 TEST_CASE("terminal_multi_thread_poll__log_test_____________________")
 {
-	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
-
-	EZCOUT << "file_multi_thread_benchmark_test_____________________";
-	constexpr uint64_t loops = 10000;
-	constexpr int32_t threads = 10;
-
-	SimpleTimer s1m;
-
-	static bool begin = false;
-	static condition_variable_any cva;
-	static shared_mutex smtx;
-
-	std::vector<TestThread> vec;
-
-	for (int i = 1; i <= threads; i++)
+	struct testLoop_t : multi_thread_test_loop_t
 	{
-		vec.emplace_back(TestThread([&](int index) -> void {
-			shared_lock<shared_mutex> slck(smtx);
-			cva.wait(slck, []() -> bool { return begin; });
-
+		constexpr static int32_t THREADS() { return 10; }
+		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return 10000; }
+		constexpr static bool PRINT_LOOP_TIME() { return true; }
+	};
+	MultiThreadTest<testLoop_t>(
+		"terminal_multi_thread_poll__log_test_____________________", tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL, [](int index) {
+			constexpr uint64_t loops = testLoop_t::GET_SINGLE_THREAD_LOOPS();
 			for (uint64_t j = 0; j < loops; j++)
 			{
 				this_thread::sleep_for(chrono::milliseconds(50));
-				TILOGD << "index= " << index << " j= " << j;
+				TILOGE << "index= " << index << " j= " << j;
 			}
-		}, i));
-	}
-
-	unique_lock<shared_mutex> ulk(smtx);
-	begin = true;
-	ulk.unlock();
-	cva.notify_all();
-	for (auto &th : vec)
-	{
-		th.join();
-	}
-	uint64_t us = s1m.GetMicrosecondsUpToNOW();
-	EZCOUT << (1000.0 * threads * loops / us) << " logs per millisecond\n";
-	EZCOUT << 1.0 * us / (loops * threads) << " us per log\n";
+		});
 }
 
 #endif
 
-#ifdef file_multi_thread_memory_leak_stress_test_____________________
+#ifdef none_multi_thread_memory_leak_stress_test_____________________
 
-TEST_CASE("file_multi_thread_memory_leak_stress_test_____________________")
+TEST_CASE("none_multi_thread_memory_leak_stress_test_____________________")
 {
-	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
-	EZCOUT << "file_multi_thread_memory_leak_stress_test_____________________";
-#ifdef NDEBUG
-	constexpr int32_t threads = 20000;
-#else
-	constexpr int32_t threads = 2000;
-#endif
-	constexpr uint64_t loops = 50;
-
-	atomic_uint64_t tt(threads);
-	SimpleTimer s1m;
-
-	static bool begin = false;
-	static condition_variable_any cva;
-
-	for (int i = 1; i <= threads; i++)
+	struct testLoop_t : multi_thread_test_loop_t
 	{
-		TestThread([=, &tt]() -> void {
+		constexpr static int32_t THREADS() { return test_release ? 40000 : 2000; }
+		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return 50; }
+		constexpr static bool PRINT_LOOP_TIME() { return true; }
+	};
+	MultiThreadTest<testLoop_t>(
+		"none_multi_thread_memory_leak_stress_test_____________________", tilogspace::EPrinterID::PRINTER_ID_NONE, [](int index) {
+			constexpr uint64_t loops = testLoop_t::GET_SINGLE_THREAD_LOOPS();
 			for (uint64_t j = 0; j < loops; j++)
 			{
-				TILOGD << "loop= " << loops << " j= " << j;
+				TILOGE << "loop= " << loops << " j= " << j;
 			}
-			tt--;
-			EZCOUT << " " << i << " to exit \n";
-		}).detach();
-		this_thread::sleep_for(chrono::microseconds(1000));
-	}
-	while (tt != 0)
-	{
-		this_thread::sleep_for(chrono::milliseconds(1000));
-	}
+			EZCOUT << " " << index << " to exit \n";
+		});
 }
 
 #endif
@@ -542,40 +355,35 @@ TEST_CASE("tilog_string_test_____________________")
 	String str;
 	str.reserve(100);
 	str.resize(200);
-	for(uint32_t i=0;i<str.size();i++)
+	for (uint32_t i = 0; i < str.size(); i++)
 	{
-		str[i]='A'+i%26;
+		str[i] = 'A' + i % 26;
 	}
-	std::cout<<str<<endl;
+	std::cout << str << endl;
 
-	String str2=std::move(str);
+	String str2 = std::move(str);
 	str2.resize(10);
 
-	String str3 ("asyindfafa");
+	String str3("asyindfafa");
 	str3 += str2;
 
-	String str4(tilogspace::internal::EPlaceHolder{}, 100 );
+	String str4(tilogspace::internal::EPlaceHolder{}, 100);
 	str4 = "dascvda";
 
 	str3 = str4;
 
 	String str5;
-	String str6=str4;
+	String str6 = str4;
 	str6.append(" nhmyootrnpkbf");
 
-	std::cout
-		<< str2 << std::endl
-		<< str3 << std::endl
-		<< str4 << std::endl
-		<< str5 << std::endl
-		<< str6 << std::endl;
+	std::cout << str2 << std::endl << str3 << std::endl << str4 << std::endl << str5 << std::endl << str6 << std::endl;
 
 	String longStr("long string ");
-	for( uint32_t i = 0; i < 10000; i++ )
+	for (uint32_t i = 0; i < 10000; i++)
 	{
 		longStr.append(char('a' + i % 26));
 	}
-	std::cout<<"\n longStr:\n"<<longStr<<std::endl;
+	std::cout << "\n longStr:\n" << longStr << std::endl;
 }
 
 #endif
@@ -583,7 +391,7 @@ TEST_CASE("tilog_string_test_____________________")
 
 #ifdef tilog_string_extend_test_____________________
 
-TEST_CASE( "tilog_string_extend_test_____________________" )
+TEST_CASE("tilog_string_extend_test_____________________")
 {
 	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
 	EZCOUT << "tilog_string_extend_test_____________________";
@@ -591,59 +399,54 @@ TEST_CASE( "tilog_string_extend_test_____________________" )
 	{
 		char s[50];
 	};
-	using String = tilogspace::internal::TiLogStringExtend< ext_t >;
+	using String = tilogspace::internal::TiLogStringExtend<ext_t>;
 	String str;
-	str.reserve( 100 );
-	str.resize( 200 );
-	for( uint32_t i = 0; i < str.size(); i++ )
+	str.reserve(100);
+	str.resize(200);
+	for (uint32_t i = 0; i < str.size(); i++)
 	{
 		str[i] = 'A' + i % 26;
 	}
 	std::cout << str << endl;
 
-	String str2 = std::move( str );
-	str2.resize( 10 );
+	String str2 = std::move(str);
+	str2.resize(10);
 
-	String str3( "asyindfafa" );
+	String str3("asyindfafa");
 	str3 += str2;
 
-	String str4( tilogspace::internal::EPlaceHolder{}, 100 );
+	String str4(tilogspace::internal::EPlaceHolder{}, 100);
 	str4 = "dascvda";
 
 	str3 = str4;
 
 	String str5;
 	String str6 = str4;
-	str6.append( " nhmyootrnpkbf" );
+	str6.append(" nhmyootrnpkbf");
 
 
-	String str7 ("dadacxxayyy");
-	ext_t* p=str7.ext();
-	strcpy( p->s, "vvvvbbbbnnnnn");
-	std::cout << "str7: " << str7 << " ext addr: " << str7.ext()<<" ext: "<< str7.ext()->s << endl;
+	String str7("dadacxxayyy");
+	ext_t* p = str7.ext();
+	strcpy(p->s, "vvvvbbbbnnnnn");
+	std::cout << "str7: " << str7 << " ext addr: " << str7.ext() << " ext: " << str7.ext()->s << endl;
 
-	std::cout<<"str2-str6\n"
-		<< str2 << std::endl
-		<< str3 << std::endl
-		<< str4 << std::endl
-		<< str5 << std::endl
-		<< str6 << std::endl;
+	std::cout << "str2-str6\n" << str2 << std::endl << str3 << std::endl << str4 << std::endl << str5 << std::endl << str6 << std::endl;
 
 	String longStr("long string ");
-	for( uint32_t i = 0; i < 10000; i++ )
+	for (uint32_t i = 0; i < 10000; i++)
 	{
 		longStr.append(char('a' + i % 26));
 		if (i % 26 == 0) longStr.append('\n');
 	}
-	std::cout<<"\n longStr:\n"<<longStr<<std::endl;
+	std::cout << "\n longStr:\n" << longStr << std::endl;
 
 	tilogspace::internal::TiLogStringExtend<int> longStr2("long string 2  ");
-	for( uint32_t i = 0; i < 10000; i++ )
+	for (uint32_t i = 0; i < 10000; i++)
 	{
 		longStr2.append(char('R' + i % 11));
-		if (i % (3*11) == 0) longStr2.append('\n');
+		if (i % (3 * 11) == 0) longStr2.append('\n');
 	}
-	std::cout<<"\n longStr2:\n"<<longStr2<<std::endl;
+	std::cout << "\n longStr2:\n" << longStr2 << std::endl;
 }
 
 #endif
@@ -651,28 +454,21 @@ TEST_CASE( "tilog_string_extend_test_____________________" )
 #ifdef terminal_single_thread_long_string_log_test_____________________
 TEST_CASE("terminal_single_thread_long_string_log_test_____________________")
 {
-	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
-	EZCOUT << "terminal_single_thread_long_string_log_test_____________________";
-	constexpr uint64_t loops = (1 << 8);
-	SimpleTimer s1m;
-	for (uint64_t i = 0; i < loops; i++)
+	struct testLoop_t : single_thread_test_loop_t
 	{
-		auto x=TILOGD;
-		for( uint32_t j = 0; j < 1000; j++ )
-		{
-			x<<(char('R' + j % 11));
-		}
-		x << "\n";
-	}
-	{
-		auto s = std::move(TILOGI<<"dsad");
-		auto s2 = std::move(s);
-	}
-
-
-	uint64_t ms = s1m.GetMillisecondsUpToNOW();
-	TILOGI << "end terminal_single_thread_long_string_log_test_____________________";
-
+		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return 1; }
+		constexpr static bool PRINT_LOOP_TIME() { return false; }
+	};
+	SingleThreadTest(
+		"terminal_single_thread_long_string_log_test_____________________", tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL,
+		[](int32_t index) {
+			auto x = std::move(TILOGE);
+			for (uint32_t j = 0; j < 1000; j++)
+			{
+				x << (char('R' + j % 11));
+			}
+			x << "\n";
+		});
 }
 #endif
 
@@ -680,55 +476,35 @@ TEST_CASE("terminal_single_thread_long_string_log_test_____________________")
 
 TEST_CASE("file_multi_thread_print_level_test_____________________")
 {
-	static_assert(TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL,"fatal error,enable it to begin test");
+	static_assert(TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL, "fatal error,enable it to begin test");
 	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
 	TiLog::clearPrintedLogs();
-	EZCOUT << "file_multi_thread_print_level_test_____________________";
-#ifdef NDEBUG
-	constexpr uint64_t loops = 10000 + 2 * (1 << 20);
-#else
-	constexpr uint64_t loops = 10000 + 128*(1 << 10);
-#endif
 
-	SimpleTimer s1m;
-
-	static bool begin = false;
-	static condition_variable_any cva;
-	static shared_mutex smtx;
-
-	std::vector<TestThread> vec;
-
-	for (int i = ELevel::ALWAYS; i <= ELevel::VERBOSE; i++)
+	struct testLoop_t : multi_thread_test_loop_t
 	{
-		vec.emplace_back(TestThread([&](int index) -> void {
-			shared_lock<shared_mutex> slck(smtx);
-			cva.wait(slck, []() -> bool { return begin; });
-
+		constexpr static int32_t THREADS() { return (int32_t)ELevel::VERBOSE - (int32_t)ELevel::ALWAYS; }
+		constexpr static bool PRINT_LOOP_TIME() { return false; }
+		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return test_release ? testApow10N(2, 6) : testpow10(4); }
+	};
+	uint64_t ns = MultiThreadTest(
+		"file_multi_thread_print_level_test_____________________", tilogspace::EPrinterID::PRINTER_TILOG_FILE, [](uint32_t index) {
+			constexpr uint64_t loops = testLoop_t::GET_SINGLE_THREAD_LOOPS();
+			index = index + (int32_t)ELevel::ALWAYS - 1;
 			for (uint64_t j = 1; j <= loops; j++)
 			{
 				TILOG(index) << "index= " << index << " j= " << j;
 				if (index == ELevel::ALWAYS && (j * 8) % loops == 0)
 				{
 					uint64_t v = j * 8 / loops;	   // 1-8
-					TiLog::setLogLevel((tilogspace::ELevel) (9 - v));
+					TiLog::setLogLevel((tilogspace::ELevel)(9 - v));
 				}
 			}
-		}, i));
-	}
+		});
 
-	unique_lock<shared_mutex> ulk(smtx);
-	begin = true;
-	ulk.unlock();
-	cva.notify_all();
-	for (auto &th : vec)
-	{
-		th.join();
-	}
-	uint64_t us = s1m.GetMicrosecondsUpToNOW();
+
 	TiLog::setLogLevel(tilogspace::ELevel::VERBOSE);
-	EZCOUT << (1000.0 * TiLog::getPrintedLogs() / us) << " logs per millisecond\n";
-	EZCOUT << 1.0 * us / (TiLog::getPrintedLogs()) << " us per log\n";
-	TILOG(tilogspace::ELevel::VERBOSE) << "Complete!\n";
+	EZCOUT << (1e6 * TiLog::getPrintedLogs() / ns) << " logs per millisecond\n";
+	EZCOUT << 1.0 * ns / (TiLog::getPrintedLogs()) << " us per log\n";
 }
 
 #endif
@@ -736,15 +512,17 @@ TEST_CASE("file_multi_thread_print_level_test_____________________")
 
 #ifdef file_static_log_test_____________________
 static bool b0_file_static_log_test = []() {
-	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
+	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
 	EZCOUT << "Prepare file_static_log_test_____________________";
 
-	auto s= std::move( TILOGD ("long string \n") );
+	auto s = std::move(TILOGE("long string \n"));
 	for (uint32_t i = 0; i < 10000; i++)
 	{
-		s<<(char('a' + i % 26));
-		if (i % 26 != 25)s << " ";
-		else s <<" "<< i/26<<'\n';
+		s << (char('a' + i % 26));
+		if (i % 26 != 25)
+			s << " ";
+		else
+			s << " " << i / 26 << '\n';
 	}
 	return true;
 }();
@@ -760,6 +538,7 @@ TEST_CASE("terminal_multi_way_log_test_____________________")
 {
 	EZCOUT << "terminal_multi_way_log_test_____________________";
 	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
+
 	TILOGE << true;
 	TILOGE << 'e';
 	TILOGE << 101;
@@ -838,48 +617,20 @@ TEST_CASE("static_log_level_multi_thread_benchmark_test_____________________")
 	static_assert(TILOG_STATIC_LOG__LEVEL == TILOG_INTERNAL_LEVEL_WARN, "set warn to begin test");
 	static_assert(!TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL, "disable it to test");
 
-	TILOGI << "static_log_level_multi_thread_benchmark_test_____________________";
-#ifdef NDEBUG
-	constexpr uint64_t loops = (uint64_t)3e7;
-#else
-	constexpr uint64_t loops = 10000 + 1 * (1 << 20);
-#endif
-	constexpr int32_t threads = 12;
-
-	SimpleTimer s1m;
-
-	static bool begin = false;
-	static condition_variable_any cva;
-	static shared_mutex smtx;
-
-	std::vector<TestThread> vec;
-
-	for (int i = 1; i <= threads; i++)
+	struct testLoop_t : multi_thread_test_loop_t
 	{
-		vec.emplace_back(TestThread(
-			[&](int index) -> void {
-				shared_lock<shared_mutex> slck(smtx);
-				cva.wait(slck, []() -> bool { return begin; });
+		constexpr static int32_t THREADS() { return 10; }
+		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return test_release ? testApow10N(3, 7) : testpow10(6); }
+		constexpr static bool PRINT_LOOP_TIME() { return true; }
+	};
 
-				for (uint64_t j = 0; j < loops; j++)
-				{
-					TILOGD << "index= " << index << " j= " << j;
-				}
-			},
-			i));
-	}
-
-	unique_lock<shared_mutex> ulk(smtx);
-	begin = true;
-	ulk.unlock();
-	cva.notify_all();
-	for (auto& th : vec)
-	{
-		th.join();
-	}
-	uint64_t us = s1m.GetMicrosecondsUpToNOW();
-	EZCOUT << (1000 * threads * loops / us) << " logs per millisecond\n";
-	EZCOUT << 1.0 * us / (loops * threads) << " us per log\n";
+	MultiThreadTest<testLoop_t>(
+		"static_log_level_multi_thread_benchmark_test_____________________", tilogspace::EPrinterID::PRINTER_TILOG_FILE, [](int index) {
+			for (uint64_t j = 0; j < testLoop_t::GET_SINGLE_THREAD_LOOPS(); j++)
+			{
+				TILOGW << "index= " << index << " j= " << j;
+			}
+		});
 }
 #endif
 
@@ -887,49 +638,21 @@ TEST_CASE("static_log_level_multi_thread_benchmark_test_____________________")
 TEST_CASE("dynamic_log_level_multi_thread_benchmark_test_____________________")
 {
 	static_assert(TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL, "enable it to test");
-	TILOGI << "dynamic_log_level_multi_thread_benchmark_test_____________________";
-#ifdef NDEBUG
-	constexpr uint64_t loops = (uint64_t)3e7;
-#else
-	constexpr uint64_t loops = 10000 + 1 * (1 << 20);
-#endif
-	constexpr int32_t threads = 12;
 
-	SimpleTimer s1m;
-
-	static bool begin = false;
-	static condition_variable_any cva;
-	static shared_mutex smtx;
-
-	std::vector<TestThread> vec;
-
-	TiLog::setLogLevel(ELevel::INFO);
-	for (int i = 1; i <= threads; i++)
+	struct testLoop_t : multi_thread_test_loop_t
 	{
-		vec.emplace_back(TestThread(
-			[&](int index) -> void {
-				shared_lock<shared_mutex> slck(smtx);
-				cva.wait(slck, []() -> bool { return begin; });
+		constexpr static int32_t THREADS() { return 10; }
+		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return test_release ? testApow10N(3, 7) : testpow10(6); }
+		constexpr static bool PRINT_LOOP_TIME() { return true; }
+	};
 
-				for (uint64_t j = 0; j < loops; j++)
-				{
-					TILOG(ELevel::DEBUG) << "index= " << index << " j= " << j;
-				}
-			},
-			i));
-	}
-
-	unique_lock<shared_mutex> ulk(smtx);
-	begin = true;
-	ulk.unlock();
-	cva.notify_all();
-	for (auto& th : vec)
-	{
-		th.join();
-	}
-	uint64_t us = s1m.GetMicrosecondsUpToNOW();
-	EZCOUT << (1000 * threads * loops / us) << " logs per millisecond\n";
-	EZCOUT << 1.0 * us / (loops * threads) << " us per log\n";
+	MultiThreadTest<testLoop_t>(
+		"dynamic_log_level_multi_thread_benchmark_test_____________________", tilogspace::EPrinterID::PRINTER_TILOG_FILE, [](int index) {
+			for (uint64_t j = 0; j < testLoop_t::GET_SINGLE_THREAD_LOOPS(); j++)
+			{
+				TILOG(ELevel::WARN) << "index= " << index << " j= " << j;
+			}
+		});
 }
 #endif
 

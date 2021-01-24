@@ -54,86 +54,23 @@ int main()
 	EZCOUT << "single log cost ns= " << (ns1 - ns0) << "\n";
 #elif FUN_MAIN== 1
 
-
-	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
-	EZCOUT << "file_multi_thread_memory_leak_stress_test_____________________";
-#ifdef NDEBUG
-	constexpr int32_t threads = 20000;
 #else
-	constexpr int32_t threads = 500;
-#endif
-	constexpr uint64_t loops = 50;
 
-	atomic_uint64_t tt(threads);
-	SimpleTimer s1m;
-
-	static bool begin = false;
-	static condition_variable_any cva;
-
-	for (int i = 1; i <= threads; i++)
+	struct testLoop_t : multi_thread_test_loop_t
 	{
-		thread([=, &tt]() -> void {
-			TiLog::initForThisThread();
-			for (uint64_t j = 0; j < loops; j++)
+		constexpr static int32_t THREADS() { return 10; }
+		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return test_release ? 100 * 100000 : 100000; }
+		constexpr static bool PRINT_LOOP_TIME() { return true; }
+	};
+
+	MultiThreadTest<testLoop_t>(
+		"file_multi_thread_benchmark_test_____________________", tilogspace::EPrinterID::PRINTER_TILOG_FILE, [](int index) {
+			for (uint64_t j = 0; j < testLoop_t::GET_SINGLE_THREAD_LOOPS(); j++)
 			{
-				TILOGD << "loop= " << loops << " j= " << j;
+				TILOGE << "index= " << index << " j= " << j;
 			}
-			tt--;
-			EZCOUT << " " << i << " to exit \n";
-		}).detach();
-		this_thread::sleep_for(chrono::microseconds(1000));
-	}
-	while (tt != 0)
-	{
-		this_thread::sleep_for(chrono::milliseconds(1000));
-	}
+		});
 
-
-#else
-
-	TILOGI << "file_multi_thread_benchmark_test_____________________";
-#ifdef NDEBUG
-	constexpr uint64_t loops = 10000 + 3*(1 << 20);
-#else
-	constexpr uint64_t loops = 10000 + 256*(1 << 10);
-#endif
-	constexpr int32_t threads = 10;
-
-	SimpleTimer s1m;
-
-	static bool begin = false;
-	static condition_variable_any cva;
-	static shared_mutex smtx;
-
-	std::vector<std::thread> vec;
-
-	for (int i = 1; i <= threads; i++)
-	{
-		vec.emplace_back(thread([&](int index) -> void {
-			TiLog::initForThisThread();
-			shared_lock<shared_mutex> slck(smtx);
-			cva.wait(slck, []() -> bool { return begin; });
-
-			for (uint64_t j = 0; j < loops; j++)
-			{
-				TILOGD << "index= " << index << " j= " << j;
-			}
-		}, i));
-	}
-
-	unique_lock<shared_mutex> ulk(smtx);
-	begin = true;
-	ulk.unlock();
-	cva.notify_all();
-	for (auto &th : vec)
-	{
-		th.join();
-	}
-	uint64_t us = s1m.GetMicrosecondsUpToNOW();
-	EZCOUT << (1000 * threads * loops / us) << " logs per millisecond\n";
-	EZCOUT << 1.0 * us / (loops * threads) << " us per log\n";
-	TILOGI << (1000 * threads * loops / us) << " logs per millisecond\n";
-	TILOGI << 1.0 * us / (loops * threads) << " us per log\n";
 #endif
 }
 
