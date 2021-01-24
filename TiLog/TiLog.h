@@ -250,14 +250,11 @@ namespace tilogspace
 
 		inline static void operator delete(void* p) { TILOG_FREE_FUNCTION(p); }
 
-		inline static void* ezmalloc(size_t sz) { return TILOG_MALLOC_FUNCTION(sz); }
+		inline static void* timalloc(size_t sz) { return TILOG_MALLOC_FUNCTION(sz); }
 
-		inline static void* ezcalloc(size_t num_elements, size_t size_of_element)
-		{
-			return TILOG_CALLOC_FUNCTION(num_elements, size_of_element);
-		}
+		inline static void* ticalloc(size_t num_ele, size_t sz_ele) { return TILOG_CALLOC_FUNCTION(num_ele, sz_ele); }
 
-		inline static void* ezrealloc(void* p, size_t sz) { return TILOG_REALLOC_FUNCTION(p, sz); }
+		inline static void* tirealloc(void* p, size_t sz) { return TILOG_REALLOC_FUNCTION(p, sz); }
 
 		inline static void ezfree(void* p) { TILOG_FREE_FUNCTION(p); }
 	};
@@ -808,7 +805,7 @@ namespace tilogspace
 				check();
 				size_type cap = this->capacity();
 				size_type mem_size = new_cap + (size_type)sizeof('\0') + size_head();	 // request extra 1 byte for '\0'
-				Core* p = (Core*)ezrealloc(this->pCore, mem_size);
+				Core* p = (Core*)tirealloc(this->pCore, mem_size);
 				DEBUG_ASSERT(p != nullptr);
 				pCore = p;
 				this->pCore->capacity = new_cap;	// capacity without '\0'
@@ -1580,9 +1577,9 @@ namespace tilogspace
 
 //------------------------------------------define micro for user------------------------------------------//
 
-#define EZCOUT std::cout
-#define EZCERR std::cerr
-#define EZCLOG std::clog
+#define TICOUT std::cout
+#define TICERR std::cerr
+#define TICLOG std::clog
 
 #if TILOG_STATIC_LOG__LEVEL >= TILOG_INTERNAL_LEVEL_ALWAYS
 #define TILOGA TILOG_INTERNAL_CREATE_TILOG_STREAM(TILOG_INTERNAL_LEVEL_ALWAYS)
@@ -1626,7 +1623,7 @@ namespace tilogspace
 #define TILOGV TILOG_INTERNAL_CREATE_TILOG_NONE_STREAM()
 #endif
 
-// not recommend,use EZCOUT to TILOGV for better performance
+// not recommend,use TICOUT to TILOGV for better performance
 #define TILOG(lv) TILOG_INTERNAL_CREATE_TILOG_STREAM(lv)
 //------------------------------------------end define micro for user------------------------------------------//
 

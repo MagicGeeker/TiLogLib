@@ -43,15 +43,15 @@ int main()
 		("abc 0100000000010000000000101000000000002300000000000023002301000000000002300023 %d %lld",123,456LL);
 #elif FUN_MAIN==0
 	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
-	EZCOUT << "file_time_multi_thread_simulation__log_test_____________________";
+	TICOUT << "file_time_multi_thread_simulation__log_test_____________________";
 
 	double ns0 = SingleLoopTimeTestFunc<false>();
 	double ns1 = SingleLoopTimeTestFunc<true>();
 
-	EZCOUT << "ns0 " << ns0 << " loop per ns\n";
-	EZCOUT << "ns1 " << ns1 << " loop per ns\n";
-	EZCOUT << "ns1/ns0= " << 100.0 * ns1 / ns0 << "%\n";
-	EZCOUT << "single log cost ns= " << (ns1 - ns0) << "\n";
+	TICOUT << "ns0 " << ns0 << " loop per ns\n";
+	TICOUT << "ns1 " << ns1 << " loop per ns\n";
+	TICOUT << "ns1/ns0= " << 100.0 * ns1 / ns0 << "%\n";
+	TICOUT << "single log cost ns= " << (ns1 - ns0) << "\n";
 #elif FUN_MAIN== 1
 
 #else

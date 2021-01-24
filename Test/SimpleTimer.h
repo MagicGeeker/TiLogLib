@@ -28,7 +28,7 @@ public:
 		m_stop = std::chrono::steady_clock::now();
 		uint64_t interval = std::chrono::duration_cast<std::chrono::microseconds>(m_stop - m_start).count();
 		std::string stringD = (m_flag + "  ####  end!");
-		EZCOUT << "time: " << interval << "us.\n";
+		TICOUT << "time: " << interval << "us.\n";
 	}
 
 	inline void close() { m_closed = true; }
@@ -60,7 +60,7 @@ protected:
 	{
 		m_start = std::chrono::steady_clock::now();
 		std::string stringD = (m_flag + " #### begin!\n");
-		EZCOUT << stringD << "\n";
+		TICOUT << stringD << "\n";
 	}
 
 private:

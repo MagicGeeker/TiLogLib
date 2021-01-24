@@ -56,7 +56,7 @@ bool s_test_init = InitFunc();
 
 TEST_CASE("single_thread_log_test_____________________")
 {
-	EZCOUT << "single_thread_log_test_____________________";
+	TICOUT << "single_thread_log_test_____________________";
 }
 
 #endif
@@ -66,7 +66,7 @@ TEST_CASE("single_thread_log_test_____________________")
 
 TEST_CASE("multi_thread_log_test_____________________")
 {
-	EZCOUT << "multi_thread_log_test_____________________";
+	TICOUT << "multi_thread_log_test_____________________";
 
 	TestThread([]() -> void {
 		this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -82,7 +82,7 @@ TEST_CASE("multi_thread_log_test_____________________")
 TEST_CASE("file_multi_thread_log_test_____________________")
 {
 	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
-	EZCOUT << "file_multi_thread_log_test_____________________";
+	TICOUT << "file_multi_thread_log_test_____________________";
 	TILOGI << "file_multi_thread_log_test_____________________";
 	TILOGI << "adcc";
 
@@ -107,9 +107,9 @@ TEST_CASE("terminal_many_thread_cout_test_____________________")
 
 	MultiThreadTest<testLoop_t>("terminal_many_thread_cout_test_____________________", [&](int index) -> void {
 		int a = 0;
-		EZCOUT << "LOGD thr " << index << " " << &a << endl;
-		EZCOUT << "LOGI thr " << index << " " << &a << endl;
-		EZCOUT << "LOGV thr " << index << " " << &a << endl;
+		TICOUT << "LOGD thr " << index << " " << &a << endl;
+		TICOUT << "LOGI thr " << index << " " << &a << endl;
+		TICOUT << "LOGV thr " << index << " " << &a << endl;
 	});
 }
 
@@ -187,15 +187,15 @@ TEST_CASE("file_time_many_thread_log_test_with_sleep_____________________")
 TEST_CASE("file_time_multi_thread_simulation__log_test_____________________")
 {
 	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
-	EZCOUT << "file_time_multi_thread_simulation__log_test_____________________";
+	TICOUT << "file_time_multi_thread_simulation__log_test_____________________";
 
 	double ns0 = SingleLoopTimeTestFunc<false>();
 	double ns1 = SingleLoopTimeTestFunc<true>();
 
-	EZCOUT << "ns0 " << ns0 << " loop per ns\n";
-	EZCOUT << "ns1 " << ns1 << " loop per ns\n";
-	EZCOUT << "ns1/ns0= " << 100.0 * ns1 / ns0 << "%\n";
-	EZCOUT << "single log cost ns= " << (ns1 - ns0) << "\n";
+	TICOUT << "ns0 " << ns0 << " loop per ns\n";
+	TICOUT << "ns1 " << ns1 << " loop per ns\n";
+	TICOUT << "ns1/ns0= " << 100.0 * ns1 / ns0 << "%\n";
+	TICOUT << "single log cost ns= " << (ns1 - ns0) << "\n";
 }
 
 #endif
@@ -269,8 +269,8 @@ TEST_CASE("file_multi_thread_close_print_benchmark_test_____________________")
 				if (j == loops * 3 / 4) { TiLog::setLogLevel(tilogspace::OPEN); }
 			}
 		});
-	EZCOUT << (1e6 * TiLog::getPrintedLogs() / ns) << " logs per millisecond\n";
-	EZCOUT << 1.0 * ns / (TiLog::getPrintedLogs()) << " ns per log\n";
+	TICOUT << (1e6 * TiLog::getPrintedLogs() / ns) << " logs per millisecond\n";
+	TICOUT << 1.0 * ns / (TiLog::getPrintedLogs()) << " ns per log\n";
 }
 
 #endif
@@ -338,7 +338,7 @@ TEST_CASE("none_multi_thread_memory_leak_stress_test_____________________")
 			{
 				TILOGE << "loop= " << loops << " j= " << j;
 			}
-			EZCOUT << " " << index << " to exit \n";
+			TICOUT << " " << index << " to exit \n";
 		});
 }
 
@@ -350,7 +350,7 @@ TEST_CASE("none_multi_thread_memory_leak_stress_test_____________________")
 TEST_CASE("tilog_string_test_____________________")
 {
 	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
-	EZCOUT << "tilog_string_test_____________________";
+	TICOUT << "tilog_string_test_____________________";
 	using String = tilogspace::internal::TiLogString;
 	String str;
 	str.reserve(100);
@@ -394,7 +394,7 @@ TEST_CASE("tilog_string_test_____________________")
 TEST_CASE("tilog_string_extend_test_____________________")
 {
 	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
-	EZCOUT << "tilog_string_extend_test_____________________";
+	TICOUT << "tilog_string_extend_test_____________________";
 	struct ext_t
 	{
 		char s[50];
@@ -503,8 +503,8 @@ TEST_CASE("file_multi_thread_print_level_test_____________________")
 
 
 	TiLog::setLogLevel(tilogspace::ELevel::VERBOSE);
-	EZCOUT << (1e6 * TiLog::getPrintedLogs() / ns) << " logs per millisecond\n";
-	EZCOUT << 1.0 * ns / (TiLog::getPrintedLogs()) << " us per log\n";
+	TICOUT << (1e6 * TiLog::getPrintedLogs() / ns) << " logs per millisecond\n";
+	TICOUT << 1.0 * ns / (TiLog::getPrintedLogs()) << " us per log\n";
 }
 
 #endif
@@ -513,7 +513,7 @@ TEST_CASE("file_multi_thread_print_level_test_____________________")
 #ifdef file_static_log_test_____________________
 static bool b0_file_static_log_test = []() {
 	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
-	EZCOUT << "Prepare file_static_log_test_____________________";
+	TICOUT << "Prepare file_static_log_test_____________________";
 
 	auto s = std::move(TILOGE("long string \n"));
 	for (uint32_t i = 0; i < 10000; i++)
@@ -528,7 +528,7 @@ static bool b0_file_static_log_test = []() {
 }();
 TEST_CASE("file_static_log_test_____________________")
 {
-	EZCOUT << "Complete file_static_log_test_____________________\n";
+	TICOUT << "Complete file_static_log_test_____________________\n";
 }
 
 #endif
@@ -536,7 +536,7 @@ TEST_CASE("file_static_log_test_____________________")
 #ifdef terminal_multi_way_log_test_____________________
 TEST_CASE("terminal_multi_way_log_test_____________________")
 {
-	EZCOUT << "terminal_multi_way_log_test_____________________";
+	TICOUT << "terminal_multi_way_log_test_____________________";
 	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
 
 	TILOGE << true;
@@ -566,10 +566,10 @@ TEST_CASE("terminal_multi_way_log_test_____________________")
 TEST_CASE("special_log_test_____________________")
 {
 	static_assert(TILOG_STATIC_LOG__LEVEL == TILOG_INTERNAL_LEVEL_WARN, "set warn to begin test");
-	EZCOUT << "special_log_test_____________________";
+	TICOUT << "special_log_test_____________________";
 	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
 	{
-		auto& tilogcout = EZCOUT;
+		auto& tilogcout = TICOUT;
 		tilogcout << "tilogcout test__";
 	}
 	{

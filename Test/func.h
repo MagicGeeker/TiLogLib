@@ -77,7 +77,7 @@ namespace funcspace
 	static uint64_t Test(const char* testName, tilogspace::printer_ids_t ids, Runnable&& runnable)
 	{
 		tilogspace::TiLog::setPrinter(ids);
-		EZCOUT << testName << '\n';
+		TICOUT << testName << '\n';
 		TILOGA << testName << '\n';
 		constexpr uint64_t loops = TestLoopType::GET_SINGLE_THREAD_LOOPS();
 		constexpr int32_t threads = TestLoopType::THREADS();
@@ -110,8 +110,8 @@ namespace funcspace
 		uint64_t ns = s1m.GetNanosecondsUpToNOW();
 		if_constexpr(TestLoopType::PRINT_LOOP_TIME())
 		{
-			EZCOUT << (1e6 * threads * loops / ns) << " loops per millisecond\n";
-			EZCOUT << 1.0 * ns / (loops * threads) << " ns per loop\n";
+			TICOUT << (1e6 * threads * loops / ns) << " loops per millisecond\n";
+			TICOUT << 1.0 * ns / (loops * threads) << " ns per loop\n";
 			TILOGA << (1e6 * threads * loops / ns) << " loops per millisecond\n";
 			TILOGA << 1.0 * ns / (loops * threads) << " ns per loop\n";
 		}
@@ -188,7 +188,7 @@ static double SingleLoopTimeTestFunc()
 		}
 	});
 
-	EZCOUT << "m= " << m << "\n";
+	TICOUT << "m= " << m << "\n";
 	return ns / (threads * LOOPS);
 }
 

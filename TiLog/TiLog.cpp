@@ -515,7 +515,7 @@ namespace tilogspace
 				size_t sz = this->size();
 				size_t cap = this->capacity();
 				size_t mem_size = new_cap + sizeof('\0');	 // request extra 1 byte for '\0'
-				char* p = (char*)ezrealloc(this->m_front, mem_size);
+				char* p = (char*)tirealloc(this->m_front, mem_size);
 				DEBUG_ASSERT(p != NULL);
 				this->m_front = p;
 				this->m_end = this->m_front + sz;
@@ -567,7 +567,7 @@ namespace tilogspace
 			using iterator = T*;
 			using const_iterator = const T*;
 
-			explicit PodCircularQueue() : pMem((T*)ezmalloc((1 + CAPACITY) * sizeof(T))), pMemEnd(pMem + 1 + CAPACITY)
+			explicit PodCircularQueue() : pMem((T*)timalloc((1 + CAPACITY) * sizeof(T))), pMemEnd(pMem + 1 + CAPACITY)
 			{
 				pFirst = pEnd = pMem;
 			}
