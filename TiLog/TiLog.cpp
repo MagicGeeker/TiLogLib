@@ -378,7 +378,7 @@ namespace tilogspace
 			inline const char& operator[](size_t index) const { return m_front[index]; }
 			inline char& operator[](size_t index) { return m_front[index]; }
 			inline const char* data() const { return m_front; }
-			inline const char* c_str() const { return nullptr == m_front ? "" : (check(), *m_end = '\0', m_front); }
+			inline const char* c_str() const { return nullptr == m_front ? "" : (check(), *(char*)m_end = '\0', m_front); }
 
 		protected:
 			inline size_t size_with_zero() const { return size() + sizeof(char); }

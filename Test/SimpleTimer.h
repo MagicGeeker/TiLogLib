@@ -24,11 +24,14 @@ public:
 
 	inline ~SimpleTimer()
 	{
+		if (m_closed) { return; }
 		m_stop = std::chrono::steady_clock::now();
 		uint64_t interval = std::chrono::duration_cast<std::chrono::microseconds>(m_stop - m_start).count();
 		std::string stringD = (m_flag + "  ####  end!");
-		EZCOUT << "time: " << interval<<"us.\n";
+		EZCOUT << "time: " << interval << "us.\n";
 	}
+
+	inline void close() { m_closed = true; }
 
 	inline uint64_t GetMillisecondsUpToNOW()
 	{
@@ -65,6 +68,7 @@ private:
 
 	std::chrono::steady_clock::time_point m_start;
 	std::chrono::steady_clock::time_point m_stop;
+	bool m_closed{};
 
 };
 

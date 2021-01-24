@@ -35,7 +35,10 @@
 #define TILOG_OS_MACRO
 
 #if defined(_M_X64) || defined(__amd64__) || defined(__IA64__)
+#define TILOG_0S_64_BIT TRUE
 #define TILOG_IS_64BIT_OS TRUE
+#else
+#define TILOG_IS_64BIT_OS FALSE
 #endif
 
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
@@ -657,7 +660,7 @@ namespace tilogspace
 			inline const char& operator[](size_type index) const { return pFront()[index]; }
 			inline char& operator[](size_type index) { return pFront()[index]; }
 			inline const char* data() const { return pFront(); }
-			inline const char* c_str() const { return nullptr == pFront() ? "" : (check(), *pEnd() = '\0', pFront()); }
+			inline const char* c_str() const { return nullptr == pFront() ? "" : (check(), *(char*)pEnd() = '\0', pFront()); }
 
 		public:
 			inline const ExtType* ext() const { return reinterpret_cast<const ExtType*>(pCore->ex); }
