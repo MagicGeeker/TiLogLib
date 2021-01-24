@@ -109,7 +109,7 @@
 #define TILOG_INTERNAL_LEVEL_DEBUG 8
 #define TILOG_INTERNAL_LEVEL_VERBOSE 9
 /**************************************************MACRO FOR USER**************************************************/
-#define TILOG_IS_AUTO_INIT FALSE  // TRUE or FALSE,if false must call tilogspace::TiLog::init() once before use
+#define TILOG_IS_AUTO_INIT FALSE  // TRUE or FALSE,if false must call tilogspace::TiLog::Init() once before use
 
 #define TILOG_TIME_IMPL_TYPE TILOG_INTERNAL_STD_STEADY_CLOCK //choose what clock to use
 #define TILOG_IS_WITH_MILLISECONDS TRUE  // TRUE or FALSE,if false no ms info in timestamp
@@ -393,7 +393,7 @@ namespace tilogspace
 		constexpr static uint32_t MAX_SIZE = 32;
 		inline static OType* create() { return new OType{}; }
 		inline static void recreate(OType* p) { *p = OType{}; }
-		inline static void destroy(OType* p) { delete p; }
+		inline static void Destroy(OType* p) { delete p; }
 	};
 
 	template <typename OType, typename FeatType = TiLogSyncedObjectPoolFeat<OType>>
@@ -409,7 +409,7 @@ namespace tilogspace
 		{
 			for (auto p : pool)
 			{
-				FeatType::destroy(p);
+				FeatType::Destroy(p);
 			}
 		};
 
@@ -1206,37 +1206,37 @@ namespace tilogspace
 	public:
 		// printer must be static or always valid until set printer next time
 		// it will not be effective immediately
-		static void enablePrinter(EPrinterID printer);
-		static void disablePrinter(EPrinterID printer);
-		static void setPrinter(printer_ids_t printerIds);
+		static void AsyncEnablePrinter(EPrinterID printer);
+		static void AsyncDisablePrinter(EPrinterID printer);
+		static void AsyncSetPrinter(printer_ids_t printerIds);
 
 	public:
-		static void pushLog(internal::TiLogBean* pBean);
+		static void PushLog(internal::TiLogBean* pBean);
 
-		static uint64_t getPrintedLogs();
+		static uint64_t GetPrintedLogs();
 
-		static void clearPrintedLogs();
+		static void ClearPrintedLogs();
 
 #if TILOG_IS_AUTO_INIT
-		static void init(){};
-		static void initForThisThread(){};
+		static void Init(){};
+		static void InitForThisThread(){};
 #else
-		static void init();					// This function is NOT thread safe.Make sure call ONLY ONCE before first log.
-		static void initForThisThread();	// Must be called for every thread.Make sure call ONLY ONCE before first log of thread.
-		// before call initForThisThread(),must call init() first
+		static void Init();					// This function is NOT thread safe.Make sure call ONLY ONCE before first log.
+		static void InitForThisThread();	// Must be called for every thread.Make sure call ONLY ONCE before first log of thread.
+		// before call InitForThisThread(),must call Init() first
 #endif
-		static void destroy();	  // call internal
+		static void Destroy();	  // call internal
 
 #if TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL == TRUE
 
-		static void setLogLevel(ELevel level);
+		static void SetLogLevel(ELevel level);
 
-		static ELevel getDynamicLogLevel();
+		static ELevel GetLogLevel();
 #else
 
-		static void setLogLevel(ELevel level) {}
+		static void SetLogLevel(ELevel level) {}
 
-		static constexpr ELevel getDynamicLogLevel() { return ELevel::STATIC_LOG_LEVEL; }
+		static constexpr ELevel GetLogLevel() { return ELevel::STATIC_LOG_LEVEL; }
 #endif
 
 	private:
@@ -1303,7 +1303,7 @@ namespace tilogspace
 		// make a valid stream
 		inline TiLogStream(uint32_t lv, const char* file, uint16_t fileLen, uint16_t line) : StringType(EPlaceHolder{})
 		{
-			if (lv > tilogspace::TiLog::getDynamicLogLevel())
+			if (lv > tilogspace::TiLog::GetLogLevel())
 			{
 				bindToNoUseStream();
 				return;
@@ -1334,7 +1334,7 @@ namespace tilogspace
 			case ELogLevelFlag::D:
 			case ELogLevelFlag::V:
 				DEBUG_RUN(TiLogBean::check(this->ext()));
-				TiLog::pushLog(this->ext());
+				TiLog::PushLog(this->ext());
 				// goto next case
 			case ELogLevelFlag::NO_USE:
 				// no need set pCore = nullptr,do nothing and shortly call do_overwrited_super_destructor

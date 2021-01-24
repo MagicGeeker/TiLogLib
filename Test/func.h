@@ -16,7 +16,7 @@ bool InitFunc();
 
 struct ThreadIniter
 {
-	void operator()() { tilogspace::TiLog::initForThisThread(); }
+	void operator()() { tilogspace::TiLog::InitForThisThread(); }
 };
 using TestThread = MThread<ThreadIniter>;
 
@@ -76,7 +76,7 @@ namespace funcspace
 	template <typename TestLoopType = multi_thread_test_loop_t, typename Runnable>
 	static uint64_t Test(const char* testName, tilogspace::printer_ids_t ids, Runnable&& runnable)
 	{
-		tilogspace::TiLog::setPrinter(ids);
+		tilogspace::TiLog::AsyncSetPrinter(ids);
 		TICOUT << testName << '\n';
 		TILOGA << testName << '\n';
 		constexpr uint64_t loops = TestLoopType::GET_SINGLE_THREAD_LOOPS();

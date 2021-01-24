@@ -81,7 +81,7 @@ TEST_CASE("multi_thread_log_test_____________________")
 
 TEST_CASE("file_multi_thread_log_test_____________________")
 {
-	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
+	TiLog::AsyncSetPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
 	TICOUT << "file_multi_thread_log_test_____________________";
 	TILOGI << "file_multi_thread_log_test_____________________";
 	TILOGI << "adcc";
@@ -186,7 +186,7 @@ TEST_CASE("file_time_many_thread_log_test_with_sleep_____________________")
 
 TEST_CASE("file_time_multi_thread_simulation__log_test_____________________")
 {
-	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
+	TiLog::AsyncSetPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
 	TICOUT << "file_time_multi_thread_simulation__log_test_____________________";
 
 	double ns0 = SingleLoopTimeTestFunc<false>();
@@ -250,7 +250,7 @@ TEST_CASE("file_multi_thread_benchmark_test_____________________")
 TEST_CASE("file_multi_thread_close_print_benchmark_test_____________________")
 {
 	static_assert(TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL, "fatal error,enable it to begin test");
-	TiLog::clearPrintedLogs();
+	TiLog::ClearPrintedLogs();
 
 	struct testLoop_t : multi_thread_test_loop_t
 	{
@@ -265,12 +265,12 @@ TEST_CASE("file_multi_thread_close_print_benchmark_test_____________________")
 			for (uint64_t j = 0; j < loops; j++)
 			{
 				TILOGD << "index= " << index << " j= " << j;
-				if (j == loops / 4) { TiLog::setLogLevel(tilogspace::CLOSED); }
-				if (j == loops * 3 / 4) { TiLog::setLogLevel(tilogspace::OPEN); }
+				if (j == loops / 4) { TiLog::SetLogLevel(tilogspace::CLOSED); }
+				if (j == loops * 3 / 4) { TiLog::SetLogLevel(tilogspace::OPEN); }
 			}
 		});
-	TICOUT << (1e6 * TiLog::getPrintedLogs() / ns) << " logs per millisecond\n";
-	TICOUT << 1.0 * ns / (TiLog::getPrintedLogs()) << " ns per log\n";
+	TICOUT << (1e6 * TiLog::GetPrintedLogs() / ns) << " logs per millisecond\n";
+	TICOUT << 1.0 * ns / (TiLog::GetPrintedLogs()) << " ns per log\n";
 }
 
 #endif
@@ -349,7 +349,7 @@ TEST_CASE("none_multi_thread_memory_leak_stress_test_____________________")
 
 TEST_CASE("tilog_string_test_____________________")
 {
-	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
+	TiLog::AsyncSetPrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
 	TICOUT << "tilog_string_test_____________________";
 	using String = tilogspace::internal::TiLogString;
 	String str;
@@ -393,7 +393,7 @@ TEST_CASE("tilog_string_test_____________________")
 
 TEST_CASE("tilog_string_extend_test_____________________")
 {
-	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
+	TiLog::AsyncSetPrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
 	TICOUT << "tilog_string_extend_test_____________________";
 	struct ext_t
 	{
@@ -477,8 +477,8 @@ TEST_CASE("terminal_single_thread_long_string_log_test_____________________")
 TEST_CASE("file_multi_thread_print_level_test_____________________")
 {
 	static_assert(TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL, "fatal error,enable it to begin test");
-	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
-	TiLog::clearPrintedLogs();
+	TiLog::AsyncSetPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
+	TiLog::ClearPrintedLogs();
 
 	struct testLoop_t : multi_thread_test_loop_t
 	{
@@ -502,9 +502,9 @@ TEST_CASE("file_multi_thread_print_level_test_____________________")
 		});
 
 
-	TiLog::setLogLevel(tilogspace::ELevel::VERBOSE);
-	TICOUT << (1e6 * TiLog::getPrintedLogs() / ns) << " logs per millisecond\n";
-	TICOUT << 1.0 * ns / (TiLog::getPrintedLogs()) << " us per log\n";
+	TiLog::SetLogLevel(tilogspace::ELevel::VERBOSE);
+	TICOUT << (1e6 * TiLog::GetPrintedLogs() / ns) << " logs per millisecond\n";
+	TICOUT << 1.0 * ns / (TiLog::GetPrintedLogs()) << " us per log\n";
 }
 
 #endif
@@ -512,7 +512,7 @@ TEST_CASE("file_multi_thread_print_level_test_____________________")
 
 #ifdef file_static_log_test_____________________
 static bool b0_file_static_log_test = []() {
-	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
+	TiLog::AsyncSetPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
 	TICOUT << "Prepare file_static_log_test_____________________";
 
 	auto s = std::move(TILOGE("long string \n"));
@@ -537,7 +537,7 @@ TEST_CASE("file_static_log_test_____________________")
 TEST_CASE("terminal_multi_way_log_test_____________________")
 {
 	TICOUT << "terminal_multi_way_log_test_____________________";
-	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
+	TiLog::AsyncSetPrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
 
 	TILOGE << true;
 	TILOGE << 'e';
@@ -567,7 +567,7 @@ TEST_CASE("special_log_test_____________________")
 {
 	static_assert(TILOG_STATIC_LOG__LEVEL == TILOG_INTERNAL_LEVEL_WARN, "set warn to begin test");
 	TICOUT << "special_log_test_____________________";
-	TiLog::setPrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
+	TiLog::AsyncSetPrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
 	{
 		auto& tilogcout = TICOUT;
 		tilogcout << "tilogcout test__";

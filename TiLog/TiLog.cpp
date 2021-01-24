@@ -1079,15 +1079,15 @@ namespace tilogspace
 		class TiLogCore : public TiLogObject
 		{
 		public:
-			inline static void pushLog(TiLogBean* pBean);
+			inline static void PushLog(TiLogBean* pBean);
 
-			inline static uint64_t getPrintedLogs();
+			inline static uint64_t GetPrintedLogs();
 
-			inline static void clearPrintedLogs();
+			inline static void ClearPrintedLogs();
 
 			TILOG_SINGLE_INSTANCE_DECLARE(TiLogCore)
 
-			inline static ThreadStru* initForEveryThread();
+			inline static ThreadStru* InitForEveryThread();
 
 		private:
 			TiLogCore();
@@ -1096,7 +1096,7 @@ namespace tilogspace
 
 			void AtExit();
 
-			inline ThreadStru* InitForEveryThread();
+			inline ThreadStru* IInitForEveryThread();
 
 			void IPushLog(TiLogBean* pBean);
 
@@ -1250,9 +1250,9 @@ namespace tilogspace
 		public:
 			TILOG_SINGLE_INSTANCE_DECLARE(TiLogPrinterManager)
 
-			static void enablePrinter(EPrinterID printer);
-			static void disablePrinter(EPrinterID printer);
-			static void setPrinter(printer_ids_t printerIds);
+			static void AsyncEnablePrinter(EPrinterID printer);
+			static void AsyncDisablePrinter(EPrinterID printer);
+			static void AsyncSetPrinter(printer_ids_t printerIds);
 
 			TiLogPrinterManager();
 			~TiLogPrinterManager();
@@ -1262,8 +1262,8 @@ namespace tilogspace
 			static void pushLogsToPrinters(IOBeanSharedPtr spLogs);
 
 		public:
-			static void setLogLevel(ELevel level);
-			static ELevel getDynamicLogLevel();
+			static void SetLogLevel(ELevel level);
+			static ELevel GetLogLevel();
 
 			static Vector<TiLogPrinter*> getAllValidPrinters();
 			static Vector<TiLogPrinter*> getCurrentPrinters();
@@ -1482,10 +1482,10 @@ namespace tilogspace
 			}
 		}
 
-		void TiLogPrinterManager::enablePrinter(EPrinterID printer) { getInstance()->m_dest |= ((printer_ids_t)printer); }
-		void TiLogPrinterManager::disablePrinter(EPrinterID printer) { getInstance()->m_dest &= (~(printer_ids_t)printer); }
+		void TiLogPrinterManager::AsyncEnablePrinter(EPrinterID printer) { getInstance()->m_dest |= ((printer_ids_t)printer); }
+		void TiLogPrinterManager::AsyncDisablePrinter(EPrinterID printer) { getInstance()->m_dest &= (~(printer_ids_t)printer); }
 
-		void TiLogPrinterManager::setPrinter(printer_ids_t printerIds) { getInstance()->m_dest = printerIds; }
+		void TiLogPrinterManager::AsyncSetPrinter(printer_ids_t printerIds) { getInstance()->m_dest = printerIds; }
 
 		void TiLogPrinterManager::addPrinter(TiLogPrinter* printer)
 		{
@@ -1509,9 +1509,9 @@ namespace tilogspace
 			}
 		}
 
-		void TiLogPrinterManager::setLogLevel(ELevel level) { getInstance()->m_level = level; }
+		void TiLogPrinterManager::SetLogLevel(ELevel level) { getInstance()->m_level = level; }
 
-		ELevel TiLogPrinterManager::getDynamicLogLevel() { return getInstance()->m_level; }
+		ELevel TiLogPrinterManager::GetLogLevel() { return getInstance()->m_level; }
 
 		Vector<TiLogPrinter*> TiLogPrinterManager::getAllValidPrinters()
 		{
@@ -1580,14 +1580,14 @@ namespace tilogspace
 			return mMerge.mRawDatas.full();
 		}
 
-		inline ThreadStru* TiLogCore::initForEveryThread()
+		inline ThreadStru* TiLogCore::InitForEveryThread()
 		{
-			DEBUG_ASSERT(getInstance() != nullptr);			// must call init() first
+			DEBUG_ASSERT(getInstance() != nullptr);			// must call Init() first
 			DEBUG_ASSERT(s_pThreadLocalStru == nullptr);	// must be called only once
-			return getRInstance().InitForEveryThread();
+			return getRInstance().IInitForEveryThread();
 		}
 
-		ThreadStru* TiLogCore::InitForEveryThread()
+		ThreadStru* TiLogCore::IInitForEveryThread()
 		{
 			s_pThreadLocalStru = new ThreadStru(TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE);
 			DEBUG_ASSERT(s_pThreadLocalStru != nullptr);
@@ -1624,13 +1624,13 @@ namespace tilogspace
 				this_thread::yield();
 			}
 			DEBUG_PRINTI("exit\n");
-			TiLog::destroy();
+			TiLog::Destroy();
 		}
 
-		inline void TiLogCore::pushLog(TiLogBean* pBean)
+		inline void TiLogCore::PushLog(TiLogBean* pBean)
 		{
-			DEBUG_ASSERT(getInstance() != nullptr);			// must call init() first
-			DEBUG_ASSERT(s_pThreadLocalStru != nullptr);	// must call initForEveryThread() first
+			DEBUG_ASSERT(getInstance() != nullptr);			// must call Init() first
+			DEBUG_ASSERT(s_pThreadLocalStru != nullptr);	// must call InitForEveryThread() first
 			getRInstance().IPushLog(pBean);
 		}
 
@@ -2143,9 +2143,9 @@ namespace tilogspace
 			t->mCV.notify_all();
 		}
 
-		inline uint64_t TiLogCore::getPrintedLogs() { return getRInstance().mPrintedLogs; }
+		inline uint64_t TiLogCore::GetPrintedLogs() { return getRInstance().mPrintedLogs; }
 
-		inline void TiLogCore::clearPrintedLogs() { getRInstance().mPrintedLogs = 0; }
+		inline void TiLogCore::ClearPrintedLogs() { getRInstance().mPrintedLogs = 0; }
 
 #endif
 
@@ -2160,24 +2160,24 @@ namespace tilogspace
 	TiLogPrinter::~TiLogPrinter() { delete mData; }
 #ifdef __________________________________________________TiLog__________________________________________________
 
-	void TiLog::enablePrinter(EPrinterID printer) { TiLogPrinterManager::enablePrinter(printer); }
-	void TiLog::disablePrinter(EPrinterID printer) { TiLogPrinterManager::disablePrinter(printer); }
-	void TiLog::setPrinter(printer_ids_t printerIds) { TiLogPrinterManager::setPrinter(printerIds); }
-	void TiLog::pushLog(TiLogBean* pBean) { TiLogCore::pushLog(pBean); }
-	uint64_t TiLog::getPrintedLogs() { return TiLogCore::getPrintedLogs(); }
-	void TiLog::clearPrintedLogs() { TiLogCore::clearPrintedLogs(); }
+	void TiLog::AsyncEnablePrinter(EPrinterID printer) { TiLogPrinterManager::AsyncEnablePrinter(printer); }
+	void TiLog::AsyncDisablePrinter(EPrinterID printer) { TiLogPrinterManager::AsyncDisablePrinter(printer); }
+	void TiLog::AsyncSetPrinter(printer_ids_t printerIds) { TiLogPrinterManager::AsyncSetPrinter(printerIds); }
+	void TiLog::PushLog(TiLogBean* pBean) { TiLogCore::PushLog(pBean); }
+	uint64_t TiLog::GetPrintedLogs() { return TiLogCore::GetPrintedLogs(); }
+	void TiLog::ClearPrintedLogs() { TiLogCore::ClearPrintedLogs(); }
 
 #if !TILOG_IS_AUTO_INIT
-	void TiLog::init()
+	void TiLog::Init()
 	{
 		tilogspace::internal::tilogtimespace::steady_flag_helper::init();
 		tilogspace::internal::TiLogPrinterManager::init();
 		tilogspace::internal::TiLogCore::init();
 	}
-	void TiLog::initForThisThread() { tilogspace::internal::TiLogCore::initForEveryThread(); }
+	void TiLog::InitForThisThread() { tilogspace::internal::TiLogCore::InitForEveryThread(); }
 #endif
 
-	void TiLog::destroy()
+	void TiLog::Destroy()
 	{
 		delete tilogspace::internal::tilogtimespace::steady_flag_helper::getInstance();
 		delete tilogspace::internal::TiLogPrinterManager::getInstance();
@@ -2185,8 +2185,8 @@ namespace tilogspace
 	}
 
 #if TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL == TRUE
-	void TiLog::setLogLevel(ELevel level) { TiLogPrinterManager::setLogLevel(level); }
-	ELevel TiLog::getDynamicLogLevel() { return TiLogPrinterManager::getDynamicLogLevel(); }
+	void TiLog::SetLogLevel(ELevel level) { TiLogPrinterManager::SetLogLevel(level); }
+	ELevel TiLog::GetLogLevel() { return TiLogPrinterManager::GetLogLevel(); }
 #endif
 
 #endif
