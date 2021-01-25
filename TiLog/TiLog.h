@@ -221,6 +221,12 @@ namespace tilogspace
 
 // clang-format on
 /**************************************************tilogspace codes**************************************************/
+
+#define TILOG_COMPLEXITY_FOR_THIS_FUNCTION(N1, N2)
+#define TILOG_COMPLEXITY_FOR_THESE_FUNCTIONS(N1, N2)
+#define TILOG_TIME_COMPLEXITY_O(n)
+#define TILOG_SPACE_COMPLEXITY_O(n)
+
 #define H__________________________________________________TiLog__________________________________________________
 #define H__________________________________________________TiLogBean__________________________________________________
 #define H__________________________________________________TiLogStream__________________________________________________
@@ -399,8 +405,6 @@ namespace tilogspace
 	template <typename OType, typename FeatType = TiLogSyncedObjectPoolFeat<OType>>
 	class TiLogSyncedObjectPool : public TiLogObject
 	{
-		constexpr static uint32_t SIZE = FeatType::MAX_SIZE;
-		static_assert(SIZE > 0, "fatal error");
 
 	public:
 		using ObjectPtr = OType*;
@@ -440,7 +444,10 @@ namespace tilogspace
 			return p;
 		}
 
-	private:
+	protected:
+		constexpr static uint32_t SIZE = FeatType::MAX_SIZE;
+		static_assert(SIZE > 0, "fatal error");
+
 		Vector<ObjectPtr> pool{ SIZE };
 		TILOG_MUTEXABLE_CLASS_MACRO_WITH_CV(typename FeatType::mutex_type, mtx, CondType, cv);
 	};
@@ -1200,23 +1207,47 @@ namespace tilogspace
 	};
 
 #ifdef H__________________________________________________TiLog__________________________________________________
-	class TiLog
+	class TiLog final
 	{
-
 	public:
-		// printer must be static or always valid until set printer next time
-		// it will not be effective immediately
+		TILOG_COMPLEXITY_FOR_THESE_FUNCTIONS(TILOG_TIME_COMPLEXITY_O(1), TILOG_SPACE_COMPLEXITY_O(1))
+		// printer must be static and always valid,so it can NOT be removed but can be disabled
+		// async functions: MAY effect(overwrite) previous printerIds setting
 		static void AsyncEnablePrinter(EPrinterID printer);
 		static void AsyncDisablePrinter(EPrinterID printer);
-		static void AsyncSetPrinter(printer_ids_t printerIds);
+		static void AsyncSetPrinters(printer_ids_t printerIds);
+		// return current active printers
+		static printer_ids_t GetPrinters();
+		// return the printer is active or not
+		static bool IsPrinterActive(EPrinterID printer);
+		// return if the printers contain the printer
+		static bool IsPrinterInPrinters(EPrinterID printer, printer_ids_t printers);
 
 	public:
-		static void PushLog(internal::TiLogBean* pBean);
+		TILOG_COMPLEXITY_FOR_THESE_FUNCTIONS(TILOG_TIME_COMPLEXITY_O(n), TILOG_SPACE_COMPLEXITY_O(n))
 
+		using callback_t = std::function<void()>;
+
+		// sync the cached log to printers's task queue,but NOT wait for IO
+		static void Sync(callback_t callback = {});
+		// sync the cached log to printers's task queue,and wait for IO
+		static void FSync(callback_t callback = {});
+
+		// printer must be static and always valid,so it can NOT be removed but can be disabled
+		// sync functions: NOT effect(overwrite) previous printerIds setting.
+		// Will call TiLog::Sync() function before set new printers
+		static void EnablePrinter(EPrinterID printer);
+		static void DisablePrinter(EPrinterID printer);
+		static void SetPrinters(printer_ids_t printerIds);
+
+	public:
+		TILOG_COMPLEXITY_FOR_THESE_FUNCTIONS(TILOG_TIME_COMPLEXITY_O(1), TILOG_SPACE_COMPLEXITY_O(1))
+		// return how many logs has been printed,NOT accurate
 		static uint64_t GetPrintedLogs();
+		// set printed log number=0
+		static void ClearPrintedLogsNumber();
 
-		static void ClearPrintedLogs();
-
+	public:
 #if TILOG_IS_AUTO_INIT
 		static void Init(){};
 		static void InitForThisThread(){};
@@ -1225,19 +1256,21 @@ namespace tilogspace
 		static void InitForThisThread();	// Must be called for every thread.Make sure call ONLY ONCE before first log of thread.
 		// before call InitForThisThread(),must call Init() first
 #endif
-		static void Destroy();	  // call internal
 
+	public:
+		TILOG_COMPLEXITY_FOR_THESE_FUNCTIONS(TILOG_TIME_COMPLEXITY_O(1), TILOG_SPACE_COMPLEXITY_O(1))
+		// Set or get dynamic log level.If TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL is FALSE,SetLogLevel take no effect.
 #if TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL == TRUE
-
 		static void SetLogLevel(ELevel level);
-
 		static ELevel GetLogLevel();
 #else
-
 		static void SetLogLevel(ELevel level) {}
-
 		static constexpr ELevel GetLogLevel() { return ELevel::STATIC_LOG_LEVEL; }
 #endif
+	public:
+		// usually only use internally
+		static void PushLog(internal::TiLogBean* pBean);
+		static void Destroy();
 
 	private:
 		TiLog() = delete;

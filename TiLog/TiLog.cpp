@@ -945,6 +945,11 @@ namespace tilogspace
 			List<ThreadStru*> availQueue;		 // thread is live
 			List<ThreadStru*> waitMergeQueue;	 // thread is dead, but some logs have not merge to global print string
 			List<ThreadStru*> toDelQueue;		 // thread is dead and no logs exist,need to delete by gc thread
+
+			List<ThreadStru*> printerQueue;		 // queue for printer threads
+			List<ThreadStru*> priThrdQueue;		 // queue for internal threads
+
+			MiniSpinMutex mAvailQueueMtx; //mutex for insert to availQueue
 		};
 
 
@@ -973,6 +978,13 @@ namespace tilogspace
 
 			explicit TiLogTaskQueueBasic(bool runAtOnce = true)
 			{
+				stat = RUN;
+				DEBUG_PRINTI("Create TiLogTaskQueueBasic %p\n", this);
+				if (runAtOnce) { start(); }
+			}
+			explicit TiLogTaskQueueBasic(EPlaceHolder,task_t initerFunc,bool runAtOnce = true)
+			{
+				this->initerFunc=initerFunc;
 				stat = RUN;
 				DEBUG_PRINTI("Create TiLogTaskQueueBasic %p\n", this);
 				if (runAtOnce) { start(); }
@@ -1008,6 +1020,7 @@ namespace tilogspace
 		private:
 			void loop()
 			{
+				if (initerFunc) { initerFunc(); }
 				std::unique_lock<MutexType> lk(mtx);
 				while (true)
 				{
@@ -1027,6 +1040,7 @@ namespace tilogspace
 
 		private:
 			std::thread loopThread;
+			task_t initerFunc;
 			Deque<task_t> taskDeque;
 			String looptid;
 			TILOG_MUTEXABLE_CLASS_MACRO_WITH_CV(MutexType, mtx, CondType, cv)
@@ -1083,11 +1097,16 @@ namespace tilogspace
 
 			inline static uint64_t GetPrintedLogs();
 
-			inline static void ClearPrintedLogs();
+			inline static void ClearPrintedLogsNumber();
 
 			TILOG_SINGLE_INSTANCE_DECLARE(TiLogCore)
 
 			inline static ThreadStru* InitForEveryThread();
+
+			inline static void InitPrinterThreadBeforeRun();
+
+			using callback_t = TiLog::callback_t;
+			inline static void Sync(callback_t func = {});
 
 		private:
 			TiLogCore();
@@ -1095,6 +1114,10 @@ namespace tilogspace
 			inline void CreateCoreThread(CoreThrdStruBase& thrd);
 
 			void AtExit();
+
+			bool Prepared();
+
+			void ISync(callback_t func);
 
 			inline ThreadStru* IInitForEveryThread();
 
@@ -1137,6 +1160,10 @@ namespace tilogspace
 
 			inline void InitInternalThreadBeforeRun();
 
+			inline void IInitPrinterThreadBeforeRun();
+
+			inline void IInitCoreThreadBeforeRun(List<ThreadStru*>& dstQueue, atomic_int32_t& counter);
+
 			inline bool LocalCircularQueuePushBack(TiLogBean* obj);
 
 			inline bool MoveLocalCacheToGlobal(ThreadStru& bean);
@@ -1146,11 +1173,14 @@ namespace tilogspace
 
 			thread_local static ThreadStru* s_pThreadLocalStru;
 
+			atomic_int32_t mExistPrinters{ 0 };
 			atomic_int32_t mExistThreads{ 0 };
 			bool mToExit{};
-			volatile bool mInited{};
+			atomic_bool mInited{};
 
 			atomic_uint64_t mPrintedLogs{ 0 };
+
+			atomic_bool mSyncing{};
 
 			ThreadStruQueue mThreadStruQueue;
 			// only all of logs of dead thread have been delivered,
@@ -1221,9 +1251,17 @@ namespace tilogspace
 			friend class TiLogPrinterManager;
 
 		public:
-			explicit TiLogPrinterData(TiLogPrinter* p) : mTaskQueue(), mpPrinter(p) {}
+			explicit TiLogPrinterData(TiLogPrinter* p) : mTaskQueue({}, InitPrinterThreadBeforeRun), mpPrinter(p) {}
 
-			void pushLogs(IOBeanSharedPtr bufPtr)
+			inline static void InitPrinterThreadBeforeRun() { TiLogCore::InitPrinterThreadBeforeRun(); }
+
+			template <typename task_t>
+			inline void pushTask(task_t&& task)
+			{
+				mTaskQueue.pushTask(task);
+			}
+
+			inline void pushLogs(IOBeanSharedPtr bufPtr)
 			{
 				auto printTask = [this, bufPtr] {
 					TiLogPrinter::buf_t buf{ bufPtr->data(), bufPtr->size(), bufPtr->mTime };
@@ -1250,9 +1288,13 @@ namespace tilogspace
 		public:
 			TILOG_SINGLE_INSTANCE_DECLARE(TiLogPrinterManager)
 
+			static printer_ids_t GetPrinters();
+			static bool IsPrinterActive(EPrinterID printer);
+			static bool IsPrinterInPrinters(EPrinterID printer, printer_ids_t printers);
+
 			static void AsyncEnablePrinter(EPrinterID printer);
 			static void AsyncDisablePrinter(EPrinterID printer);
-			static void AsyncSetPrinter(printer_ids_t printerIds);
+			static void AsyncSetPrinters(printer_ids_t printerIds);
 
 			TiLogPrinterManager();
 			~TiLogPrinterManager();
@@ -1260,6 +1302,7 @@ namespace tilogspace
 		public:	   // internal public
 			void addPrinter(TiLogPrinter* printer);
 			static void pushLogsToPrinters(IOBeanSharedPtr spLogs);
+			static void waitForIO();
 
 		public:
 			static void SetLogLevel(ELevel level);
@@ -1371,10 +1414,10 @@ namespace tilogspace
 #ifdef __________________________________________________TiLogTerminalPrinter__________________________________________________
 		TILOG_SINGLE_INSTANCE_DECLARE_OUTER(TiLogTerminalPrinter)
 
-		TiLogTerminalPrinter::TiLogTerminalPrinter() { std::ios::sync_with_stdio(false); };
-		void TiLogTerminalPrinter::onAcceptLogs(MetaData metaData) { std::cout.write(metaData->logs, metaData->logs_size); }
+		TiLogTerminalPrinter::TiLogTerminalPrinter(){};
+		void TiLogTerminalPrinter::onAcceptLogs(MetaData metaData) { fwrite(metaData->logs, metaData->logs_size, 1, stdout); }
 
-		void TiLogTerminalPrinter::sync() { std::cout.flush(); }
+		void TiLogTerminalPrinter::sync() { fflush(stdout); }
 		EPrinterID TiLogTerminalPrinter::getUniqueID() const { return PRINTER_TILOG_TERMINAL; }
 
 #endif
@@ -1481,11 +1524,13 @@ namespace tilogspace
 				delete x;
 			}
 		}
-
+		printer_ids_t TiLogPrinterManager::GetPrinters() { return getInstance()->m_dest; }
+		bool TiLogPrinterManager::IsPrinterActive(EPrinterID printer) { return getInstance()->m_dest & printer; }
+		bool TiLogPrinterManager::IsPrinterInPrinters(EPrinterID printer, printer_ids_t printers) { return printer & printers; }
 		void TiLogPrinterManager::AsyncEnablePrinter(EPrinterID printer) { getInstance()->m_dest |= ((printer_ids_t)printer); }
 		void TiLogPrinterManager::AsyncDisablePrinter(EPrinterID printer) { getInstance()->m_dest &= (~(printer_ids_t)printer); }
 
-		void TiLogPrinterManager::AsyncSetPrinter(printer_ids_t printerIds) { getInstance()->m_dest = printerIds; }
+		void TiLogPrinterManager::AsyncSetPrinters(printer_ids_t printerIds) { getInstance()->m_dest = printerIds; }
 
 		void TiLogPrinterManager::addPrinter(TiLogPrinter* printer)
 		{
@@ -1506,6 +1551,36 @@ namespace tilogspace
 			for (TiLogPrinter* printer : printers)
 			{
 				printer->mData->pushLogs(std::move(spLogs));
+			}
+		}
+
+		void TiLogPrinterManager::waitForIO()
+		{
+			Vector<TiLogPrinter*> printers = TiLogPrinterManager::getCurrentPrinters();
+			if (printers.empty()) { return; }
+			DEBUG_PRINTI("prepare to wait for io");
+
+			size_t count = printers.size();
+			mutex mtx;
+			condition_variable cv;
+
+			for (TiLogPrinter* printer : printers)
+			{
+				printer->mData->pushTask([printer, &mtx, &count, &cv] {
+					printer->sync();
+					bool zero = false;
+					synchronized(mtx)
+					{
+						count--;
+						if (count == 0) { zero = true; }
+					}
+					if (zero) { cv.notify_one(); }
+				});
+			}
+
+			synchronized_u(lk, mtx)
+			{
+				cv.wait(lk, [&count] { return count == 0; });
 			}
 		}
 
@@ -1551,7 +1626,6 @@ namespace tilogspace
 			CreateCoreThread(mDeliver);
 			CreateCoreThread(mGC);
 
-			mExistThreads = 4;
 			atexit([] { getRInstance().AtExit(); });
 			mInited = true;
 		}
@@ -1592,6 +1666,8 @@ namespace tilogspace
 			s_pThreadLocalStru = new ThreadStru(TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE);
 			DEBUG_ASSERT(s_pThreadLocalStru != nullptr);
 			DEBUG_ASSERT(s_pThreadLocalStru->tid != nullptr);
+
+			synchronized(mThreadStruQueue.mAvailQueueMtx) {}
 			synchronized(mThreadStruQueue)
 			{
 				DEBUG_PRINTV("availQueue insert thrd tid= %s\n", s_pThreadLocalStru->tid->c_str());
@@ -1627,6 +1703,61 @@ namespace tilogspace
 			TiLog::Destroy();
 		}
 
+		bool TiLogCore::Prepared() { return mExistThreads == 4; }
+
+		inline void TiLogCore::Sync(callback_t func) { getRInstance().ISync(std::move(func)); }
+
+		void TiLogCore::ISync(callback_t func)
+		{
+			if (!Prepared()) { return; }  // wait for merge etc. internal thread inited
+			std::unique_lock<MiniSpinMutex> lk(mThreadStruQueue.mAvailQueueMtx);  //prevent new thread insert to availQueue
+
+			synchronized(mThreadStruQueue)
+			{
+				mSyncing=true;
+
+				List<ThreadStru*> copyQ = mThreadStruQueue.availQueue;
+				for (List<ThreadStru*>::iterator it = copyQ.begin(); !copyQ.empty();)
+				{
+					ThreadStru* threadStru = *it;
+					if (threadStru->spinMtx.try_lock()) //prevent active threads add new logs
+					{
+						it = copyQ.erase(it);
+					} else
+					{
+						++it;
+					}
+					if (it == copyQ.end()) { it = copyQ.begin(); }
+				}
+			}
+
+			synchronized_u(lk_deliver,mDeliver.mMtxWait)
+			{
+				mDeliver.mCompleted = false;
+
+				synchronized_u(lk_merge,mMerge.mMtx){
+					mMerge.mDoing=true;
+					lk_merge.unlock();
+					mMerge.mCV.notify_all();  //notify merge thread
+				}
+
+				mDeliver.mCvWait.wait(lk_deliver,[this]{return mDeliver.mCompleted;});  //wait for deliver thread
+			}
+
+			mSyncing = false;
+
+			if (func) { func(); }  //call the callback function
+
+			synchronized(mThreadStruQueue)
+			{
+				for (ThreadStru* threadStru : mThreadStruQueue.availQueue)
+				{
+					threadStru->spinMtx.unlock();
+				}
+			}
+
+		}
+
 		inline void TiLogCore::PushLog(TiLogBean* pBean)
 		{
 			DEBUG_ASSERT(getInstance() != nullptr);			// must call Init() first
@@ -1659,10 +1790,26 @@ namespace tilogspace
 
 		void TiLogCore::MergeThreadStruQueueToSet(List<ThreadStru*>& thread_queue, TiLogBean& bean)
 		{
-			for (auto it = thread_queue.begin(); it != thread_queue.end(); (void)((**it).spinMtx.unlock()), (void)++it)
+			struct ThreadSpinLock
+			{
+				ThreadLocalSpinMutex& spinMtx;
+				bool isSyncing;
+				void lock()
+				{
+					if (!isSyncing) { spinMtx.lock(); }
+				}
+				void unlock()
+				{
+					if (!isSyncing) { spinMtx.unlock(); }
+				}
+			};
+
+			bool syncing = this->mSyncing;
+
+			for (auto it = thread_queue.begin(); it != thread_queue.end(); ++it)
 			{
 				ThreadStru& threadStru = **it;
-				threadStru.spinMtx.lock();
+				ThreadSpinLock spinLock{ threadStru.spinMtx, syncing };
 				CrcQueueLogCache& qCache = threadStru.qCache;
 
 				auto func_to_vector = [&](CrcQueueLogCache::iterator it_sub_beg, CrcQueueLogCache::iterator it_sub_end) {
@@ -1974,15 +2121,7 @@ namespace tilogspace
 					lk_wait.unlock();
 					mDeliver.mCvWait.notify_all();
 				}
-				if (!mMerge.mExist)
-				{
-					Vector<TiLogPrinter*> printers = TiLogPrinterManager::getAllValidPrinters();
-					for (TiLogPrinter* printer : printers)
-					{
-						printer->sync();
-					}
-					break;
-				}
+				if (!mMerge.mExist) { break; }
 			}
 			AtInternalThreadExit(&mDeliver, &mGC);
 			return;
@@ -2109,17 +2248,25 @@ namespace tilogspace
 			return;
 		}
 
-		inline void TiLogCore::InitInternalThreadBeforeRun()
+		void TiLogCore::InitPrinterThreadBeforeRun()
+		{
+			while (getInstance() == nullptr)
+			{
+				this_thread::yield();
+			}
+			getRInstance().IInitPrinterThreadBeforeRun();
+		}
+		void TiLogCore::IInitPrinterThreadBeforeRun() { IInitCoreThreadBeforeRun(mThreadStruQueue.printerQueue, mExistPrinters); }
+
+		inline void TiLogCore::InitInternalThreadBeforeRun() { IInitCoreThreadBeforeRun(mThreadStruQueue.priThrdQueue, mExistThreads); }
+
+		inline void TiLogCore::IInitCoreThreadBeforeRun(List<ThreadStru*>& dstQueue, atomic_int32_t& counter)
 		{
 			while (!mInited)	// make sure all variables are inited
 			{
 				this_thread::yield();
 			}
-			if (s_pThreadLocalStru == nullptr) { return; }
-			TiLogStreamHelper::free_no_used_stream(s_pThreadLocalStru->noUseStream);
-			DEBUG_PRINTI("free mem tid: %s\n", s_pThreadLocalStru->tid->c_str());
-			delete (s_pThreadLocalStru->tid);
-			s_pThreadLocalStru->tid = NULL;
+			if (s_pThreadLocalStru == nullptr) { goto func_end; }
 			synchronized(mThreadStruQueue)
 			{
 				auto it = std::find(mThreadStruQueue.availQueue.begin(), mThreadStruQueue.availQueue.end(), s_pThreadLocalStru);
@@ -2127,7 +2274,11 @@ namespace tilogspace
 				mThreadStruQueue.availQueue.erase(it);
 				// thrdExistMtx and thrdExistCV is not deleted here
 				// erase from availQueue,and s_pThreadLocalStru will be deleted by system at exit,no need to delete here.
+				dstQueue.emplace_back(s_pThreadLocalStru);
 			}
+		func_end:
+			++counter;
+			return;
 		}
 
 		inline void TiLogCore::AtInternalThreadExit(CoreThrdStruBase* thrd, CoreThrdStruBase* nextExitThrd)
@@ -2145,7 +2296,7 @@ namespace tilogspace
 
 		inline uint64_t TiLogCore::GetPrintedLogs() { return getRInstance().mPrintedLogs; }
 
-		inline void TiLogCore::ClearPrintedLogs() { getRInstance().mPrintedLogs = 0; }
+		inline void TiLogCore::ClearPrintedLogsNumber() { getRInstance().mPrintedLogs = 0; }
 
 #endif
 
@@ -2162,10 +2313,33 @@ namespace tilogspace
 
 	void TiLog::AsyncEnablePrinter(EPrinterID printer) { TiLogPrinterManager::AsyncEnablePrinter(printer); }
 	void TiLog::AsyncDisablePrinter(EPrinterID printer) { TiLogPrinterManager::AsyncDisablePrinter(printer); }
-	void TiLog::AsyncSetPrinter(printer_ids_t printerIds) { TiLogPrinterManager::AsyncSetPrinter(printerIds); }
+	void TiLog::AsyncSetPrinters(printer_ids_t printerIds) { TiLogPrinterManager::AsyncSetPrinters(printerIds); }
+	void TiLog::Sync(callback_t callback) {TiLogCore::Sync(std::move(callback)); }
 	void TiLog::PushLog(TiLogBean* pBean) { TiLogCore::PushLog(pBean); }
 	uint64_t TiLog::GetPrintedLogs() { return TiLogCore::GetPrintedLogs(); }
-	void TiLog::ClearPrintedLogs() { TiLogCore::ClearPrintedLogs(); }
+	void TiLog::ClearPrintedLogsNumber() { TiLogCore::ClearPrintedLogsNumber(); }
+
+	void TiLog::FSync(callback_t callback)
+	{
+		TiLogCore::Sync();
+		TiLogPrinterManager::waitForIO();
+	}
+	printer_ids_t TiLog::GetPrinters() { return TiLogPrinterManager::GetPrinters(); }
+	bool TiLog::IsPrinterInPrinters(EPrinterID p, printer_ids_t ps) { return TiLogPrinterManager::IsPrinterInPrinters(p, ps); }
+	bool TiLog::IsPrinterActive(EPrinterID printer) { return TiLogPrinterManager::IsPrinterActive(printer); }
+	void TiLog::EnablePrinter(EPrinterID printer)
+	{
+		TiLogCore::Sync([printer] { AsyncEnablePrinter(printer); });
+	}
+	void TiLog::DisablePrinter(EPrinterID printer)
+	{
+		TiLogCore::Sync([printer] { AsyncEnablePrinter(printer); });
+	}
+
+	void TiLog::SetPrinters(printer_ids_t printerIds)
+	{
+		TiLogCore::Sync([printerIds] { AsyncSetPrinters(printerIds); });
+	}
 
 #if !TILOG_IS_AUTO_INIT
 	void TiLog::Init()

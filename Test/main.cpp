@@ -42,7 +42,7 @@ int main()
 	(TILOGV<<"6601000010000000000100000000100000000000230100000000000230002300000000236")
 		("abc 0100000000010000000000101000000000002300000000000023002301000000000002300023 %d %lld",123,456LL);
 #elif FUN_MAIN==0
-	TiLog::AsyncSetPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
+	TiLog::SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
 	TICOUT << "file_time_multi_thread_simulation__log_test_____________________";
 
 	double ns0 = SingleLoopTimeTestFunc<false>();

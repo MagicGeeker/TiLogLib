@@ -56,7 +56,7 @@ bool s_test_init = InitFunc();
 
 TEST_CASE("single_thread_log_test_____________________")
 {
-	TICOUT << "single_thread_log_test_____________________";
+	TICOUT << "single_thread_log_test_____________________\n";
 }
 
 #endif
@@ -66,7 +66,7 @@ TEST_CASE("single_thread_log_test_____________________")
 
 TEST_CASE("multi_thread_log_test_____________________")
 {
-	TICOUT << "multi_thread_log_test_____________________";
+	TICOUT << "multi_thread_log_test_____________________\n";
 
 	TestThread([]() -> void {
 		this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -81,9 +81,9 @@ TEST_CASE("multi_thread_log_test_____________________")
 
 TEST_CASE("file_multi_thread_log_test_____________________")
 {
-	TiLog::AsyncSetPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
-	TICOUT << "file_multi_thread_log_test_____________________";
-	TILOGI << "file_multi_thread_log_test_____________________";
+	TiLog::SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
+	TICOUT << "file_multi_thread_log_test_____________________\n";
+	TILOGI << "file_multi_thread_log_test_____________________\n";
 	TILOGI << "adcc";
 
 	TestThread([]() -> void {
@@ -186,11 +186,11 @@ TEST_CASE("file_time_many_thread_log_test_with_sleep_____________________")
 
 TEST_CASE("file_time_multi_thread_simulation__log_test_____________________")
 {
-	TiLog::AsyncSetPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
-	TICOUT << "file_time_multi_thread_simulation__log_test_____________________";
+	TiLog::SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
+	TICOUT << "file_time_multi_thread_simulation__log_test_____________________\n";
 
-	double ns0 = SingleLoopTimeTestFunc<false>();
-	double ns1 = SingleLoopTimeTestFunc<true>();
+	double ns0 = SingleLoopTimeTestFunc<false>("when without log");
+	double ns1 = SingleLoopTimeTestFunc<true>("when with log");
 
 	TICOUT << "ns0 " << ns0 << " loop per ns\n";
 	TICOUT << "ns1 " << ns1 << " loop per ns\n";
@@ -208,6 +208,7 @@ TEST_CASE("file_single_thread_benchmark_test_____________________")
 	struct testLoop_t : single_thread_test_loop_t
 	{
 		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return test_release ? testpow10(6) : testpow10(4); }
+		constexpr static bool PRINT_LOOP_TIME() { return true; }
 	};
 
 	SingleThreadTest<testLoop_t>(
@@ -250,7 +251,7 @@ TEST_CASE("file_multi_thread_benchmark_test_____________________")
 TEST_CASE("file_multi_thread_close_print_benchmark_test_____________________")
 {
 	static_assert(TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL, "fatal error,enable it to begin test");
-	TiLog::ClearPrintedLogs();
+	TiLog::ClearPrintedLogsNumber();
 
 	struct testLoop_t : multi_thread_test_loop_t
 	{
@@ -349,7 +350,7 @@ TEST_CASE("none_multi_thread_memory_leak_stress_test_____________________")
 
 TEST_CASE("tilog_string_test_____________________")
 {
-	TiLog::AsyncSetPrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
+	TiLog::SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
 	TICOUT << "tilog_string_test_____________________";
 	using String = tilogspace::internal::TiLogString;
 	String str;
@@ -393,7 +394,7 @@ TEST_CASE("tilog_string_test_____________________")
 
 TEST_CASE("tilog_string_extend_test_____________________")
 {
-	TiLog::AsyncSetPrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
+	TiLog::SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
 	TICOUT << "tilog_string_extend_test_____________________";
 	struct ext_t
 	{
@@ -477,8 +478,8 @@ TEST_CASE("terminal_single_thread_long_string_log_test_____________________")
 TEST_CASE("file_multi_thread_print_level_test_____________________")
 {
 	static_assert(TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL, "fatal error,enable it to begin test");
-	TiLog::AsyncSetPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
-	TiLog::ClearPrintedLogs();
+	TiLog::SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
+	TiLog::ClearPrintedLogsNumber();
 
 	struct testLoop_t : multi_thread_test_loop_t
 	{
@@ -512,8 +513,8 @@ TEST_CASE("file_multi_thread_print_level_test_____________________")
 
 #ifdef file_static_log_test_____________________
 static bool b0_file_static_log_test = []() {
-	TiLog::AsyncSetPrinter(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
-	TICOUT << "Prepare file_static_log_test_____________________";
+	TiLog::SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
+	TICOUT << "Prepare file_static_log_test_____________________\n";
 
 	auto s = std::move(TILOGE("long string \n"));
 	for (uint32_t i = 0; i < 10000; i++)
@@ -536,8 +537,8 @@ TEST_CASE("file_static_log_test_____________________")
 #ifdef terminal_multi_way_log_test_____________________
 TEST_CASE("terminal_multi_way_log_test_____________________")
 {
-	TICOUT << "terminal_multi_way_log_test_____________________";
-	TiLog::AsyncSetPrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
+	TICOUT << "terminal_multi_way_log_test_____________________\n";
+	TiLog::SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
 
 	TILOGE << true;
 	TILOGE << 'e';
@@ -566,8 +567,8 @@ TEST_CASE("terminal_multi_way_log_test_____________________")
 TEST_CASE("special_log_test_____________________")
 {
 	static_assert(TILOG_STATIC_LOG__LEVEL == TILOG_INTERNAL_LEVEL_WARN, "set warn to begin test");
-	TICOUT << "special_log_test_____________________";
-	TiLog::AsyncSetPrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
+	TICOUT << "special_log_test_____________________\n";
+	TiLog::SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
 	{
 		auto& tilogcout = TICOUT;
 		tilogcout << "tilogcout test__";

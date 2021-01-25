@@ -76,9 +76,10 @@ namespace funcspace
 	template <typename TestLoopType = multi_thread_test_loop_t, typename Runnable>
 	static uint64_t Test(const char* testName, tilogspace::printer_ids_t ids, Runnable&& runnable)
 	{
-		tilogspace::TiLog::AsyncSetPrinter(ids);
-		TICOUT << testName << '\n';
-		TILOGA << testName << '\n';
+		tilogspace::TiLog::SetPrinters(ids);
+		bool terminal_enabled = tilogspace::TiLog::IsPrinterInPrinters(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL, ids);
+		if (!terminal_enabled) { TICOUT << "\n\n========Test: " << testName << '\n'; }
+		TILOGA << "\n\n========Test: " << testName << '\n';
 		constexpr uint64_t loops = TestLoopType::GET_SINGLE_THREAD_LOOPS();
 		constexpr int32_t threads = TestLoopType::THREADS();
 
@@ -110,8 +111,12 @@ namespace funcspace
 		uint64_t ns = s1m.GetNanosecondsUpToNOW();
 		if_constexpr(TestLoopType::PRINT_LOOP_TIME())
 		{
-			TICOUT << (1e6 * threads * loops / ns) << " loops per millisecond\n";
-			TICOUT << 1.0 * ns / (loops * threads) << " ns per loop\n";
+			if (!terminal_enabled)
+			{
+				TICOUT << (1e6 * threads * loops / ns) << " loops per millisecond\n";
+				TICOUT << 1.0 * ns / (loops * threads) << " ns per loop\n";
+			}
+
 			TILOGA << (1e6 * threads * loops / ns) << " loops per millisecond\n";
 			TILOGA << 1.0 * ns / (loops * threads) << " ns per loop\n";
 		}
@@ -166,7 +171,7 @@ static uint64_t ComplexCalFunc(uint64_t x)
 }
 
 template <bool WITH_LOG, size_t N = 50>
-static double SingleLoopTimeTestFunc()
+static double SingleLoopTimeTestFunc(const char* testName="")
 {
 	struct testLoop_t : multi_thread_test_loop_t
 	{
@@ -179,7 +184,7 @@ static double SingleLoopTimeTestFunc()
 	constexpr uint64_t LOOPS = testLoop_t::GET_SINGLE_THREAD_LOOPS();
 
 	uint64_t m = 0;
-	uint64_t ns = MultiThreadTest<testLoop_t>("", tilogspace::EPrinterID::PRINTER_TILOG_FILE, [&m](int index) {
+	uint64_t ns = MultiThreadTest<testLoop_t>(testName, tilogspace::EPrinterID::PRINTER_TILOG_FILE, [LOOPS, &m](int index) {
 		int a = 0;
 		for (uint64_t loops = LOOPS; loops; loops--)
 		{
