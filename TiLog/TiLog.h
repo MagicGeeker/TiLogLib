@@ -122,7 +122,7 @@
 #define TILOG_REALLOC_FUNCTION(ptr, new_size) realloc(ptr, new_size)
 #define TILOG_FREE_FUNCTION(ptr) free(ptr)
 
-#define TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL FALSE //TRUE or FALSE,if false TiLog::setLogLevel no effect
+#define TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL FALSE //TRUE or FALSE,if false TiLog::SetLogLevel no effect
 #define TILOG_STATIC_LOG__LEVEL TILOG_INTERNAL_LEVEL_VERBOSE	 // set the static log level,dynamic log level will always <= static log level
 
 /**************************************************user-defined data structure**************************************************/
@@ -454,18 +454,7 @@ namespace tilogspace
 
 
 	constexpr char LOG_PREFIX[] = "FF  FEWIDVFFFF";	   // begin FF,and end FFFF is invalid
-	enum class ELogLevelFlag : char
-	{
-		BLANK = ' ',
-		F = 'F',
-		E = 'E',
-		W = 'W',
-		I = 'I',
-		D = 'D',
-		V = 'V',
-		NO_USE = 'x',
-		INVALID = 'y',
-	};
+
 	// reserve +1 for '\0'
 	constexpr size_t TILOG_UINT16_MAX_CHAR_LEN = (5 + 1);
 	constexpr size_t TILOG_INT16_MAX_CHAR_LEN = (6 + 1);
@@ -487,6 +476,20 @@ namespace tilogspace
 		class TiLogBean;
 
 		const String* GetThreadIDString();
+
+		enum class ELogLevelFlag : char
+		{
+			BLANK = ' ',
+			F = 'F',
+			E = 'E',
+			W = 'W',
+			I = 'I',
+			D = 'D',
+			V = 'V',
+			NO_USE = 'x',
+			INVALID = 'y',
+			FREED = 'z'
+		};
 
 #ifndef NDEBUG
 		struct positive_size_type
@@ -779,6 +782,11 @@ namespace tilogspace
 			{
 				size_type pre_cap = capacity();
 				if (pre_cap >= ensure_cap) { return; }
+				ensureCapNoCheck(ensure_cap);
+			}
+
+			inline void ensureCapNoCheck(size_type ensure_cap)
+			{
 				size_type new_cap = ensure_cap * 2;
 				// you must ensure (ensure_cap * RESERVE_RATE_DEFAULT) will not over-flow size_type max
 				DEBUG_ASSERT2(new_cap > ensure_cap, new_cap, ensure_cap);
@@ -1149,7 +1157,7 @@ namespace tilogspace
 				check(p);
 				DEBUG_RUN(p->file = nullptr, p->tid = nullptr);
 				DEBUG_RUN(p->line = 0, p->fileLen = 0);
-				DEBUG_RUN(p->level = 'X');
+				DEBUG_RUN(p->level = (char)ELogLevelFlag::FREED);
 				TILOG_FREE_FUNCTION(p);
 			}
 
@@ -1163,7 +1171,7 @@ namespace tilogspace
 					{
 						if (c == p->level) { return; }
 					}
-					DEBUG_ASSERT(false);
+					DEBUG_ASSERT1(false, p->level);
 				};
 				DEBUG_RUN(checkLevelFunc());
 			}
@@ -1319,7 +1327,7 @@ namespace tilogspace
 		using StringType = TILOG_INTERNAL_STRING_TYPE;
 		using TiLogBean = tilogspace::internal::TiLogBean;
 		using EPlaceHolder = tilogspace::internal::EPlaceHolder;
-
+		using ELogLevelFlag = tilogspace::internal::ELogLevelFlag;
 		using StringType::StringType;
 
 	public:
@@ -1397,12 +1405,21 @@ namespace tilogspace
 				this->resetsize(size_pre + sz);
 			} else
 			{
-				this->ext()->level = (char)ELogLevelFlag::E;
+				resetLogLevel(ELevel::ERROR);
 				this->append("get err format:\n", 16);
 				this->append(fmt);
 			}
 			va_end(args);
 
+			return *this;
+		}
+
+		inline TiLogStream& resetLogLevel(ELevel lv)
+		{
+			if (!isNoUsedStream())
+			{
+				this->ext()->level = LOG_PREFIX[lv];
+			} 
 			return *this;
 		}
 
@@ -1455,25 +1472,26 @@ namespace tilogspace
 		// force overwrite super class request_new_size
 		inline void request_new_size(size_type new_size)
 		{
+			size_type pre_cap = capacity();
+			size_type pre_size = size();
+			size_type ensure_cap = pre_size + new_size;
+			DEBUG_ASSERT3(pre_size <= ensure_cap && new_size <= ensure_cap, pre_size, new_size, ensure_cap);
+			if (ensure_cap <= pre_cap) { return; }
+
 			if (!isNoUsedStream())
 			{
-				StringType::do_request_new_size(new_size);
+				ensureCapNoCheck(ensure_cap);
 			} else
 			{
-				request_no_use_size(new_size);
+				if (pre_cap >= new_size)
+				{
+					pCore->size = 0;	// force set size=0
+				} else
+				{
+					ensureCapNoCheck(ensure_cap);
+					s_pNoUsedStream->pCore = this->pCore;	 // update the s_pNoUsedStream->pCore
+				}
 			}
-		}
-
-		inline void request_no_use_size(const size_type new_size)
-		{
-			check();
-			if (new_size > capacity())
-			{
-				StringType::ensureCap(new_size);
-				s_pNoUsedStream->pCore = this->pCore;	 // update the s_pNoUsedStream->pCore
-			}
-			pCore->size = 0;	// force set size=0
-			check();
 		}
 
 		// special constructor for s_pNoUsedStream

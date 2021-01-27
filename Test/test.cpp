@@ -10,6 +10,7 @@
 using namespace std;
 using namespace tilogspace;
 //__________________________________________________major test__________________________________________________//
+#define do_nothing_test_____________________
 #define single_thread_log_test_____________________
 #define multi_thread_log_test_____________________
 #define file_multi_thread_log_test_____________________
@@ -51,6 +52,14 @@ using namespace tilogspace;
 bool s_test_init = InitFunc();
 
 
+#ifdef do_nothing_test_____________________
+
+TEST_CASE("do_nothing_test_____________________")
+{
+	
+}
+
+#endif
 
 #ifdef single_thread_log_test_____________________
 
@@ -497,7 +506,7 @@ TEST_CASE("file_multi_thread_print_level_test_____________________")
 				if (index == ELevel::ALWAYS && (j * 8) % loops == 0)
 				{
 					uint64_t v = j * 8 / loops;	   // 1-8
-					TiLog::setLogLevel((tilogspace::ELevel)(9 - v));
+					TiLog::SetLogLevel((tilogspace::ELevel)(9 - v));
 				}
 			}
 		});
