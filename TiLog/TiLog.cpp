@@ -1117,6 +1117,8 @@ namespace tilogspace
 
 			bool Prepared();
 
+			void WaitPrepared(TiLogStringView msg);
+
 			void ISync(callback_t func);
 
 			inline ThreadStru* IInitForEveryThread();
@@ -1683,6 +1685,9 @@ namespace tilogspace
 		// 故用到全局变量需要在此函数前构造
 		void TiLogCore::AtExit()
 		{
+			// this program run too fast ,even main function end before Prepared
+			WaitPrepared("AtExit: Wow,main function end too fast\n");
+
 			DEBUG_PRINTI("exit,wait poll\n");
 			mPoll.s_pollPeriodus = 1;	 // make poll faster
 
@@ -1703,13 +1708,26 @@ namespace tilogspace
 			TiLog::Destroy();
 		}
 
-		bool TiLogCore::Prepared() { return mExistThreads == 4; }
+		bool TiLogCore::Prepared() { return mExistPrinters == TiLogPrinterManager::GetPrinterNum() && mExistThreads == 4; }
+
+		void TiLogCore::WaitPrepared(TiLogStringView msg)
+		{
+			if (Prepared()) { return; }
+			DEBUG_PRINTA("WaitPrepared: %s", msg.data());
+			while (!Prepared())
+			{
+				std::this_thread::yield();
+			}
+			DEBUG_PRINTA("WaitPrepared: end\n");
+		}
 
 		inline void TiLogCore::Sync(callback_t func) { getRInstance().ISync(std::move(func)); }
 
 		void TiLogCore::ISync(callback_t func)
 		{
-			if (!Prepared()) { return; }  // wait for merge etc. internal thread inited
+			// wait for merge etc. internal thread inited
+			WaitPrepared({ "ISync: Wow,call this function before core prepared\n" });
+
 			std::unique_lock<MiniSpinMutex> lk(mThreadStruQueue.mAvailQueueMtx);  //prevent new thread insert to availQueue
 
 			synchronized(mThreadStruQueue)

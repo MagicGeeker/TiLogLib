@@ -533,7 +533,12 @@ namespace tilogspace
 				m_end = front + sz;
 				DEBUG_RUN(max_size = sz);
 			}
-
+			template <size_t N>
+			inline TiLogStringView(const char (&s)[N])
+			{
+				m_front = s;
+				m_end = s + N - 1;
+			}
 			const char* data() const { return m_front; }
 
 			size_t size() const { return m_end - m_front; }
