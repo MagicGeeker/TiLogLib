@@ -556,9 +556,18 @@ TEST_CASE("terminal_multi_way_log_test_____________________")
 	TILOGE << nullptr;
 	TILOGE << NULL;
 	TILOGE << "e0";
+
 	const char* pe1 = "e1";
 	TILOGE << pe1;
-	TILOGE("e2");
+	const char*& re1 = pe1;
+	TILOGE << re1;
+	TILOGE << (const void*)pe1;
+
+	const char e2[] = { 'e', '2', '\0' };
+	TILOGE(e2);
+	const char(&re2)[3] = e2;
+	TILOGE << re2;
+
 	TILOGE << 54231.0f;
 	TILOGE << 54231.0e6;
 	TILOGE << std::string("e3");
@@ -569,6 +578,14 @@ TEST_CASE("terminal_multi_way_log_test_____________________")
 	(TILOGV << "666")("abc %0999999999999999d %", 123, 456LL);	  // TODO error?
 	(TILOGV << "6601000010000000000100000000100000000000230100000000000230002300000000236")(
 		"abc 0100000000010000000000101000000000002300000000000023002301000000000002300023 %d %lld", 123, 456LL);
+
+	TILOGI << "e20" << std::boolalpha;
+	TILOGI << "e21" << std::endl;
+	TILOGI << "e22" << std::ends;
+	TILOGI << "e23" << std::flush;
+	TILOGE << "e24" << std::endl<signed char, std::char_traits<signed char>>;
+	TILOGE << "e25" << std::ends<unsigned char, std::char_traits<unsigned char>>;
+	TILOGE << "e26" << std::flush<unsigned char, std::char_traits<unsigned char>>;
 }
 #endif
 

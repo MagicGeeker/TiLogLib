@@ -1305,15 +1305,42 @@ namespace tilogspace
 		struct ConvertToChar
 		{
 		};
+		// clang-format off
 #define ConvertToCharMacro(T)                                                                                                              \
-	template <>                                                                                                                            \
-	struct ConvertToChar<T>                                                                                                                \
-	{                                                                                                                                      \
-		static constexpr bool value = true;                                                                                                \
-	};
-		ConvertToCharMacro(char) ConvertToCharMacro(const char) ConvertToCharMacro(signed char) ConvertToCharMacro(const signed char)
-			ConvertToCharMacro(const unsigned char) ConvertToCharMacro(unsigned char)
+		template <>                                                                                                                            \
+		struct ConvertToChar<T>                                                                                                                \
+		{                                                                                                                                      \
+			static constexpr bool value = true;                                                                                                \
+		};
+		ConvertToCharMacro(char) ConvertToCharMacro(const char) ConvertToCharMacro(signed char)
+		ConvertToCharMacro(const signed char) ConvertToCharMacro(const unsigned char) ConvertToCharMacro(unsigned char)
+
 #undef ConvertToCharMacro
+
+		inline static void uint32tohex(char dst[8], uint32_t val)
+		{
+			const uint16_t* const mm = (const uint16_t* const)
+				"000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F"
+				"202122232425262728292A2B2C2D2E2F303132333435363738393A3B3C3D3E3F"
+				"404142434445464748494A4B4C4D4E4F505152535455565758595A5B5C5D5E5F"
+				"606162636465666768696A6B6C6D6E6F707172737475767778797A7B7C7D7E7F"
+				"808182838485868788898A8B8C8D8E8F909192939495969798999A9B9C9D9E9F"
+				"A0A1A2A3A4A5A6A7A8A9AAABACADAEAFB0B1B2B3B4B5B6B7B8B9BABBBCBDBEBF"
+				"C0C1C2C3C4C5C6C7C8C9CACBCCCDCECFD0D1D2D3D4D5D6D7D8D9DADBDCDDDEDF"
+				"E0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFF0F1F2F3F4F5F6F7F8F9FAFBFCFDFEFF";
+			uint16_t* const p = (uint16_t* const)dst;
+			p[0] = mm[(val & 0xFF000000) >> 24];
+			p[1] = mm[(val & 0x00FF0000) >> 16];
+			p[2] = mm[(val & 0x0000FF00) >> 8];
+			p[3] = mm[val & 0xFF];
+		}
+
+		inline static void uint64tohex(char dst[16], uint64_t val)
+		{
+			uint32tohex(dst, (uint32_t)(val >> 32ULL));
+			uint32tohex(dst + 8, (uint32_t)val);
+		}
+		// clang-format on
 	}	 // namespace internal
 
 #ifdef H__________________________________________________TiLogStream__________________________________________________
@@ -1416,22 +1443,19 @@ namespace tilogspace
 
 		inline TiLogStream& resetLogLevel(ELevel lv)
 		{
-			if (!isNoUsedStream())
-			{
-				this->ext()->level = LOG_PREFIX[lv];
-			} 
+			if (!isNoUsedStream()) { this->ext()->level = LOG_PREFIX[lv]; }
 			return *this;
 		}
 
 		template <typename Args0>
 		inline TiLogStream& appends(Args0&& args0)
 		{
-			return StringType::append(std::forward<Args0>(args0)), *this;
+			return (*this) << (std::forward<Args0>(args0));
 		}
 		template <typename Args0, typename... Args>
 		inline TiLogStream& appends(Args0&& args0, Args&&... args)
 		{
-			return append(std::forward<Args0>(args0)), appends(std::forward<Args>(args)...), *this;
+			return (*this) << (std::forward<Args0>(args0)), appends(std::forward<Args>(args)...);
 		}
 
 	public:
@@ -1446,7 +1470,6 @@ namespace tilogspace
 		inline TiLogStream& operator<<(float val) { return append(val), *this; }
 		inline TiLogStream& operator<<(double val) { return append(val), *this; }
 		inline TiLogStream& operator<<(std::nullptr_t) { return append("nullptr", 7), *this; }
-		inline TiLogStream& operator<<(const void* ptr) { return append((uintptr_t)ptr), *this; }
 		inline TiLogStream& operator<<(const String& s) { return append(s.data(), s.size()), *this; }
 		TILOG_CPP17_FEATURE(inline TiLogStream& operator<<(const StringView& s) { return append(s.data(), s.size()), *this; })
 
@@ -1463,6 +1486,61 @@ namespace tilogspace
 		inline TiLogStream& operator<<(Ch (&s)[N])
 		{
 			return append(s, N - 1), *this;	   // N with '\0'
+		}
+
+		inline TiLogStream& operator<<(const void* ptr)
+		{
+			if_constexpr(sizeof(uintptr_t) == sizeof(uint64_t))
+			{
+				request_new_size(16);
+				internal::uint64tohex(pEnd(), (uintptr_t)ptr);
+				inc_size_s(16);
+				return *this;
+			}
+			else if_constexpr(sizeof(uintptr_t) == sizeof(uint32_t))
+			{
+				request_new_size(8);
+				internal::uint32tohex(pEnd(), (uintptr_t)ptr);
+				inc_size_s(8);
+				return *this;
+			}
+			else { return appends((uintptr_t)ptr); }
+		}
+
+		TiLogStream& operator<<(std::ios_base& (*func)(std::ios_base&)) { return callStdFunc<char>((const void*)func); }
+
+		template <typename CharT = char, typename Traits = std::char_traits<char>>
+		TiLogStream& operator<<(std::basic_ios<CharT, Traits>& (*func)(std::basic_ios<CharT, Traits>&))
+		{
+			return callStdFunc<CharT>((const void*)func);
+		}
+
+		template <typename CharT = char, typename Traits = std::char_traits<char>>
+		TiLogStream& operator<<(std::basic_ostream<CharT, Traits>& (*func)(std::basic_ostream<CharT, Traits>&))
+		{
+			return callStdFunc<CharT>((const void*)func);
+		}
+
+	protected:
+		template <typename CharT>
+		TiLogStream& callStdFunc(const void* func)
+		{
+			if (func == &std::endl<CharT, std::char_traits<CharT>>)
+			{
+				this->appends('\n');
+				// TiLog::FSync(); //it is too slow
+			} else if (func == &std::ends<CharT, std::char_traits<CharT>>)
+			{
+				this->appends('\0');
+			} else if (func == &std::flush<CharT, std::char_traits<CharT>>)
+			{
+				// TiLog::FSync(); //it is too slow
+			} else
+			{
+				this->appends(" not support func: ", func);
+				resetLogLevel(ELevel::WARN);
+			}
+			return *this;
 		}
 
 	private:
