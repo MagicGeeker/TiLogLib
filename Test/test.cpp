@@ -30,7 +30,8 @@ using namespace tilogspace;
 
 //__________________________________________________long time test__________________________________________________//
 //#define terminal_multi_thread_poll__log_test_____________________
-//#define none_multi_thread_memory_leak_stress_test_____________________
+#define none_multi_thread_memory_leak_stress_test_____________________
+//#define none_multi_thread_set_printer_test_____________________
 
 
 
@@ -337,22 +338,54 @@ TEST_CASE("none_multi_thread_memory_leak_stress_test_____________________")
 {
 	struct testLoop_t : multi_thread_test_loop_t
 	{
-		constexpr static int32_t THREADS() { return test_release ? 40000 : 2000; }
+		constexpr static int32_t THREADS() { return 10; }
 		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return 50; }
+	};
+
+
+	for (uint32_t i = 0; i < (test_release ? 4000 : 200); i++)
+	{
+		MultiThreadTest<testLoop_t>(
+			"none_multi_thread_memory_leak_stress_test_____________________", tilogspace::EPrinterID::PRINTER_ID_NONE, [](int index) {
+				constexpr uint64_t loops = testLoop_t::GET_SINGLE_THREAD_LOOPS();
+				for (uint64_t j = 0; j < loops; j++)
+				{
+					TILOGE << "loop= " << loops << " j= " << j;
+				}
+				mycout << " " << index << " to exit \n";
+
+			});
+	}
+
+	mycout << "none_multi_thread_memory_leak_stress_test_____________________ end\n";
+}
+
+#endif
+
+
+#ifdef none_multi_thread_set_printer_test_____________________
+
+TEST_CASE("none_multi_thread_set_printer_test_____________________")
+{
+	struct testLoop_t : multi_thread_test_loop_t
+	{
+		constexpr static int32_t THREADS() { return 10; }
+		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return test_release ? 10*1000 : 1000; }
 		constexpr static bool PRINT_LOOP_TIME() { return true; }
 	};
 	MultiThreadTest<testLoop_t>(
-		"none_multi_thread_memory_leak_stress_test_____________________", tilogspace::EPrinterID::PRINTER_ID_NONE, [](int index) {
+		"none_multi_thread_set_printer_test_____________________", tilogspace::EPrinterID::PRINTER_ID_NONE, [](int index) {
 			constexpr uint64_t loops = testLoop_t::GET_SINGLE_THREAD_LOOPS();
 			for (uint64_t j = 0; j < loops; j++)
 			{
 				TILOGE << "loop= " << loops << " j= " << j;
+				TiLog::SetPrinters(EPrinterID::PRINTER_ID_NONE);
 			}
-			TICOUT << " " << index << " to exit \n";
+			mycout << " " << index << " to exit \n";
 		});
 }
-
 #endif
+
 
 
 #ifdef tilog_string_test_____________________

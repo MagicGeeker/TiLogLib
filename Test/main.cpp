@@ -11,6 +11,7 @@ bool InitFunc()
 	return r;
 }
 bool s_main_init = InitFunc();
+synccout_t mycout;
 
 #if USE_CATCH_TEST == FALSE
 #include <iostream>
