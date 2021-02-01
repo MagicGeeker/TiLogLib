@@ -1,7 +1,9 @@
 cmake-build-debug/*
 cmake-build-release/*
+cmake-build-relwithdebinfo/*
 cmake-build-debug-clang
 cmake-build-debug-visual-studio
+build
 .idea
 .vs
 .vscode
@@ -11,4 +13,5 @@ cmake-build-debug-visual-studio
 *.opensdf
 *.vcxproj.user
 *.o
+
 
