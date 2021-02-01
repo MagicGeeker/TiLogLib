@@ -1082,12 +1082,17 @@ namespace tilogspace
 
 			std::condition_variable_any mCvWait;
 			MiniSpinMutex mMtxWait;	   // wait thread complete mutex
-			// bool mCompleted = false;
 
 			bool mDoing = false;
-			bool mCompleted = false;
 		};
 
+		struct DeliverCallBack
+		{
+			virtual ~DeliverCallBack() = default;
+			virtual void onDeliverEnd() = 0;
+		};
+
+		using VecVecLogCache = Vector<VecLogCache>;
 		using VecLogCachePtrPriorQueue = PriorQueue<VecLogCachePtr, Vector<VecLogCachePtr>, VecLogCachePtrLesser>;
 
 		class TiLogCore : public TiLogObject
@@ -1106,7 +1111,8 @@ namespace tilogspace
 			inline static void InitPrinterThreadBeforeRun();
 
 			using callback_t = TiLog::callback_t;
-			inline static void Sync(callback_t func = {});
+			inline static void Sync();
+			inline static void SyncAndSetPrinter(callback_t func);
 
 		private:
 			TiLogCore();
@@ -1119,7 +1125,9 @@ namespace tilogspace
 
 			void WaitPrepared(TiLogStringView msg);
 
-			void ISync(callback_t func);
+			void ISync();
+
+			void ISyncAndSetPrinter(callback_t func);
 
 			inline ThreadStru* IInitForEveryThread();
 
@@ -1216,6 +1224,9 @@ namespace tilogspace
 				DeliverList mDeliverCache;	  // input
 				DeliverList mNeedGCCache;	  // output
 
+				atomic_uint64_t mDeliveredTimes{};
+				std::atomic<DeliverCallBack*> mCallback{ nullptr };
+
 				TiLogTime::origin_time_type mPreLogTime{};
 				char mctimestr[TILOG_CTIME_MAX_LEN] = { 0 };
 				TiLogStringView mLogTimeStringView{ mctimestr, TILOG_CTIME_MAX_LEN - 1 };
@@ -1223,8 +1234,13 @@ namespace tilogspace
 				SyncedIOBeanPool mIOBeanPool;
 				const char* GetName() override { return "deliver"; }
 				CoreThrdEntryFuncType GetThrdEntryFunc() override { return &TiLogCore::thrdFuncDeliverLogs; }
-				bool IsBusy() override { return mDeliverCache.full(); }
+				bool IsBusy() override { return !mDeliverCache.empty(); }
 			} mDeliver;
+
+			struct SyncControler : public TiLogObject
+			{
+				std::mutex mSyncMtx;
+			} mSyncControler;
 
 			struct GCStru : public CoreThrdStru
 			{
@@ -1232,7 +1248,7 @@ namespace tilogspace
 
 				const char* GetName() override { return "gc"; }
 				CoreThrdEntryFuncType GetThrdEntryFunc() override { return &TiLogCore::thrdFuncGarbageCollection; }
-				bool IsBusy() override { return mGCList.full(); }
+				bool IsBusy() override { return !mGCList.empty(); }
 			} mGC;
 		};
 
@@ -1293,6 +1309,8 @@ namespace tilogspace
 			static printer_ids_t GetPrinters();
 			static bool IsPrinterActive(EPrinterID printer);
 			static bool IsPrinterInPrinters(EPrinterID printer, printer_ids_t printers);
+			static void EnablePrinterForPrinters(EPrinterID printer, printer_ids_t& printers);
+			static void DisEnablePrinterForPrinters(EPrinterID printer, printer_ids_t& printers);
 
 			static void AsyncEnablePrinter(EPrinterID printer);
 			static void AsyncDisablePrinter(EPrinterID printer);
@@ -1304,6 +1322,7 @@ namespace tilogspace
 		public:	   // internal public
 			void addPrinter(TiLogPrinter* printer);
 			static void pushLogsToPrinters(IOBeanSharedPtr spLogs);
+			static void pushLogsToPrinters(IOBeanSharedPtr spLogs, const printer_ids_t& printerIds);
 			static void waitForIO();
 
 		public:
@@ -1312,6 +1331,7 @@ namespace tilogspace
 
 			static Vector<TiLogPrinter*> getAllValidPrinters();
 			static Vector<TiLogPrinter*> getCurrentPrinters();
+			static Vector<TiLogPrinter*> getPrinters(printer_ids_t dest);
 
 		protected:
 			constexpr static uint32_t GetPrinterNum() { return GetArgsNum<TILOG_REGISTER_PRINTERS>(); }
@@ -1529,6 +1549,8 @@ namespace tilogspace
 		printer_ids_t TiLogPrinterManager::GetPrinters() { return getInstance()->m_dest; }
 		bool TiLogPrinterManager::IsPrinterActive(EPrinterID printer) { return getInstance()->m_dest & printer; }
 		bool TiLogPrinterManager::IsPrinterInPrinters(EPrinterID printer, printer_ids_t printers) { return printer & printers; }
+		void TiLogPrinterManager::EnablePrinterForPrinters(EPrinterID printer, printer_ids_t& printers) { printers |= printers; }
+		void TiLogPrinterManager::DisEnablePrinterForPrinters(EPrinterID printer, printer_ids_t& printers) { printers &= ~printer; }
 		void TiLogPrinterManager::AsyncEnablePrinter(EPrinterID printer) { getInstance()->m_dest |= ((printer_ids_t)printer); }
 		void TiLogPrinterManager::AsyncDisablePrinter(EPrinterID printer) { getInstance()->m_dest &= (~(printer_ids_t)printer); }
 
@@ -1544,10 +1566,10 @@ namespace tilogspace
 			DEBUG_ASSERT2(u < PRINTER_ID_MAX, e, u);
 			m_printers[u] = printer;
 		}
-
-		void TiLogPrinterManager::pushLogsToPrinters(IOBeanSharedPtr spLogs)
+		void TiLogPrinterManager::pushLogsToPrinters(IOBeanSharedPtr spLogs) { pushLogsToPrinters(spLogs, GetPrinters()); }
+		void TiLogPrinterManager::pushLogsToPrinters(IOBeanSharedPtr spLogs, const printer_ids_t& printerIds)
 		{
-			Vector<TiLogPrinter*> printers = TiLogPrinterManager::getCurrentPrinters();
+			Vector<TiLogPrinter*> printers = TiLogPrinterManager::getPrinters(printerIds);
 			if (printers.empty()) { return; }
 			DEBUG_PRINTI("prepare to push %u bytes\n", (unsigned)spLogs->size());
 			for (TiLogPrinter* printer : printers)
@@ -1596,9 +1618,10 @@ namespace tilogspace
 			return Vector<TiLogPrinter*>(v.begin() + 1, v.end());
 		}
 
-		Vector<TiLogPrinter*> TiLogPrinterManager::getCurrentPrinters()
+		Vector<TiLogPrinter*> TiLogPrinterManager::getCurrentPrinters() { return getPrinters(getInstance()->m_dest); }
+
+		Vector<TiLogPrinter*> TiLogPrinterManager::getPrinters(printer_ids_t dest)
 		{
-			printer_ids_t dest = getInstance()->m_dest;
 			Vector<TiLogPrinter*>& arr = getInstance()->m_printers;
 			Vector<TiLogPrinter*> vec;
 			for (uint32_t i = 1, x = PRINTER_ID_BEGIN; x < PRINTER_ID_MAX; ++i, x <<= 1U)
@@ -1721,59 +1744,48 @@ namespace tilogspace
 			DEBUG_PRINTA("WaitPrepared: end\n");
 		}
 
-		inline void TiLogCore::Sync(callback_t func) { getRInstance().ISync(std::move(func)); }
+		inline void TiLogCore::Sync() { getRInstance().ISync(); }
 
-		void TiLogCore::ISync(callback_t func)
+		void TiLogCore::SyncAndSetPrinter(callback_t func) { getRInstance().ISyncAndSetPrinter(func); }
+
+		void TiLogCore::ISync()
 		{
 			// wait for merge etc. internal thread inited
 			WaitPrepared({ "ISync: Wow,call this function before core prepared\n" });
 
-			std::unique_lock<MiniSpinMutex> lk(mThreadStruQueue.mAvailQueueMtx);  //prevent new thread insert to availQueue
+			uint64_t counter = mDeliver.mDeliveredTimes;
 
-			synchronized(mThreadStruQueue)
+			while (mDeliver.mDeliveredTimes == counter)	   // make sure deliver at least once
 			{
-				mSyncing=true;
+				mMerge.mCV.notify_all();	  // notify merge thread
+				std::this_thread::yield();	  // wait for deliver thread
+			}
+		}
 
-				List<ThreadStru*> copyQ = mThreadStruQueue.availQueue;
-				for (List<ThreadStru*>::iterator it = copyQ.begin(); !copyQ.empty();)
+		void TiLogCore::ISyncAndSetPrinter(callback_t func)
+		{
+			struct CallBack : DeliverCallBack
+			{
+				callback_t func;
+				void onDeliverEnd() override
 				{
-					ThreadStru* threadStru = *it;
-					if (threadStru->spinMtx.try_lock()) //prevent active threads add new logs
-					{
-						it = copyQ.erase(it);
-					} else
-					{
-						++it;
-					}
-					if (it == copyQ.end()) { it = copyQ.begin(); }
+					func();
+					TiLogCore::getRInstance().mDeliver.mCallback = nullptr;
+					delete this;
 				}
-			}
+			};
+			CallBack* c = new CallBack();
+			c->func = std::move(func);
 
-			synchronized_u(lk_deliver,mDeliver.mMtxWait)
+			synchronized(mSyncControler.mSyncMtx)
 			{
-				mDeliver.mCompleted = false;
-
-				synchronized_u(lk_merge,mMerge.mMtx){
-					mMerge.mDoing=true;
-					lk_merge.unlock();
-					mMerge.mCV.notify_all();  //notify merge thread
-				}
-
-				mDeliver.mCvWait.wait(lk_deliver,[this]{return mDeliver.mCompleted;});  //wait for deliver thread
-			}
-
-			mSyncing = false;
-
-			if (func) { func(); }  //call the callback function
-
-			synchronized(mThreadStruQueue)
-			{
-				for (ThreadStru* threadStru : mThreadStruQueue.availQueue)
+				mDeliver.mCallback = c;
+				ISync();
+				while (mDeliver.mCallback)
 				{
-					threadStru->spinMtx.unlock();
+					std::this_thread::yield();
 				}
 			}
-
 		}
 
 		inline void TiLogCore::PushLog(TiLogBean* pBean)
@@ -1798,7 +1810,6 @@ namespace tilogspace
 				lk_local.unlock();
 				if (isGlobalFull)
 				{
-					mMerge.mDoing = true;	 //此时本地缓存和全局缓存已满
 					lk_merge.unlock();
 					mMerge.mCV.notify_all();	//这个通知后，锁可能会被另一个工作线程拿到
 				}
@@ -1940,7 +1951,6 @@ namespace tilogspace
 			std::unique_lock<std::mutex> lk_deliver = GetDeliverLock();
 			mDeliver.mDeliverCache.swap_insert(mMerge.mMergeCaches);
 
-			mDeliver.mDoing = true;
 			lk_deliver.unlock();
 			mDeliver.mCV.notify_all();
 		}
@@ -2007,16 +2017,14 @@ namespace tilogspace
 
 		inline std::unique_lock<std::mutex> TiLogCore::GetCoreThrdLock(CoreThrdStru& thrd)
 		{
+			constexpr static uint32_t NANOS[8] = { 256, 128, 320, 192, 512, 384, 768, 64 };
 			std::unique_lock<std::mutex> lk(thrd.mMtx);
-			while (thrd.mDoing || thrd.IsBusy())
+			for (uint32_t i = 0; thrd.IsBusy(); i = (1 + i) % 8)
 			{
-				thrd.mCompleted = false;
 				lk.unlock();
 				thrd.mCV.notify_one();
-				synchronized_u(lk_wait, thrd.mMtxWait)
-				{
-					thrd.mCvWait.wait(lk_wait, [&thrd] { return thrd.mCompleted; });
-				}
+				// maybe thrd complete at once after notify,so wait_for nanos and wake up to check again.
+				synchronized_u(lk_wait, thrd.mMtxWait) { thrd.mCvWait.wait_for(lk_wait, std::chrono::nanoseconds(NANOS[i])); }
 				lk.lock();
 			}
 			return lk;
@@ -2039,8 +2047,6 @@ namespace tilogspace
 				c.clear();
 			}
 			mDeliver.mNeedGCCache.clear();
-
-			mGC.mDoing = true;
 			ulk.unlock();
 			mGC.mCV.notify_all();
 		}
@@ -2051,7 +2057,8 @@ namespace tilogspace
 			while (true)
 			{
 				std::unique_lock<std::mutex> lk_merge(mMerge.mMtx);
-				mMerge.mCV.wait(lk_merge, [this]() -> bool { return (mMerge.mDoing && mInited); });
+				mMerge.mCV.wait(lk_merge);
+				mMerge.mDoing = true;
 
 				{
 					MergeSortForGlobalQueue();
@@ -2064,7 +2071,6 @@ namespace tilogspace
 
 				{
 					unique_lock<MiniSpinMutex> lk_wait(mMerge.mMtxWait);
-					mMerge.mCompleted = true;
 					lk_wait.unlock();
 					mMerge.mCvWait.notify_all();
 				}
@@ -2123,9 +2129,12 @@ namespace tilogspace
 			while (true)
 			{
 				std::unique_lock<std::mutex> lk_deliver(mDeliver.mMtx);
-				mDeliver.mCV.wait(lk_deliver, [this]() -> bool { return (mDeliver.mDoing && mInited); });
-
+				mDeliver.mCV.wait(lk_deliver);
+				mDeliver.mDoing = true;
 				DeliverLogs();
+				++mDeliver.mDeliveredTimes;
+				DeliverCallBack* callBack = mDeliver.mCallback;
+				if (callBack) { callBack->onDeliverEnd(); }
 				mWaitDeliverDeadThreads = 0;
 				mDeliver.mDeliverCache.swap(mDeliver.mNeedGCCache);
 				mDeliver.mDeliverCache.clear();
@@ -2135,7 +2144,6 @@ namespace tilogspace
 
 				{
 					unique_lock<MiniSpinMutex> lk_wait(mDeliver.mMtxWait);
-					mDeliver.mCompleted = true;
 					lk_wait.unlock();
 					mDeliver.mCvWait.notify_all();
 				}
@@ -2151,15 +2159,14 @@ namespace tilogspace
 			while (true)
 			{
 				std::unique_lock<std::mutex> lk_del(mGC.mMtx);
-				mGC.mCV.wait(lk_del, [this]() -> bool { return (mGC.mDoing && mInited); });
-
+				mGC.mCV.wait(lk_del);
+				mGC.mDoing = true;
 				mGC.mGCList.gc();
 				mGC.mDoing = false;
 				lk_del.unlock();
 
 				{
 					unique_lock<MiniSpinMutex> lk_wait(mGC.mMtxWait);
-					mGC.mCompleted = true;
 					lk_wait.unlock();
 					mGC.mCvWait.notify_all();
 				}
@@ -2189,11 +2196,7 @@ namespace tilogspace
 			for (uint32_t t = mPoll.s_pollPeriodSplitNum; t--;)
 			{
 				this_thread::sleep_for(chrono::microseconds(mPoll.s_pollPeriodus));
-				if (mToExit)
-				{
-					DEBUG_PRINTI("poll thrd prepare to exit,try last poll\n");
-					return false;
-				}
+				if (mToExit) { return false; }
 			}
 			return true;
 		}
@@ -2203,15 +2206,8 @@ namespace tilogspace
 			InitInternalThreadBeforeRun();	  // this thread is no need log
 			do
 			{
-				unique_lock<mutex> lk_merge;
-				bool own_lk = tryLocks(lk_merge, mMerge.mMtx);
-				DEBUG_PRINTD("thrdFuncPoll own lock? %d\n", (int)own_lk);
-				if (own_lk)
-				{
-					mMerge.mDoing = true;
-					lk_merge.unlock();
-					mMerge.mCV.notify_one();
-				}
+				DEBUG_PRINTD("thrdFuncPoll notify merge\n");
+				mMerge.mCV.notify_one();
 
 				// if mWaitDeliverDeadThreads!=0, skip this loop
 				if (mWaitDeliverDeadThreads != 0) { continue; }
@@ -2262,6 +2258,8 @@ namespace tilogspace
 			} while (PollThreadSleep());
 
 			DEBUG_ASSERT(mToExit);
+			DEBUG_PRINTI("poll thrd prepare to exit,try last poll\n");
+			GetMergeLock();	   // wait for current merge
 			AtInternalThreadExit(&mPoll, &mMerge);
 			return;
 		}
@@ -2306,9 +2304,6 @@ namespace tilogspace
 			mExistThreads--;
 			CoreThrdStru* t = dynamic_cast<CoreThrdStru*>(nextExitThrd);
 			if (!t) return;
-			t->mMtx.lock();
-			t->mDoing = true;
-			t->mMtx.unlock();
 			t->mCV.notify_all();
 		}
 
@@ -2332,12 +2327,12 @@ namespace tilogspace
 	void TiLog::AsyncEnablePrinter(EPrinterID printer) { TiLogPrinterManager::AsyncEnablePrinter(printer); }
 	void TiLog::AsyncDisablePrinter(EPrinterID printer) { TiLogPrinterManager::AsyncDisablePrinter(printer); }
 	void TiLog::AsyncSetPrinters(printer_ids_t printerIds) { TiLogPrinterManager::AsyncSetPrinters(printerIds); }
-	void TiLog::Sync(callback_t callback) {TiLogCore::Sync(std::move(callback)); }
+	void TiLog::Sync() { TiLogCore::Sync(); }
 	void TiLog::PushLog(TiLogBean* pBean) { TiLogCore::PushLog(pBean); }
 	uint64_t TiLog::GetPrintedLogs() { return TiLogCore::GetPrintedLogs(); }
 	void TiLog::ClearPrintedLogsNumber() { TiLogCore::ClearPrintedLogsNumber(); }
 
-	void TiLog::FSync(callback_t callback)
+	void TiLog::FSync()
 	{
 		TiLogCore::Sync();
 		TiLogPrinterManager::waitForIO();
@@ -2347,16 +2342,16 @@ namespace tilogspace
 	bool TiLog::IsPrinterActive(EPrinterID printer) { return TiLogPrinterManager::IsPrinterActive(printer); }
 	void TiLog::EnablePrinter(EPrinterID printer)
 	{
-		TiLogCore::Sync([printer] { AsyncEnablePrinter(printer); });
+		TiLogCore::SyncAndSetPrinter([printer] { AsyncEnablePrinter(printer); });
 	}
 	void TiLog::DisablePrinter(EPrinterID printer)
 	{
-		TiLogCore::Sync([printer] { AsyncEnablePrinter(printer); });
+		TiLogCore::SyncAndSetPrinter([printer] { AsyncEnablePrinter(printer); });
 	}
 
 	void TiLog::SetPrinters(printer_ids_t printerIds)
 	{
-		TiLogCore::Sync([printerIds] { AsyncSetPrinters(printerIds); });
+		TiLogCore::SyncAndSetPrinter([printerIds] { AsyncSetPrinters(printerIds); });
 	}
 
 #if !TILOG_IS_AUTO_INIT

@@ -189,7 +189,7 @@ namespace tilogspace
 	constexpr static size_t TILOG_THREAD_ID_MAX_LEN = SIZE_MAX;	// tid max len,SIZE_MAX means no limit,in popular system limit is TILOG_UINT64_MAX_CHAR_LEN
 	constexpr static size_t TILOG_MAX_LOG_NUM = SIZE_MAX;	// max log numbers
 
-	constexpr static size_t TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE= (8U << 20U);	// log size per file,it is not accurate,especially TILOG_GLOBAL_BUF_SIZE is bigger
+	constexpr static size_t TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE= (16U << 20U);	// log size per file,it is not accurate,especially TILOG_GLOBAL_BUF_SIZE is bigger
 }	 // namespace tilogspace
 
 
@@ -1242,9 +1242,9 @@ namespace tilogspace
 		using callback_t = std::function<void()>;
 
 		// sync the cached log to printers's task queue,but NOT wait for IO
-		static void Sync(callback_t callback = {});
+		static void Sync();
 		// sync the cached log to printers's task queue,and wait for IO
-		static void FSync(callback_t callback = {});
+		static void FSync();
 
 		// printer must be static and always valid,so it can NOT be removed but can be disabled
 		// sync functions: NOT effect(overwrite) previous printerIds setting.
