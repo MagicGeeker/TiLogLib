@@ -26,6 +26,7 @@
 #endif
 
 #define __________________________________________________TiLogCircularQueue__________________________________________________
+#define __________________________________________________TiLogCurrentHashMap__________________________________________________
 #define __________________________________________________TiLogFile__________________________________________________
 #define __________________________________________________TiLogTerminalPrinter__________________________________________________
 #define __________________________________________________TiLogFilePrinter__________________________________________________
@@ -730,6 +731,131 @@ namespace tilogspace
 
 #endif
 
+
+#ifdef __________________________________________________TiLogCurrentHashMap__________________________________________________
+		template <typename K, typename V>
+		struct TiLogCurrentHashMapDefaultFeat
+		{
+			using Hash = std::hash<K>;
+			using EqualTo = std::equal_to<K>;
+			using mutex_type = std::mutex;
+			using clear_func_t = void (*)(V*);
+
+			constexpr static uint32_t CONCURRENT = 8;
+			constexpr static uint32_t BUCKET_SIZE = 8;
+			constexpr static clear_func_t CLEAR_FUNC = nullptr;
+		};
+
+		template <typename K, typename V, typename Feat = TiLogCurrentHashMapDefaultFeat<K, V>>
+		class TiLogCurrentHashMap
+		{
+		public:
+			using KImpl = typename std::remove_const<K>::type;
+			using Hash = typename Feat::Hash;
+			using EqualTo = typename Feat::EqualTo;
+			using mutex_type = typename Feat::mutex_type;
+			using clear_func_t = typename Feat::clear_func_t;
+
+
+			constexpr static uint32_t CONCURRENT = Feat::CONCURRENT;
+			constexpr static uint32_t BUCKET_SIZE = Feat::BUCKET_SIZE;
+			constexpr static clear_func_t CLEAR_K_FUNC = Feat::CLEAR_FUNC;
+
+			struct Node
+			{
+				KImpl k;
+				V v;
+				Node() {}
+				Node(const KImpl& k0, const V& v0) : k(k0), v(v0){};
+			};
+
+			enum Flag : uint8_t
+			{
+				RAW,
+				NODE
+			};
+
+			struct Nodex
+			{
+				Node* nd{};
+				Nodex() = default;
+				Nodex(Node* x):nd(x){};
+				~Nodex() { delete nd; }
+				Nodex(const Nodex& rhs) : nd(rhs.nd==nullptr?nullptr: new Node(*rhs.nd))
+				{
+				}
+				Nodex(Nodex&& rhs)
+				{
+					std::swap(nd, rhs.nd);
+				}
+				Node* Get() { return nd; }
+				void Set(Node* nd) { delete this->nd;
+					this->nd = nd;
+				}
+
+			};
+
+			struct Bucket : public List<Nodex>
+			{
+				mutex_type mtx;
+				Bucket() : List<Nodex>(BUCKET_SIZE, Nodex{}) {}
+				~Bucket() = default;
+			};
+
+		public:
+			TiLogCurrentHashMap() {}
+			~TiLogCurrentHashMap() {}
+
+			V& get(K k)
+			{
+				uint32_t ha = static_cast<uint32_t>(Hash()(k) % CONCURRENT);
+				Bucket& bucket = datas[ha];
+				unique_lock<mutex_type> lk(bucket.mtx);
+				uint32_t sz = static_cast<uint32_t>(bucket.size());
+				auto raw_it=bucket.end();
+				for (auto it=bucket.begin();it!=bucket.end();++it)
+				{
+					if (it->Get()==nullptr)
+					{
+						if(raw_it==bucket.end()){
+							raw_it=it;
+						}
+						continue;
+					}
+					if (EqualTo()(it->Get()->k, k)) { return it->Get()->v; }
+				}
+
+				if (raw_it != bucket.end())
+				{
+				} else
+				{
+					auto it_back = std::prev(raw_it);
+					bucket.resize(2 * sz);
+					raw_it = std::next(it_back);
+				}
+
+				Nodex& addr = *raw_it;
+				addr.Set (new Node(k, V{}));
+				return addr.Get()->v;
+			}
+
+			/*void clear()
+			{
+				for (Bucket& bucket : datas)
+				{
+					unique_lock<mutex_type> lk(bucket.mtx);
+					for (Nodex& nodex : bucket)
+					{
+						if (nodex.flag == NODE && CLEAR_K_FUNC != nullptr) { CLEAR_K_FUNC(std::addressof(nodex.toNode()->v)); }
+					}
+				}
+			}*/
+
+			Bucket datas[CONCURRENT];
+		};
+#endif
+
+
 #ifdef TILOG_OS_WIN
 		static const auto nullfd = INVALID_HANDLE_VALUE;
 #elif defined(TILOG_OS_POSIX)
@@ -887,21 +1013,29 @@ namespace tilogspace
 
 		class TiLogCore;
 
-		struct MergeRawDatas : public TiLogObject, public UnorderedMap<const String*, VecLogCache>
+		struct MergeRawDatas : public TiLogObject, public TiLogCurrentHashMap<const String*, VecLogCache>
 		{
-			using super = UnorderedMap<const String*, VecLogCache>;
-			inline bool full() const { return mSize >= TILOG_MERGE_QUEUE_RATE; }
-			inline void clear() { super::clear(), mSize = 0; }
+			using super = TiLogCurrentHashMap<const String*, VecLogCache>;
+			inline size_t may_size() const { return mSize; }
+			inline bool may_full() const { return mSize >= TILOG_MERGE_QUEUE_RATE; }
+			inline void clear() { mSize = 0; }
 			template <bool INC_M_SIZE>
 			inline VecLogCache& get(const String* key)
 			{
 				if_constexpr(INC_M_SIZE) { ++mSize; }
-				return super::operator[](key);
+				return super::get(key);
 			}
 
 		protected:
-			size_t mSize{ 0 };
+			std::atomic<size_t> mSize{ 0 };
 		};
+
+		using VecVecLogCache = Vector<VecLogCache>;
+		struct MergeVecVecLogcahes : public TiLogObject, public VecVecLogCache
+		{
+			uint32_t mIndex{};
+		};
+
 
 		struct DeliverList : public ContainerList<VecLogCache, TILOG_DELIVER_QUEUE_SIZE>
 		{
@@ -928,16 +1062,21 @@ namespace tilogspace
 		{
 			void gc()
 			{
+				unsigned sz = 0;
 				for (auto it = mList.begin(); it != it_next; ++it)
 				{
 					auto& v = *it;
+					sz += (unsigned)v.size();
 					for (TiLogBean* pBean : v)
 					{
 						DestroyPushedTiLogBean(pBean);
 					}
 				}
 				clear();
+				DEBUG_PRINTI("gc: %u logs\n", sz);
+				gcsize += sz;
 			}
+			uint64_t gcsize{ 0 };
 		};
 
 		struct ThreadStruQueue : public TiLogObject, public std::mutex
@@ -1092,7 +1231,6 @@ namespace tilogspace
 			virtual void onDeliverEnd() = 0;
 		};
 
-		using VecVecLogCache = Vector<VecLogCache>;
 		using VecLogCachePtrPriorQueue = PriorQueue<VecLogCachePtr, Vector<VecLogCachePtr>, VecLogCachePtrLesser>;
 
 		class TiLogCore : public TiLogObject
@@ -1138,6 +1276,8 @@ namespace tilogspace
 			inline TiLogStringView AppendToMergeCacheByMetaData(const TiLogBean& bean);
 
 			void MergeThreadStruQueueToSet(List<ThreadStru*>& thread_queue, TiLogBean& bean);
+
+			void InitMergeSort(size_t needMergeSortReserveSize);
 
 			void MergeSortForGlobalQueue();
 
@@ -1210,13 +1350,15 @@ namespace tilogspace
 			{
 				MergeRawDatas mRawDatas;							// input
 				VecLogCache mMergeCaches{ GLOBAL_SIZE };	// output
-
+				
+				MergeVecVecLogcahes mMergeLogVecVec;
 				VecLogCache mMergeSortVec{};					   // temp vector
 				VecLogCachePtrPriorQueue mThreadStruPriorQueue;	   // prior queue of ThreadStru cache
+				uint64_t mMergedSize = 0;
 				VecLogCachePool mVecPool;
 				const char* GetName() override { return "merge"; }
 				CoreThrdEntryFuncType GetThrdEntryFunc() override { return &TiLogCore::thrdFuncMergeLogs; }
-				bool IsBusy() override { return mRawDatas.full(); }
+				bool IsBusy() override { return mRawDatas.may_full(); }
 			} mMerge;
 
 			struct DeliverStru : public CoreThrdStru
@@ -1672,11 +1814,11 @@ namespace tilogspace
 		inline bool TiLogCore::MoveLocalCacheToGlobal(ThreadStru& bean)
 		{
 			static_assert(TILOG_MERGE_QUEUE_RATE >= 1, "fatal error!too small");
-
+			// bean's spinMtx protect both qCache and vec
 			VecLogCache& vec = mMerge.mRawDatas.get<true>(bean.tid);
 			CrcQueueLogCache::append_to_vector(vec, bean.qCache);
 			bean.qCache.clear();
-			return mMerge.mRawDatas.full();
+			return mMerge.mRawDatas.may_full();
 		}
 
 		inline ThreadStru* TiLogCore::InitForEveryThread()
@@ -1800,18 +1942,15 @@ namespace tilogspace
 			ThreadStru& stru = *s_pThreadLocalStru;
 			unique_lock<ThreadLocalSpinMutex> lk_local(stru.spinMtx);
 			bool isLocalFull = LocalCircularQueuePushBack(pBean);
-			lk_local.unlock();
+
 			if (isLocalFull)
 			{
-				std::unique_lock<std::mutex> lk_merge = GetMergeLock();
-				lk_local.lock();	// maybe judge full again?
-				// if (!s_pThreadLocalStru->qCache.full()) { return; }
-				bool isGlobalFull = MoveLocalCacheToGlobal(*s_pThreadLocalStru);
+				bool isGlobalFull = MoveLocalCacheToGlobal(stru);
 				lk_local.unlock();
 				if (isGlobalFull)
 				{
-					lk_merge.unlock();
-					mMerge.mCV.notify_all();	//这个通知后，锁可能会被另一个工作线程拿到
+					mMerge.mCV.notify_all();
+					GetMergeLock();	   // wait for merge thread
 				}
 			}
 		}
@@ -1819,26 +1958,13 @@ namespace tilogspace
 
 		void TiLogCore::MergeThreadStruQueueToSet(List<ThreadStru*>& thread_queue, TiLogBean& bean)
 		{
-			struct ThreadSpinLock
-			{
-				ThreadLocalSpinMutex& spinMtx;
-				bool isSyncing;
-				void lock()
-				{
-					if (!isSyncing) { spinMtx.lock(); }
-				}
-				void unlock()
-				{
-					if (!isSyncing) { spinMtx.unlock(); }
-				}
-			};
-
-			bool syncing = this->mSyncing;
-
+			using ThreadSpinLock = std::unique_lock<ThreadLocalSpinMutex>;
+			unsigned may_size = (unsigned)mMerge.mRawDatas.may_size();
+			DEBUG_PRINTD("mMerge.mRawDatas may_size %u\n", may_size);
 			for (auto it = thread_queue.begin(); it != thread_queue.end(); ++it)
 			{
 				ThreadStru& threadStru = **it;
-				ThreadSpinLock spinLock{ threadStru.spinMtx, syncing };
+				ThreadSpinLock spinLock{ threadStru.spinMtx };
 				CrcQueueLogCache& qCache = threadStru.qCache;
 
 				auto func_to_vector = [&](CrcQueueLogCache::iterator it_sub_beg, CrcQueueLogCache::iterator it_sub_end) {
@@ -1853,10 +1979,15 @@ namespace tilogspace
 				DEBUG_PRINTD(
 					"MergeThreadStruQueueToSet ptid %p , tid %s , qCachePreSize= %u\n", threadStru.tid,
 					(threadStru.tid == nullptr ? "" : threadStru.tid->c_str()), (unsigned)qCachePreSize);
-				if (qCachePreSize == 0) { continue; }
-				if (bean.time() < (**qCache.first_sub_queue_begin()).time()) { continue; }
 
 				VecLogCache& v = mMerge.mRawDatas.get<false>(threadStru.tid);
+				size_t vsizepre = v.size();
+				DEBUG_PRINTD("v %p size pre: %u\n", &v, (unsigned)vsizepre);
+
+				if (qCachePreSize == 0) { goto loopend; }
+				if (bean.time() < (**qCache.first_sub_queue_begin()).time()) { goto loopend; }
+
+				
 				if (!qCache.normalized())
 				{
 					if (bean.time() < (**qCache.second_sub_queue_begin()).time()) { goto one_sub; }
@@ -1879,6 +2010,7 @@ namespace tilogspace
 					qCache.erase_from_begin_to(it_before_last_merge);
 				}
 
+			loopend:
 				auto sorted_judge_func = [&v]() {
 					if (!std::is_sorted(v.begin(), v.end(), TiLogBeanPtrComp()))
 					{
@@ -1891,7 +2023,20 @@ namespace tilogspace
 					}
 				};
 				DEBUG_RUN(sorted_judge_func());
+
+				DEBUG_PRINTD("v %p size after: %u diff %u\n", &v, (unsigned)v.size(), (unsigned)(v.size() - vsizepre));
+				mMerge.mMergeLogVecVec[mMerge.mMergeLogVecVec.mIndex++].swap(v);
 			}
+		}
+
+		void TiLogCore::InitMergeSort(size_t needMergeSortReserveSize)
+		{
+			mMerge.mMergeLogVecVec.resize(needMergeSortReserveSize);
+			for (VecLogCache& vecLogCache : mMerge.mMergeLogVecVec)
+			{
+				vecLogCache.clear();
+			}
+			mMerge.mMergeLogVecVec.mIndex = 0;
 		}
 
 		void TiLogCore::MergeSortForGlobalQueue()
@@ -1905,16 +2050,18 @@ namespace tilogspace
 
 			synchronized(mThreadStruQueue)
 			{
-				DEBUG_PRINTI("MergeThreadStruQueueToSet availQueue.size()= %u\n", (unsigned)mThreadStruQueue.availQueue.size());
+				size_t availQueueSize = mThreadStruQueue.availQueue.size();
+				size_t waitMergeQueueSize = mThreadStruQueue.waitMergeQueue.size();
+				InitMergeSort(availQueueSize + waitMergeQueueSize);
+				DEBUG_PRINTI("MergeThreadStruQueueToSet availQueue.size()= %u\n", (unsigned)availQueueSize);
 				MergeThreadStruQueueToSet(mThreadStruQueue.availQueue, referenceBean);
-				DEBUG_PRINTI("MergeThreadStruQueueToSet waitMergeQueue.size()= %u\n", (unsigned)mThreadStruQueue.waitMergeQueue.size());
+				DEBUG_PRINTI("MergeThreadStruQueueToSet waitMergeQueue.size()= %u\n", (unsigned)waitMergeQueueSize);
 				MergeThreadStruQueueToSet(mThreadStruQueue.waitMergeQueue, referenceBean);
 			}
 
 			s = {};
-			for (auto& mRawData : mMerge.mRawDatas)
+			for (VecLogCache & caches : mMerge.mMergeLogVecVec)
 			{
-				VecLogCache& caches = mRawData.second;
 				s.emplace(&caches);
 			}
 
@@ -1941,6 +2088,7 @@ namespace tilogspace
 					mMerge.mMergeCaches.swap(*p);
 				}
 			}
+			mMerge.mMergedSize += mMerge.mMergeCaches.size();
 			DEBUG_PRINTI("End of MergeSortForGlobalQueue mMergeCaches size= %u\n", (unsigned)mMerge.mMergeCaches.size());
 		}
 
@@ -2077,6 +2225,7 @@ namespace tilogspace
 				this_thread::yield();
 				if (!mPoll.mExist) { break; }
 			}
+			DEBUG_PRINTA("mMerge.mMergedSize %llu\n", (long long unsigned)mMerge.mMergedSize);
 			AtInternalThreadExit(&mMerge, &mDeliver);
 			return;
 		}
@@ -2186,6 +2335,7 @@ namespace tilogspace
 				this_thread::yield();
 				if (!mDeliver.mExist) { break; }
 			}
+			DEBUG_PRINTA("gcsize %llu\n",(long long unsigned)mGC.mGCList.gcsize);
 			AtInternalThreadExit(&mGC, nullptr);
 			return;
 		}
