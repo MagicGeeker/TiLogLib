@@ -462,7 +462,7 @@ namespace tilogspace
 	constexpr size_t TILOG_INT32_MAX_CHAR_LEN = (11 + 1);
 	constexpr size_t TILOG_UINT64_MAX_CHAR_LEN = (20 + 1);
 	constexpr size_t TILOG_INT64_MAX_CHAR_LEN = (20 + 1);
-	constexpr size_t TILOG_DOUBLE_MAX_CHAR_LEN = (25 + 1);	  // TODO
+	constexpr size_t TILOG_DOUBLE_MAX_CHAR_LEN = (25 + 1);	  
 	constexpr size_t TILOG_FLOAT_MAX_CHAR_LEN = (25 + 1);	  // TODO
 
 }	 // namespace tilogspace
@@ -723,7 +723,7 @@ namespace tilogspace
 			inline TiLogStringExtend& append_unsafe(float x) { return inc_size_s(ftoa(pEnd(), x, NULL)); }
 			inline TiLogStringExtend& append_unsafe(double x)
 			{
-				return inc_size_s((size_type)(rapidjson::internal::dtoa(x, pEnd()) - pEnd()));
+				return inc_size_s((size_type)(rapidjson::internal::dtoa(x, pEnd(),TILOG_DOUBLE_MAX_CHAR_LEN) - pEnd()));
 			}
 
 		public:
@@ -1485,6 +1485,7 @@ namespace tilogspace
 		template <size_t N, typename Ch, typename = typename std::enable_if<internal::ConvertToChar<Ch>::value>::type>
 		inline TiLogStream& operator<<(Ch (&s)[N])
 		{
+			DEBUG_ASSERT(s[N - 1] == '\0');
 			return append(s, N - 1), *this;	   // N with '\0'
 		}
 

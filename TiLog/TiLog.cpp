@@ -1716,7 +1716,7 @@ namespace tilogspace
 			DEBUG_PRINTI("prepare to push %u bytes\n", (unsigned)spLogs->size());
 			for (TiLogPrinter* printer : printers)
 			{
-				printer->mData->pushLogs(std::move(spLogs));
+				printer->mData->pushLogs(spLogs);
 			}
 		}
 
