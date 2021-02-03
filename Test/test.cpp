@@ -338,6 +338,7 @@ TEST_CASE("none_multi_thread_memory_leak_stress_test_____________________")
 {
 	struct testLoop_t : multi_thread_test_loop_t
 	{
+		constexpr static bool ASYNC_SET_PRINTERS() { return true; }
 		constexpr static int32_t THREADS() { return 10; }
 		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return 50; }
 	};
