@@ -37,7 +37,8 @@ using namespace tilogspace;
 #define FUN_MAIN  2
 int main()
 {
-#if FUN_MAIN==-1
+#if FUN_MAIN == -1
+	tilogspace::TiLog::EnablePrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
 	(TILOGV<<"main.cpp")("abc %d %lld",123,456LL);
 	(TILOGV<<"666")("abc %0999999999999999d %",123,456LL);
 	(TILOGV<<"6601000010000000000100000000100000000000230100000000000230002300000000236")

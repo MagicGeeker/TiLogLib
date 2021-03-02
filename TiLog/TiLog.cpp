@@ -1,3 +1,5 @@
+
+#include <functional>
 #include <stdlib.h>
 #include <assert.h>
 #include <time.h>
@@ -779,20 +781,17 @@ namespace tilogspace
 			{
 				Node* nd{};
 				Nodex() = default;
-				Nodex(Node* x):nd(x){};
+				Nodex(Node* x) : nd(x){};
 				~Nodex() { delete nd; }
-				Nodex(const Nodex& rhs) : nd(rhs.nd==nullptr?nullptr: new Node(*rhs.nd))
-				{
-				}
-				Nodex(Nodex&& rhs)
-				{
-					std::swap(nd, rhs.nd);
-				}
+				Nodex(const Nodex& rhs) : nd(rhs.nd == nullptr ? nullptr : new Node(*rhs.nd)) {}
+				Nodex(Nodex&& rhs) { std::swap(nd, rhs.nd); }
 				Node* Get() { return nd; }
-				void Set(Node* nd) { delete this->nd;
+				const Node* Get()const { return nd; }
+				void Set(Node* nd)
+				{
+					delete this->nd;
 					this->nd = nd;
 				}
-
 			};
 
 			struct Bucket : public List<Nodex>
@@ -839,17 +838,35 @@ namespace tilogspace
 				return addr.Get()->v;
 			}
 
-			/*void clear()
+			void remove(K k)
+			{
+				uint32_t ha = static_cast<uint32_t>(Hash()(k) % CONCURRENT);
+				Bucket& bucket = datas[ha];
+				unique_lock<mutex_type> lk(bucket.mtx);
+
+				for (auto it = bucket.begin(); it != bucket.end();)
+				{
+					Node* ptr= it->Get();
+					if (ptr != nullptr && EqualTo()(ptr->k, k))
+					{
+						it = bucket.erase(it);
+					} else
+					{
+						++it;
+					}
+				}
+			}
+
+			void clean()
 			{
 				for (Bucket& bucket : datas)
 				{
 					unique_lock<mutex_type> lk(bucket.mtx);
-					for (Nodex& nodex : bucket)
-					{
-						if (nodex.flag == NODE && CLEAR_K_FUNC != nullptr) { CLEAR_K_FUNC(std::addressof(nodex.toNode()->v)); }
-					}
+					uint32_t sz = static_cast<uint32_t>(bucket.size());
+					if (sz <= BUCKET_SIZE) { continue; }
+					bucket.remove_if([](const Nodex& nodex){ return nodex.Get()==nullptr; });
 				}
-			}*/
+			}
 
 			Bucket datas[CONCURRENT];
 		};
@@ -1339,8 +1356,8 @@ namespace tilogspace
 
 			struct PollStru : public CoreThrdStruBase
 			{
-				static constexpr uint32_t s_pollPeriodSplitNum = 100;
-				atomic_uint32_t s_pollPeriodus{ TILOG_POLL_DEFAULT_THREAD_SLEEP_MS * 1000 / s_pollPeriodSplitNum };
+				static constexpr uint32_t s_pollPeriodSplitNum = (1000 * TILOG_POLL_DEFAULT_THREAD_SLEEP_MS);
+				atomic_uint32_t s_pollPeriodus{ 1 };
 				TiLogTime s_log_last_time{ tilogtimespace::ELogTime::MAX };
 				const char* GetName() override { return "poll"; }
 				CoreThrdEntryFuncType GetThrdEntryFunc() override { return &TiLogCore::thrdFuncPoll; }
@@ -1691,7 +1708,7 @@ namespace tilogspace
 		printer_ids_t TiLogPrinterManager::GetPrinters() { return getInstance()->m_dest; }
 		bool TiLogPrinterManager::IsPrinterActive(EPrinterID printer) { return getInstance()->m_dest & printer; }
 		bool TiLogPrinterManager::IsPrinterInPrinters(EPrinterID printer, printer_ids_t printers) { return printer & printers; }
-		void TiLogPrinterManager::EnablePrinterForPrinters(EPrinterID printer, printer_ids_t& printers) { printers |= printers; }
+		void TiLogPrinterManager::EnablePrinterForPrinters(EPrinterID printer, printer_ids_t& printers) { printers |= printer; }
 		void TiLogPrinterManager::DisEnablePrinterForPrinters(EPrinterID printer, printer_ids_t& printers) { printers &= ~printer; }
 		void TiLogPrinterManager::AsyncEnablePrinter(EPrinterID printer) { getInstance()->m_dest |= ((printer_ids_t)printer); }
 		void TiLogPrinterManager::AsyncDisablePrinter(EPrinterID printer) { getInstance()->m_dest &= (~(printer_ids_t)printer); }
@@ -1854,14 +1871,10 @@ namespace tilogspace
 			WaitPrepared("AtExit: Wow,main function end too fast\n");
 
 			DEBUG_PRINTI("exit,wait poll\n");
-			mPoll.s_pollPeriodus = 1;	 // make poll faster
-
-			DEBUG_PRINTI("prepare to exit\n");
 			mToExit = true;
 
 			while (mPoll.mExist)
 			{
-				mMerge.mCV.notify_one();
 				this_thread::yield();
 			}
 
@@ -2310,6 +2323,7 @@ namespace tilogspace
 				std::unique_lock<std::mutex> lk_del(mGC.mMtx);
 				mGC.mCV.wait(lk_del);
 				mGC.mDoing = true;
+				mMerge.mRawDatas.clean();
 				mGC.mGCList.gc();
 				mGC.mDoing = false;
 				lk_del.unlock();
@@ -2326,6 +2340,7 @@ namespace tilogspace
 					for (auto it = mThreadStruQueue.toDelQueue.begin(); it != mThreadStruQueue.toDelQueue.end();)
 					{
 						ThreadStru& threadStru = **it;
+						mMerge.mRawDatas.remove(threadStru.tid);
 						delete (&threadStru);
 						it = mThreadStruQueue.toDelQueue.erase(it);
 					}
