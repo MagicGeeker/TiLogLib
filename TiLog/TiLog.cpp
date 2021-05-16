@@ -527,7 +527,7 @@ namespace tilogspace
 			}
 
 			// ptr is m_front
-			inline void do_free() { TILOG_FREE_FUNCTION(this->m_front); }
+			inline void do_free() { tifree(this->m_front); }
 
 		protected:
 			constexpr static size_t DEFAULT_CAPACITY = 32;
@@ -592,7 +592,7 @@ namespace tilogspace
 				rhs.pMem = nullptr;
 			}
 
-			~PodCircularQueue() { ezfree(pMem); }
+			~PodCircularQueue() { tifree(pMem); }
 
 			bool empty() const { return pFirst == pEnd; }
 
@@ -1030,9 +1030,14 @@ namespace tilogspace
 
 		class TiLogCore;
 
-		struct MergeRawDatas : public TiLogObject, public TiLogCurrentHashMap<const String*, VecLogCache>
+		struct MergeRawDatasHashMapFeat : TiLogCurrentHashMapDefaultFeat<const String*, VecLogCache>
 		{
-			using super = TiLogCurrentHashMap<const String*, VecLogCache>;
+			constexpr static uint32_t CONCURRENT = TILOG_AVERAGE_CONCURRENT_THREAD_NUM;
+		};
+		
+		struct MergeRawDatas : public TiLogObject, public TiLogCurrentHashMap<const String*, VecLogCache,MergeRawDatasHashMapFeat>
+		{
+			using super = TiLogCurrentHashMap<const String*, VecLogCache, MergeRawDatasHashMapFeat>;
 			inline size_t may_size() const { return mSize; }
 			inline bool may_full() const { return mSize >= TILOG_MERGE_QUEUE_RATE; }
 			inline void clear() { mSize = 0; }

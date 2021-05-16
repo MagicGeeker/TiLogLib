@@ -189,6 +189,9 @@ namespace tilogspace
 	constexpr static size_t TILOG_THREAD_ID_MAX_LEN = SIZE_MAX;	// tid max len,SIZE_MAX means no limit,in popular system limit is TILOG_UINT64_MAX_CHAR_LEN
 	constexpr static size_t TILOG_MAX_LOG_NUM = SIZE_MAX;	// max log numbers
 
+	constexpr static uint32_t TILOG_MAY_MAX_RUNNING_THREAD_NUM = 1024;	// may max running threads
+	constexpr static uint32_t TILOG_AVERAGE_CONCURRENT_THREAD_NUM = 128;	// average concurrent threads
+
 	constexpr static size_t TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE= (16U << 20U);	// log size per file,it is not accurate,especially TILOG_GLOBAL_BUF_SIZE is bigger
 }	 // namespace tilogspace
 
@@ -262,7 +265,7 @@ namespace tilogspace
 
 		inline static void* tirealloc(void* p, size_t sz) { return TILOG_REALLOC_FUNCTION(p, sz); }
 
-		inline static void ezfree(void* p) { TILOG_FREE_FUNCTION(p); }
+		inline static void tifree(void* p) { TILOG_FREE_FUNCTION(p); }
 	};
 
 	class TiLogObject : public TiLogMemoryManager
@@ -812,7 +815,7 @@ namespace tilogspace
 			{
 				DEBUG_ASSERT(size <= cap);
 				size_type mem_size = cap + (size_type)sizeof('\0') + size_head();	 // request extra 1 byte for '\0'
-				Core* p = (Core*)TILOG_MALLOC_FUNCTION(mem_size);
+				Core* p = (Core*)timalloc(mem_size);
 				DEBUG_ASSERT(p != nullptr);
 				pCore = p;
 				this->pCore->size = size;
@@ -831,7 +834,7 @@ namespace tilogspace
 				this->pCore->capacity = new_cap;	// capacity without '\0'
 				check();
 			}
-			inline void do_free() { TILOG_FREE_FUNCTION(this->pCore); }
+			inline void do_free() { tifree(this->pCore); }
 			inline char* pFront() { return pCore->buf; }
 			inline const char* pFront() const { return pCore->buf; }
 			inline const char* pEnd() const { return pCore->buf + pCore->size; }
@@ -1158,7 +1161,7 @@ namespace tilogspace
 				DEBUG_RUN(p->file = nullptr, p->tid = nullptr);
 				DEBUG_RUN(p->line = 0, p->fileLen = 0);
 				DEBUG_RUN(p->level = (char)ELogLevelFlag::FREED);
-				TILOG_FREE_FUNCTION(p);
+				tifree(p);
 			}
 
 			inline static void check(const TiLogBean* p)
