@@ -1361,7 +1361,7 @@ namespace tilogspace
 
 			struct PollStru : public CoreThrdStruBase
 			{
-				static constexpr uint32_t s_pollPeriodSplitNum = (1000 * TILOG_POLL_DEFAULT_THREAD_SLEEP_MS);
+				static constexpr uint32_t s_pollPeriodSplitNum = (1 * TILOG_POLL_DEFAULT_THREAD_SLEEP_MS);
 				atomic_uint32_t s_pollPeriodus{ 1 };
 				TiLogTime s_log_last_time{ tilogtimespace::ELogTime::MAX };
 				const char* GetName() override { return "poll"; }
@@ -2365,7 +2365,7 @@ namespace tilogspace
 		{
 			for (uint32_t t = mPoll.s_pollPeriodSplitNum; t--;)
 			{
-				this_thread::sleep_for(chrono::microseconds(mPoll.s_pollPeriodus));
+				this_thread::sleep_for(chrono::milliseconds (mPoll.s_pollPeriodus));
 				if (mToExit) { return false; }
 			}
 			return true;
