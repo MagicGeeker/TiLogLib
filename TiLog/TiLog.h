@@ -108,6 +108,7 @@
 #define TILOG_INTERNAL_LEVEL_INFO 7
 #define TILOG_INTERNAL_LEVEL_DEBUG 8
 #define TILOG_INTERNAL_LEVEL_VERBOSE 9
+#define TILOG_INTERNAL_LEVEL_MAX 10
 /**************************************************MACRO FOR USER**************************************************/
 #define TILOG_IS_AUTO_INIT FALSE  // TRUE or FALSE,if false must call tilogspace::TiLog::Init() once before use
 
@@ -169,13 +170,20 @@ namespace tilogspace
 	//writing from register to memory is atomic
 	enum ELevel:uint8_t
 	{
-		CLOSED = 2,
+		GLOBAL_CLOSED = 2,			//only used in TiLog::SetLogLevel()
 		ALWAYS, FATAL, ERROR, WARN, INFO, DEBUG, VERBOSE,
-		OPEN = VERBOSE,
+		GLOBAL_OPEN = VERBOSE,
 		STATIC_LOG_LEVEL = TILOG_STATIC_LOG__LEVEL,
 		MIN = ALWAYS,
-		MAX= VERBOSE
+		MAX = VERBOSE + 1,
+#ifdef NDEBUG
+		ON_RELEASE = 0, ON_DEBUG = MAX
+#else
+		ON_RELEASE = MAX, ON_DEBUG = 0
+#endif
 	};
+
+	inline constexpr ELevel operator&(ELevel a, ELevel b) { return a > b ? a : b; };
 
 	constexpr static uint32_t TILOG_NO_USED_STREAM_LENGTH = 64;	// no used stream length
 	constexpr static uint32_t TILOG_POLL_DEFAULT_THREAD_SLEEP_MS = 1000;	// poll period to ensure print every logs for every thread
@@ -465,7 +473,7 @@ namespace tilogspace
 	constexpr size_t TILOG_INT32_MAX_CHAR_LEN = (11 + 1);
 	constexpr size_t TILOG_UINT64_MAX_CHAR_LEN = (20 + 1);
 	constexpr size_t TILOG_INT64_MAX_CHAR_LEN = (20 + 1);
-	constexpr size_t TILOG_DOUBLE_MAX_CHAR_LEN = (25 + 1);	  
+	constexpr size_t TILOG_DOUBLE_MAX_CHAR_LEN = (25 + 1);
 	constexpr size_t TILOG_FLOAT_MAX_CHAR_LEN = (25 + 1);	  // TODO
 
 }	 // namespace tilogspace
@@ -1643,42 +1651,6 @@ inline static tilogspace::TiLogStream TiLogCreateNewTiLogStream(const char* file
 	return tilogspace::TiLogStream(lv, file, fileLen, line);
 }
 
-namespace DBG
-{
-	inline static tilogspace::TiLogNoneStream TiLogCreateNewTiLogNoneStream(uint32_t) { return tilogspace::TiLogNoneStream(); }
-#ifdef NDEBUG
-	template <uint32_t fileLen, uint32_t line>
-	inline static tilogspace::TiLogNoneStream TiLogCreateNewTiLogStream(const char* file, uint32_t lv)
-	{
-		return tilogspace::TiLogNoneStream();
-	}
-#else
-	template <uint32_t fileLen, uint32_t line>
-	inline static tilogspace::TiLogStream TiLogCreateNewTiLogStream(const char* file, uint32_t lv)
-	{
-		return tilogspace::TiLogStream(lv, file, fileLen, line);
-	}
-#endif
-}	 // namespace DBG
-
-namespace NDBG
-{
-	inline static tilogspace::TiLogNoneStream TiLogCreateNewTiLogNoneStream(uint32_t) { return tilogspace::TiLogNoneStream(); }
-#ifdef NDEBUG
-	template <uint32_t fileLen, uint32_t line>
-	inline static tilogspace::TiLogStream TiLogCreateNewTiLogStream(const char* file, uint32_t lv)
-	{
-		return tilogspace::TiLogStream(lv, file, fileLen, line);
-	}
-#else
-	template <uint32_t fileLen, uint32_t line>
-	inline static tilogspace::TiLogNoneStream TiLogCreateNewTiLogStream(const char* file, uint32_t lv)
-	{
-		return tilogspace::TiLogNoneStream();
-	}
-#endif
-}	 // namespace NDBG
-
 
 namespace tilogspace
 {
@@ -1697,10 +1669,11 @@ namespace tilogspace
 
 // clang-format off
 
-#define TILOG_INTERNAL_GET_LEVEL(lv)                                                                                                       \
+#define TILOG_INTERNAL_GET_LEVEL(LV)                                                                                                       \
 	[&]() {                                                                                                                                \
 		static_assert((sizeof(__FILE__) - 1) <= UINT16_MAX, "fatal error,file path is too long");                                          \
 		static_assert(__LINE__ <= UINT16_MAX, "fatal error,file line too big");                                                            \
+		auto lv=(LV);                                                                                                                      \
 		DEBUG_ASSERT((lv) >= tilogspace::ELevel::MIN);                                                                                     \
 		DEBUG_ASSERT((lv) <= tilogspace::ELevel::MAX);                                                                                     \
 		return (lv);                                                                                                                       \
@@ -1763,6 +1736,7 @@ namespace tilogspace
 
 // not recommend,use TICOUT to TILOGV for better performance
 #define TILOG(lv) TILOG_INTERNAL_CREATE_TILOG_STREAM(lv)
+#define TILOG_IF(lv,cond) TILOG_INTERNAL_CREATE_TILOG_STREAM((cond)?(lv):TILOG_INTERNAL_LEVEL_MAX)
 //------------------------------------------end define micro for user------------------------------------------//
 
 

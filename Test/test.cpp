@@ -276,8 +276,8 @@ TEST_CASE("file_multi_thread_close_print_benchmark_test_____________________")
 			for (uint64_t j = 0; j < loops; j++)
 			{
 				TILOGD << "index= " << index << " j= " << j;
-				if (j == loops / 4) { TiLog::SetLogLevel(tilogspace::CLOSED); }
-				if (j == loops * 3 / 4) { TiLog::SetLogLevel(tilogspace::OPEN); }
+				if (j == loops / 4) { TiLog::SetLogLevel(tilogspace::GLOBAL_CLOSED); }
+				if (j == loops * 3 / 4) { TiLog::SetLogLevel(tilogspace::GLOBAL_OPEN); }
 			}
 		});
 	TICOUT << (1e6 * TiLog::GetPrintedLogs() / ns) << " logs per millisecond\n";
@@ -344,7 +344,7 @@ TEST_CASE("none_multi_thread_memory_leak_stress_test_____________________")
 	};
 
 
-	for (uint32_t i = 0; i < (test_release ? 4000 : 200); i++)
+	for (uint32_t i = 0; i < (test_release ? 20000 : 200); i++)
 	{
 		MultiThreadTest<testLoop_t>(
 			"none_multi_thread_memory_leak_stress_test_____________________", tilogspace::EPrinterID::PRINTER_ID_NONE, [](int index) {
@@ -356,6 +356,7 @@ TEST_CASE("none_multi_thread_memory_leak_stress_test_____________________")
 				mycout << " " << index << " to exit \n";
 
 			});
+		mycout << "test round " << i << " complete!\n";
 	}
 
 	mycout << "none_multi_thread_memory_leak_stress_test_____________________ end\n";
@@ -620,6 +621,14 @@ TEST_CASE("terminal_multi_way_log_test_____________________")
 	TILOGE << "e24" << std::endl<signed char, std::char_traits<signed char>>;
 	TILOGE << "e25" << std::ends<unsigned char, std::char_traits<unsigned char>>;
 	TILOGE << "e26" << std::flush<unsigned char, std::char_traits<unsigned char>>;
+
+	{
+		using namespace tilogspace;
+		TILOG(ON_DEBUG & WARN) << "e27 only print on debug exe";
+		TILOG(ON_RELEASE & WARN) << "e28 only print on release exe";
+		TILOG_IF(INFO, 10 > 8) << "e29 10>8";
+		TILOG_IF(ERROR, 10 < 8) << "e30 10<8";
+	}
 }
 #endif
 
