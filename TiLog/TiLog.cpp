@@ -143,6 +143,7 @@ namespace tiloghelperspace
 			FILE* p = fopen(s, "a");
 			if (p)
 			{
+				setbuf(p, nullptr);	   // set no buf
 				char s2[] = "\n\n\ncreate new internal log\n";
 				fwrite(s2, sizeof(char), TILOG_STRING_LEN_OF_CHAR_ARRAY(s2), p);
 			}
@@ -1229,7 +1230,8 @@ namespace tilogspace
 		using CoreThrdEntryFuncType = void (TiLogCore::*)();
 		struct CoreThrdStruBase : public TiLogObject
 		{
-			bool mExist = false;
+			std::atomic_bool mToExit = { false };
+			std::atomic_bool mExist = { false };
 			virtual ~CoreThrdStruBase() = default;
 			virtual const char* GetName() = 0;
 			virtual CoreThrdEntryFuncType GetThrdEntryFunc() = 0;
@@ -2429,7 +2431,7 @@ namespace tilogspace
 
 			DEBUG_ASSERT(mToExit);
 			DEBUG_PRINTI("poll thrd prepare to exit,try last poll\n");
-			GetMergeLock();	   // wait for current merge
+
 			AtInternalThreadExit(&mPoll, &mMerge);
 			return;
 		}
@@ -2469,12 +2471,26 @@ namespace tilogspace
 
 		inline void TiLogCore::AtInternalThreadExit(CoreThrdStruBase* thrd, CoreThrdStruBase* nextExitThrd)
 		{
-			DEBUG_PRINTI("thrd %s exit.\n", thrd->GetName());
-			thrd->mExist = false;
-			mExistThreads--;
+			DEBUG_PRINTI("thrd %s to exit.\n", thrd->GetName());
+			thrd->mToExit = true;
 			CoreThrdStru* t = dynamic_cast<CoreThrdStru*>(nextExitThrd);
-			if (!t) return;
-			t->mCV.notify_all();
+			if (t)
+			{
+				auto lk = GetCoreThrdLock(*t);	  // wait for "current may working nextExitThrd"
+				thrd->mExist = false;
+				lk.unlock();
+				while (!t->mToExit)		// wait for "nextExitThrd complete all work and prepare to exit"
+				{
+					t->mCV.notify_all();
+					std::this_thread::yield();
+				}
+			} else
+			{
+				thrd->mExist = false;
+			}
+
+			DEBUG_PRINTI("thrd %s exit.\n", thrd->GetName());
+			mExistThreads--;
 		}
 
 		inline uint64_t TiLogCore::GetPrintedLogs() { return getRInstance().mPrintedLogs; }
