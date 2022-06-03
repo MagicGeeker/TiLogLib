@@ -309,9 +309,10 @@ namespace tilogspace
 		// if you want to use c-style function on this object, such as strlen(&this->front())
 		// you must call c_str() function before to ensure end with the '\0'
 		// see ensureZero
-		class TiLogString : public TiLogObject
+		class TiLogString : public TiLogObject, public TiLogStrBase<TiLogString, size_t>
 		{
 			friend class tilogspace::TiLogStream;
+			friend class TiLogStrBase<TiLogString, size_t>;
 
 		public:
 			inline ~TiLogString()
@@ -352,7 +353,7 @@ namespace tilogspace
 			explicit inline TiLogString(const char* s) : TiLogString(s, strlen(s)) {}
 			inline TiLogString(const TiLogString& x) : TiLogString(x.data(), x.size()) {}
 			inline TiLogString(TiLogString&& x) noexcept { makeThisInvalid(), *this = std::move(x); }
-			inline TiLogString& operator=(const String& str) { return clear(), append(str.data(), str.size()); }
+			inline TiLogString& operator=(const String& str) { return clear(), this->append(str.data(), str.size()); }
 			inline TiLogString& operator=(const TiLogString& str) { return clear(), append(str.data(), str.size()); }
 			inline TiLogString& operator=(TiLogString&& str) noexcept { return swap(str), str.clear(), *this; }
 
@@ -388,37 +389,9 @@ namespace tilogspace
 			inline size_t size_with_zero() const { return size() + sizeof(char); }
 
 		public:
-			// length without '\0'
-			inline TiLogString& append(const char* cstr, size_t length) { return append_s(length, cstr, length); }
-			inline TiLogString& append(const char* cstr) { return append(cstr, strlen(cstr)); }
-			inline TiLogString& append(const String& str) { return append(str.data(), (size_t)str.size()); }
-			inline TiLogString& append(const TiLogString& str) { return append(str.data(), str.size()); }
-			inline TiLogString& append(unsigned char x) { return append_s(sizeof(unsigned char), x); }
-			inline TiLogString& append(signed char x) { return append_s(sizeof(unsigned char), x); }
-			inline TiLogString& append(char x) { return append_s(sizeof(unsigned char), x); }
-			inline TiLogString& append(uint64_t x) { return append_s(TILOG_UINT64_MAX_CHAR_LEN, x); }
-			inline TiLogString& append(int64_t x) { return append_s(TILOG_INT64_MAX_CHAR_LEN, x); }
-			inline TiLogString& append(uint32_t x) { return append_s(TILOG_UINT32_MAX_CHAR_LEN, x); }
-			inline TiLogString& append(int32_t x) { return append_s(TILOG_INT32_MAX_CHAR_LEN, x); }
-			inline TiLogString& append(double x) { return append_s(TILOG_DOUBLE_MAX_CHAR_LEN, x); }
-			inline TiLogString& append(float x) { return append_s(TILOG_FLOAT_MAX_CHAR_LEN, x); }
-
-			//*********  Warning!!!You must reserve enough capacity ,then append is safe ******************************//
-
-			// length without '\0'
-			inline TiLogString& append_unsafe(const char* cstr, size_t L) { return memcpy(m_end, cstr, L), inc_size_s(L); }
-			inline TiLogString& append_unsafe(unsigned char c) { return *m_end = c, inc_size_s(1); }
-			inline TiLogString& append_unsafe(signed char c) { return *m_end = c, inc_size_s(1); }
-			inline TiLogString& append_unsafe(char c) { return *m_end = c, inc_size_s(1); }
-			inline TiLogString& append_unsafe(uint64_t x) { return inc_size_s(u64toa_sse2(x, m_end)); }
-			inline TiLogString& append_unsafe(int64_t x) { return inc_size_s(i64toa_sse2(x, m_end)); }
-			inline TiLogString& append_unsafe(uint32_t x) { return inc_size_s(u32toa_sse2(x, m_end)); }
-			inline TiLogString& append_unsafe(int32_t x) { return inc_size_s(i32toa_sse2(x, m_end)); }
-			inline TiLogString& append_unsafe(float x) { return inc_size_s(ftoa(m_end, x, NULL)); }
-			inline TiLogString& append_unsafe(double x) { return inc_size_s((size_t)(rapidjson::internal::dtoa(x, m_end) - m_end)); }
 
 			template <size_t L0>
-			inline TiLogString& append_smallstr_unsafe(const char (&cstr)[L0])
+			inline TiLogString& writestrend(const char (&cstr)[L0])
 			{
 				constexpr size_t length = L0 - 1;	 // L0 with '\0'
 				memcpy_small<length>(m_end, cstr);
@@ -463,7 +436,7 @@ namespace tilogspace
 				DEBUG_ASSERT(new_size < std::numeric_limits<size_t>::max());
 				DEBUG_ASSERT(size() + new_size < std::numeric_limits<size_t>::max());
 				request_new_size(new_size);
-				return append_unsafe(std::forward<Args>(args)...);
+				return writend(std::forward<Args>(args)...);
 			}
 			inline TiLogString& inc_size_s(size_t sz) { return m_end += sz, ensureZero(); }
 
@@ -529,6 +502,10 @@ namespace tilogspace
 
 			// ptr is m_front
 			inline void do_free() { tifree(this->m_front); }
+			inline char* pFront() { return m_front; }
+			inline const char* pFront() const { return m_front; }
+			inline const char* pEnd() const { return m_end; }
+			inline char* pEnd() { return m_end; }
 
 		protected:
 			constexpr static size_t DEFAULT_CAPACITY = 32;
@@ -2159,22 +2136,22 @@ namespace tilogspace
 			DEBUG_PRINTV("logs size %llu capacity %llu \n", (llu)logs.size(), (llu)logs.capacity());
 			logs.reserve(reserveSize);
 
-			logs.append_unsafe('\n');												  // 1
+			logs.writend('\n');												  // 1
 #if TILOG_INTERNAL_PRINT_STEADY_FLAG
-			logs.append_unsafe(bean.time().toSteadyFlag());				  // L3_1
-			logs.append_unsafe(' ');										  // L3_2
+			logs.writend(bean.time().toSteadyFlag());				  // L3_1
+			logs.writend(' ');										  // L3_2
 #endif
-			logs.append_unsafe(bean.level);											  // 1
-			logs.append_unsafe(bean.tid->c_str(), bean.tid->size());				  //----bean.tid->size()
-			logs.append_unsafe('[');													   // 1
-			logs.append_unsafe(mDeliver.mLogTimeStringView.data(), mDeliver.mLogTimeStringView.size());	   //----mLogTimeStringView.size()
-			logs.append_smallstr_unsafe("]  [");						  // 4
+			logs.writend(bean.level);											  // 1
+			logs.writend(bean.tid->c_str(), bean.tid->size());				  //----bean.tid->size()
+			logs.writend('[');													   // 1
+			logs.writend(mDeliver.mLogTimeStringView.data(), mDeliver.mLogTimeStringView.size());	   //----mLogTimeStringView.size()
+			logs.writestrend("]  [");						  // 4
 
-			logs.append_unsafe(bean.file, bean.fileLen);						   //----bean.fileLen
-			logs.append_unsafe(':');											   // 1
-			logs.append_unsafe((uint32_t)bean.line);							   // 5 see TILOG_UINT16_MAX_CHAR_LEN
-			logs.append_smallstr_unsafe("] ");						   // 2
-			logs.append_unsafe(bean.str_view().data(), bean.str_view().size());	   //----bean.str_view()->size()
+			logs.writend(bean.file, bean.fileLen);						   //----bean.fileLen
+			logs.writend(':');											   // 1
+			logs.writend((uint32_t)bean.line);							   // 5 see TILOG_UINT16_MAX_CHAR_LEN
+			logs.writestrend("] ");						   // 2
+			logs.writend(bean.str_view().data(), bean.str_view().size());	   //----bean.str_view()->size()
 			// static L1=1+1+1+4+1+5+2=15
 			// dynamic L2= bean.tid->size() + mLogTimeStringView.size() + bean.fileLen + bean.str_view().size()
 			// dynamic L3= len of steady flag

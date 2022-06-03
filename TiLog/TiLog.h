@@ -564,6 +564,53 @@ namespace tilogspace
 			}
 		};
 
+#define thiz ((TStr&)*this)
+		template <typename TStr, typename sz_t>
+		class TiLogStrBase
+		{
+		public:
+			// length without '\0'
+			inline TStr& append(const char* cstr, sz_t length) { return append_s(length, cstr, length); }
+			inline TStr& append(const char* cstr) { return append(cstr, (sz_t)strlen(cstr)); }
+			inline TStr& append(const String& str) { return append(str.data(), (sz_t)str.size()); }
+			inline TStr& append(const TStr& str) { return append(str.data(), str.size()); }
+			inline TStr& append(unsigned char x) { return append_s(sizeof(unsigned char), x); }
+			inline TStr& append(signed char x) { return append_s(sizeof(unsigned char), x); }
+			inline TStr& append(char x) { return append_s(sizeof(unsigned char), x); }
+			inline TStr& append(uint64_t x) { return append_s(TILOG_UINT64_MAX_CHAR_LEN, x); }
+			inline TStr& append(int64_t x) { return append_s(TILOG_INT64_MAX_CHAR_LEN, x); }
+			inline TStr& append(uint32_t x) { return append_s(TILOG_UINT32_MAX_CHAR_LEN, x); }
+			inline TStr& append(int32_t x) { return append_s(TILOG_INT32_MAX_CHAR_LEN, x); }
+			inline TStr& append(double x) { return append_s(TILOG_DOUBLE_MAX_CHAR_LEN, x); }
+			inline TStr& append(float x) { return append_s(TILOG_FLOAT_MAX_CHAR_LEN, x); }
+
+			//*********  Warning!!!You must reserve enough capacity ,then writend is safe ******************************//
+
+			// length without '\0'
+			inline TStr& writend(const char* cstr, sz_t L) { return memcpy(thiz.pEnd(), cstr, L), inc_size_s(L); }
+			inline TStr& writend(unsigned char c) { return *thiz.pEnd() = c, inc_size_s(1); }
+			inline TStr& writend(signed char c) { return *thiz.pEnd() = c, inc_size_s(1); }
+			inline TStr& writend(char c) { return *thiz.pEnd() = c, inc_size_s(1); }
+			inline TStr& writend(uint64_t x) { return inc_size_s(u64toa_sse2(x, thiz.pEnd())); }
+			inline TStr& writend(int64_t x) { return inc_size_s(i64toa_sse2(x, thiz.pEnd())); }
+			inline TStr& writend(uint32_t x) { return inc_size_s(u32toa_sse2(x, thiz.pEnd())); }
+			inline TStr& writend(int32_t x) { return inc_size_s(i32toa_sse2(x, thiz.pEnd())); }
+			inline TStr& writend(float x) { return inc_size_s(ftoa(thiz.pEnd(), x, NULL)); }
+			inline TStr& writend(double x)
+			{
+				return inc_size_s((sz_t)(rapidjson::internal::dtoa(x, thiz.pEnd(), TILOG_DOUBLE_MAX_CHAR_LEN) - thiz.pEnd()));
+			}
+
+		protected:
+			template <typename... Args>
+			inline TStr& append_s(const sz_t new_size, Args&&... args)
+			{
+				return thiz.append_s(new_size, std::forward<Args>(args)...);
+			}
+
+			inline TStr& inc_size_s(sz_t sz) { return thiz.inc_size_s(sz); }
+		};
+#undef thiz
 
 		// notice! For faster in append and etc function, this is not always end with '\0'
 		// if you want to use c-style function on this object, such as strlen(&this->front())
@@ -571,11 +618,12 @@ namespace tilogspace
 		// see ensureZero
 		// TiLogStringExtend is a string which include a extend head before front()
 		template <typename ExtType, typename FeatureHelperType = std::nullptr_t>
-		class TiLogStringExtend : public TiLogObject
+		class TiLogStringExtend : public TiLogObject, public TiLogStrBase<TiLogStringExtend<ExtType, FeatureHelperType>, size_type>
 		{
 			static_assert(std::is_trivially_copy_assignable<ExtType>::value, "fatal error");
 
 			friend class tilogspace::TiLogStream;
+			friend class TiLogStrBase<TiLogStringExtend<ExtType, FeatureHelperType>, size_type>;
 
 		protected:
 			constexpr static size_type SIZE_OF_EXTEND = (size_type)sizeof(ExtType);
@@ -664,7 +712,7 @@ namespace tilogspace
 			}
 
 			inline TiLogStringExtend(TiLogStringExtend&& x) noexcept { this->pCore = nullptr, swap(x); }
-			inline TiLogStringExtend& operator=(const String& str) { return clear(), append(str.data(), (size_type)str.size()); }
+			inline TiLogStringExtend& operator=(const String& str) { return clear(), this->append(str.data(), (size_type)str.size()); }
 			inline TiLogStringExtend& operator=(const TiLogStringExtend& str) { return clear(), append(str.data(), str.size()); }
 			inline TiLogStringExtend& operator=(TiLogStringExtend&& str) noexcept { return swap(str), str.clear(), *this; }
 			inline void swap(TiLogStringExtend& rhs) noexcept { std::swap(this->pCore, rhs.pCore); }
@@ -704,38 +752,7 @@ namespace tilogspace
 				return TiLogStringView(p_front, sz);
 			}
 
-		public:
-			// length without '\0'
-			inline TiLogStringExtend& append(const char* cstr, size_type length) { return append_s(length, cstr, length); }
-			inline TiLogStringExtend& append(const char* cstr) { return append(cstr, (size_type)strlen(cstr)); }
-			inline TiLogStringExtend& append(const String& str) { return append(str.data(), (size_type)str.size()); }
-			inline TiLogStringExtend& append(const TiLogStringExtend& str) { return append(str.data(), str.size()); }
-			inline TiLogStringExtend& append(unsigned char x) { return append_s(sizeof(unsigned char), x); }
-			inline TiLogStringExtend& append(signed char x) { return append_s(sizeof(unsigned char), x); }
-			inline TiLogStringExtend& append(char x) { return append_s(sizeof(unsigned char), x); }
-			inline TiLogStringExtend& append(uint64_t x) { return append_s(TILOG_UINT64_MAX_CHAR_LEN, x); }
-			inline TiLogStringExtend& append(int64_t x) { return append_s(TILOG_INT64_MAX_CHAR_LEN, x); }
-			inline TiLogStringExtend& append(uint32_t x) { return append_s(TILOG_UINT32_MAX_CHAR_LEN, x); }
-			inline TiLogStringExtend& append(int32_t x) { return append_s(TILOG_INT32_MAX_CHAR_LEN, x); }
-			inline TiLogStringExtend& append(double x) { return append_s(TILOG_DOUBLE_MAX_CHAR_LEN, x); }
-			inline TiLogStringExtend& append(float x) { return append_s(TILOG_FLOAT_MAX_CHAR_LEN, x); }
 
-			//*********  Warning!!!You must reserve enough capacity ,then append is safe ******************************//
-
-			// length without '\0'
-			inline TiLogStringExtend& append_unsafe(const char* cstr, size_type L) { return memcpy(pEnd(), cstr, L), inc_size_s(L); }
-			inline TiLogStringExtend& append_unsafe(unsigned char c) { return *pEnd() = c, inc_size_s(1); }
-			inline TiLogStringExtend& append_unsafe(signed char c) { return *pEnd() = c, inc_size_s(1); }
-			inline TiLogStringExtend& append_unsafe(char c) { return *pEnd() = c, inc_size_s(1); }
-			inline TiLogStringExtend& append_unsafe(uint64_t x) { return inc_size_s(u64toa_sse2(x, pEnd())); }
-			inline TiLogStringExtend& append_unsafe(int64_t x) { return inc_size_s(i64toa_sse2(x, pEnd())); }
-			inline TiLogStringExtend& append_unsafe(uint32_t x) { return inc_size_s(u32toa_sse2(x, pEnd())); }
-			inline TiLogStringExtend& append_unsafe(int32_t x) { return inc_size_s(i32toa_sse2(x, pEnd())); }
-			inline TiLogStringExtend& append_unsafe(float x) { return inc_size_s(ftoa(pEnd(), x, NULL)); }
-			inline TiLogStringExtend& append_unsafe(double x)
-			{
-				return inc_size_s((size_type)(rapidjson::internal::dtoa(x, pEnd(),TILOG_DOUBLE_MAX_CHAR_LEN) - pEnd()));
-			}
 
 		public:
 			inline void reserve(size_type capacity) { ensureCap(capacity), ensureZero(); }
@@ -771,7 +788,7 @@ namespace tilogspace
 				DEBUG_ASSERT(new_size < std::numeric_limits<size_type>::max());
 				DEBUG_ASSERT(size() + new_size < std::numeric_limits<size_type>::max());
 				request_new_size(new_size);
-				return append_unsafe(std::forward<Args>(args)...);
+				return this->writend(std::forward<Args>(args)...);
 			}
 
 			template <typename T = FeatureHelperType, typename std::enable_if<!std::is_same<T, std::nullptr_t>::value, T>::type* = nullptr>
