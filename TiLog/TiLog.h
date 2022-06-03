@@ -617,6 +617,7 @@ namespace tilogspace
 		// you must call c_str() function before to ensure end with the '\0'
 		// see ensureZero
 		// TiLogStringExtend is a string which include a extend head before front()
+		// not handle copy/move to itself
 		template <typename ExtType, typename FeatureHelperType = std::nullptr_t>
 		class TiLogStringExtend : public TiLogObject, public TiLogStrBase<TiLogStringExtend<ExtType, FeatureHelperType>, size_type>
 		{
@@ -680,41 +681,19 @@ namespace tilogspace
 			explicit inline TiLogStringExtend(EPlaceHolder) noexcept {};
 
 			// init with capacity n
-			inline TiLogStringExtend(EPlaceHolder, positive_size_type n)
-			{
-				do_malloc(0, n);
-				ensureZero();
-			}
+			inline TiLogStringExtend(EPlaceHolder, positive_size_type n) { create(n); }
 
 			// init with n count of c
-			inline TiLogStringExtend(positive_size_type n, char c)
-			{
-				do_malloc(n, n);
-				memset(pFront(), c, n);
-				ensureZero();
-			}
+			inline TiLogStringExtend(positive_size_type n, char c) { create_sz(n, n), memset(pFront(), c, n); }
 
 			// length without '\0'
-			inline TiLogStringExtend(const char* s, size_type length)
-			{
-				do_malloc(length, get_better_cap(length));
-				memcpy(pFront(), s, length);
-				ensureZero();
-			}
+			inline TiLogStringExtend(const char* s, size_type length) { create_sz(length, length), memcpy(pFront(), s, length); }
 
 			explicit inline TiLogStringExtend(const char* s) : TiLogStringExtend(s, (size_type)strlen(s)) {}
-
-			inline TiLogStringExtend(const TiLogStringExtend& x)
-			{
-				do_malloc(x.pCore->size, get_better_cap(x.pCore->size));
-				memcpy(this->pCore, x.pCore, size_head() + x.pCore->size);
-				ensureZero();
-			}
-
+			inline TiLogStringExtend(const TiLogStringExtend& x): TiLogStringExtend(x.data(), x.size()) {}
 			inline TiLogStringExtend(TiLogStringExtend&& x) noexcept { this->pCore = nullptr, swap(x); }
 			inline TiLogStringExtend& operator=(const String& str) { return clear(), this->append(str.data(), (size_type)str.size()); }
-			inline TiLogStringExtend& operator=(const TiLogStringExtend& str) { return clear(), append(str.data(), str.size()); }
-			inline TiLogStringExtend& operator=(TiLogStringExtend&& str) noexcept { return swap(str), str.clear(), *this; }
+			inline TiLogStringExtend& operator=(TiLogStringExtend str) noexcept { return swap(str), *this; }
 			inline void swap(TiLogStringExtend& rhs) noexcept { std::swap(this->pCore, rhs.pCore); }
 			inline explicit operator String() const { return String(pFront(), size()); }
 
@@ -776,7 +755,7 @@ namespace tilogspace
 			template <typename T>
 			inline TiLogStringExtend& operator+=(T&& val)
 			{
-				return append(std::forward<T>(val));
+				return this->append(std::forward<T>(val));
 			}
 
 			friend std::ostream& operator<<(std::ostream& os, const class_type& s) { return os << String(s.c_str(), s.size()); }
@@ -821,7 +800,9 @@ namespace tilogspace
 				do_realloc(new_cap);
 			}
 
-			inline void create(size_type capacity = DEFAULT_CAPACITY) { do_malloc(0, capacity), ensureZero(); }
+			inline void create_sz(size_type size, size_type capacity = DEFAULT_CAPACITY) { do_malloc(size, capacity), ensureZero(); }
+			inline void create_better(size_type size, size_type cap = DEFAULT_CAPACITY) { create_sz(size, betterCap(cap)); }
+			inline void create(size_type capacity = DEFAULT_CAPACITY) { create_sz(0, capacity); }
 
 			inline TiLogStringExtend& ensureZero()
 			{
@@ -834,7 +815,7 @@ namespace tilogspace
 
 			inline void check() const { DEBUG_ASSERT(pCore->size <= pCore->capacity); }
 
-			inline size_type get_better_cap(size_type cap) { return DEFAULT_CAPACITY > cap ? DEFAULT_CAPACITY : cap; }
+			inline size_type betterCap(size_type cap) { return DEFAULT_CAPACITY > cap ? DEFAULT_CAPACITY : cap; }
 
 			inline void do_malloc(const size_type size, const size_type cap)
 			{

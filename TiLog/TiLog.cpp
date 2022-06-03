@@ -309,6 +309,7 @@ namespace tilogspace
 		// if you want to use c-style function on this object, such as strlen(&this->front())
 		// you must call c_str() function before to ensure end with the '\0'
 		// see ensureZero
+		// not handle copy/move to itself
 		class TiLogString : public TiLogObject, public TiLogStrBase<TiLogString, size_t>
 		{
 			friend class tilogspace::TiLogStream;
@@ -328,34 +329,19 @@ namespace tilogspace
 			explicit inline TiLogString() { create(); }
 
 			// init with capacity n
-			inline TiLogString(EPlaceHolder, positive_size_t n)
-			{
-				do_malloc(0, n);
-				ensureZero();
-			}
+			inline TiLogString(EPlaceHolder, positive_size_t n) { create(n); }
 
 			// init with n count of c
-			inline TiLogString(positive_size_t n, char c)
-			{
-				do_malloc(n, n);
-				memset(m_front, c, n);
-				ensureZero();
-			}
+			inline TiLogString(positive_size_t n, char c) { create_sz(n, n), memset(m_front, c, n); }
 
 			// length without '\0'
-			inline TiLogString(const char* s, size_t length)
-			{
-				do_malloc(length, get_better_cap(length));
-				memcpy(m_front, s, length);
-				ensureZero();
-			}
+			inline TiLogString(const char* s, size_t length) { create_sz(length, length), memcpy(m_front, s, length); }
 
 			explicit inline TiLogString(const char* s) : TiLogString(s, strlen(s)) {}
 			inline TiLogString(const TiLogString& x) : TiLogString(x.data(), x.size()) {}
-			inline TiLogString(TiLogString&& x) noexcept { makeThisInvalid(), *this = std::move(x); }
+			inline TiLogString(TiLogString&& x) noexcept { makeThisInvalid(), swap(x); }
 			inline TiLogString& operator=(const String& str) { return clear(), this->append(str.data(), str.size()); }
-			inline TiLogString& operator=(const TiLogString& str) { return clear(), append(str.data(), str.size()); }
-			inline TiLogString& operator=(TiLogString&& str) noexcept { return swap(str), str.clear(), *this; }
+			inline TiLogString& operator=(TiLogString str) noexcept { return swap(str), *this; }
 
 			inline void swap(TiLogString& str) noexcept
 			{
@@ -452,7 +438,9 @@ namespace tilogspace
 				do_realloc(new_cap);
 			}
 
-			inline void create(size_t capacity = DEFAULT_CAPACITY) { do_malloc(0, capacity), ensureZero(); }
+			inline void create_sz(size_type size, size_type cap = DEFAULT_CAPACITY) { do_malloc(size, cap), ensureZero(); }
+			inline void create_better(size_type size, size_type cap = DEFAULT_CAPACITY) { create_sz(size, betterCap(cap)); }
+			inline void create(size_type capacity = DEFAULT_CAPACITY) { create_sz(0, capacity); }
 
 			inline void makeThisInvalid()
 			{
@@ -476,7 +464,7 @@ namespace tilogspace
 				DEBUG_ASSERT(m_cap >= m_end);
 			}
 
-			inline static size_t get_better_cap(size_t cap) { return DEFAULT_CAPACITY > cap ? DEFAULT_CAPACITY : cap; }
+			inline static size_t betterCap(size_t cap) { return DEFAULT_CAPACITY > cap ? DEFAULT_CAPACITY : cap; }
 
 			inline void do_malloc(const size_t size, const size_t cap)
 			{
