@@ -33,6 +33,9 @@
 #define shared_mutex std::shared_mutex
 #endif
 
-#define USE_CATCH_TEST TRUE
+#define USE_MAIN_TEST    0
+#define USE_COMPLEX_TEST   1
+#define USE_CATCH_TEST    2
+#define TEST_WAY USE_CATCH_TEST
 
 #endif //TILOG_INC_H

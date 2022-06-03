@@ -13,7 +13,7 @@ bool InitFunc()
 bool s_main_init = InitFunc();
 synccout_t mycout;
 
-#if USE_CATCH_TEST == FALSE
+#if USE_MAIN_TEST == TEST_WAY
 #include <iostream>
 #include <stdlib.h>
 #include <assert.h>
@@ -78,9 +78,13 @@ int main()
 
 #endif
 
-#if USE_CATCH_TEST == TRUE
+#if USE_CATCH_TEST == TEST_WAY 
 
 #define CATCH_CONFIG_MAIN  // This tells Catch to provide a main() - only do this in one cpp file
 #include "../depend_libs/catch/catch.hpp"
+
+#endif
+
+#if USE_COMPLEX_TEST == TEST_WAY
 
 #endif

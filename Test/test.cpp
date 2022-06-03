@@ -3,9 +3,15 @@
 #include "SimpleTimer.h"
 #include "func.h"
 #include "mthread.h"
-#if USE_CATCH_TEST == TRUE
-
+#if USE_CATCH_TEST == TEST_WAY
 #include "../depend_libs/catch/catch.hpp"
+#endif
+#if USE_COMPLEX_TEST == TEST_WAY
+#define TEST_CASE if
+#endif
+
+#if USE_MAIN_TEST != TEST_WAY
+
 
 using namespace std;
 using namespace tilogspace;
@@ -53,11 +59,17 @@ using namespace tilogspace;
 bool s_test_init = InitFunc();
 
 
+#if USE_COMPLEX_TEST == TEST_WAY
+int main()
+{
+#endif
+
+
 #ifdef do_nothing_test_____________________
 
 TEST_CASE("do_nothing_test_____________________")
 {
-	
+
 }
 
 #endif
@@ -725,5 +737,10 @@ TEST_CASE("dynamic_log_level_multi_thread_benchmark_test_____________________")
 		});
 }
 #endif
+
+#if USE_COMPLEX_TEST == TEST_WAY
+}
+#endif
+
 
 #endif
