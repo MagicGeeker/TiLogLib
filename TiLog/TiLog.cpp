@@ -705,7 +705,6 @@ namespace tilogspace
 		struct TiLogCurrentHashMapDefaultFeat
 		{
 			using Hash = std::hash<K>;
-			using EqualTo = std::equal_to<K>;
 			using mutex_type = std::mutex;
 			using clear_func_t = void (*)(V*);
 
@@ -720,7 +719,6 @@ namespace tilogspace
 		public:
 			using KImpl = typename std::remove_const<K>::type;
 			using Hash = typename Feat::Hash;
-			using EqualTo = typename Feat::EqualTo;
 			using mutex_type = typename Feat::mutex_type;
 			using clear_func_t = typename Feat::clear_func_t;
 
@@ -729,42 +727,9 @@ namespace tilogspace
 			constexpr static uint32_t BUCKET_SIZE = Feat::BUCKET_SIZE;
 			constexpr static clear_func_t CLEAR_K_FUNC = Feat::CLEAR_FUNC;
 
-			struct Node
+			struct Bucket : public Map<KImpl,V>
 			{
-				KImpl k;
-				V v;
-				Node() {}
-				Node(const KImpl& k0, const V& v0) : k(k0), v(v0){};
-			};
-
-			enum Flag : uint8_t
-			{
-				RAW,
-				NODE
-			};
-
-			struct Nodex
-			{
-				Node* nd{};
-				Nodex() = default;
-				Nodex(Node* x) : nd(x){};
-				~Nodex() { delete nd; }
-				Nodex(const Nodex& rhs) : nd(rhs.nd == nullptr ? nullptr : new Node(*rhs.nd)) {}
-				Nodex(Nodex&& rhs) { std::swap(nd, rhs.nd); }
-				Node* Get() { return nd; }
-				const Node* Get()const { return nd; }
-				void Set(Node* nd)
-				{
-					delete this->nd;
-					this->nd = nd;
-				}
-			};
-
-			struct Bucket : public List<Nodex>
-			{
-				mutex_type mtx;
-				Bucket() : List<Nodex>(BUCKET_SIZE, Nodex{}) {}
-				~Bucket() = default;
+				TILOG_MUTEXABLE_CLASS_MACRO(mutex_type,mtx)
 			};
 
 		public:
@@ -775,66 +740,20 @@ namespace tilogspace
 			{
 				uint32_t ha = static_cast<uint32_t>(Hash()(k) % CONCURRENT);
 				Bucket& bucket = datas[ha];
-				unique_lock<mutex_type> lk(bucket.mtx);
-				uint32_t sz = static_cast<uint32_t>(bucket.size());
-				auto raw_it=bucket.end();
-				for (auto it=bucket.begin();it!=bucket.end();++it)
-				{
-					if (it->Get()==nullptr)
-					{
-						if(raw_it==bucket.end()){
-							raw_it=it;
-						}
-						continue;
-					}
-					if (EqualTo()(it->Get()->k, k)) { return it->Get()->v; }
-				}
-
-				if (raw_it != bucket.end())
-				{
-				} else
-				{
-					auto it_back = std::prev(raw_it);
-					bucket.resize(2 * sz);
-					raw_it = std::next(it_back);
-				}
-
-				Nodex& addr = *raw_it;
-				addr.Set (new Node(k, V{}));
-				return addr.Get()->v;
+				synchronized(bucket) { synchronized_return_and_unlock bucket[k]; }
+				DEBUG_ASSERT(false);
+				return emptyV;
 			}
 
 			void remove(K k)
 			{
 				uint32_t ha = static_cast<uint32_t>(Hash()(k) % CONCURRENT);
 				Bucket& bucket = datas[ha];
-				unique_lock<mutex_type> lk(bucket.mtx);
-
-				for (auto it = bucket.begin(); it != bucket.end();)
-				{
-					Node* ptr= it->Get();
-					if (ptr != nullptr && EqualTo()(ptr->k, k))
-					{
-						it = bucket.erase(it);
-					} else
-					{
-						++it;
-					}
-				}
-			}
-
-			void clean()
-			{
-				for (Bucket& bucket : datas)
-				{
-					unique_lock<mutex_type> lk(bucket.mtx);
-					uint32_t sz = static_cast<uint32_t>(bucket.size());
-					if (sz <= BUCKET_SIZE) { continue; }
-					bucket.remove_if([](const Nodex& nodex){ return nodex.Get()==nullptr; });
-				}
+				synchronized(bucket) { bucket.erase(k); }
 			}
 
 			Bucket datas[CONCURRENT];
+			V  emptyV;
 		};
 #endif
 
@@ -2295,7 +2214,6 @@ namespace tilogspace
 				std::unique_lock<std::mutex> lk_del(mGC.mMtx);
 				mGC.mCV.wait(lk_del);
 				mGC.mDoing = true;
-				mMerge.mRawDatas.clean();
 				mGC.mGCList.gc();
 				mGC.mDoing = false;
 				lk_del.unlock();
