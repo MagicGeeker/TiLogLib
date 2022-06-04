@@ -402,6 +402,12 @@ namespace tilogspace
 				ensureZero();
 			}
 
+			inline void shrink_to_fit(size_t minCap = DEFAULT_CAPACITY)
+			{
+				minCap = std::max(size(), minCap);
+				do_realloc(minCap);
+			}
+
 			// force set size
 			inline void resetsize(size_t sz) { m_end = m_front + sz, ensureZero(); }
 
@@ -841,11 +847,24 @@ namespace tilogspace
 
 
 		using CrcQueueLogCache = PodCircularQueue<TiLogBean*, TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE - 1>;
-		using VecLogCache = Vector<TiLogBean*>;
-		using VecLogCachePtr = VecLogCache*;
 		using TiLogCoreString = TiLogString;
 
 		using ThreadLocalSpinMutex = OptimisticMutex;
+
+		struct VecLogCache : public Vector<TiLogBean*>
+		{
+			using Vector<TiLogBean*>::Vector;
+			void shrink_to_fit(size_t minCap)
+			{
+				VecLogCache tmp;
+				minCap = std::max(size(), minCap);
+				tmp.reserve(minCap);
+				tmp = *this;
+				*this = std::move(tmp);
+			}
+		};
+		using VecLogCachePtr = VecLogCache*;
+
 
 		struct ThreadStru : public TiLogObject
 		{
@@ -1212,6 +1231,9 @@ namespace tilogspace
 
 			void pushLogsToPrinters(IOBean* pIObean);
 
+			template <class VEC>
+			inline void FreeVecMem(VEC& v,size_t newCap);
+
 			inline void DeliverLogs();
 
 			inline bool PollThreadSleep();
@@ -1247,8 +1269,8 @@ namespace tilogspace
 
 			struct PollStru : public CoreThrdStruBase
 			{
-				static constexpr uint32_t s_pollPeriodSplitNum = (1 * TILOG_POLL_DEFAULT_THREAD_SLEEP_MS);
-				atomic_uint32_t s_pollPeriodus{ 1 };
+				atomic<uint32_t> mPollPeriodSplitNum = { TILOG_POLL_THREAD_MAX_SLEEP_MS};
+				static constexpr uint32_t s_pollPeriodus{ 1 };
 				TiLogTime s_log_last_time{ tilogtimespace::ELogTime::MAX };
 				const char* GetName() override { return "poll"; }
 				CoreThrdEntryFuncType GetThrdEntryFunc() override { return &TiLogCore::thrdFuncPoll; }
@@ -1301,6 +1323,8 @@ namespace tilogspace
 				bool IsBusy() override { return !mGCList.empty(); }
 			} mGC;
 		};
+
+		constexpr uint32_t TiLogCore::PollStru::s_pollPeriodus;   //fix link error in debug mode in GCC before cpp17
 
 		// clang-format off
 		static constexpr int32_t _ = -1;
@@ -2114,6 +2138,7 @@ namespace tilogspace
 
 				{
 					MergeSortForGlobalQueue();
+					FreeVecMem(mMerge.mMergeCaches, TILOG_MERGE_CACHE_MAX_MEMORY_BYTES);
 					mMerge.mRawDatas.clear();
 				}
 
@@ -2159,6 +2184,21 @@ namespace tilogspace
 			TiLogPrinterManager::pushLogsToPrinters({ pIObean, [this](IOBean* p) { mDeliver.mIOBeanPool.release(p); } });
 		}
 
+		template <class VEC>
+		void TiLogCore::FreeVecMem(VEC& v, size_t newCap)
+		{
+			if (v.capacity() > newCap)
+			{
+				v.shrink_to_fit(v.capacity() * TILOG_CACHE_CAPACITY_ADJUST_PERCENT_RATE / 100);
+				mPoll.mPollPeriodSplitNum =
+					std::max(TILOG_POLL_THREAD_MIN_SLEEP_MS, mPoll.mPollPeriodSplitNum * TILOG_POLL_MS_ADJUST_PERCENT_RATE / 100);
+			} else
+			{
+				mPoll.mPollPeriodSplitNum =
+					std::min(TILOG_POLL_THREAD_MAX_SLEEP_MS, mPoll.mPollPeriodSplitNum * 100 / TILOG_POLL_MS_ADJUST_PERCENT_RATE);
+			}
+		}
+
 		inline void TiLogCore::DeliverLogs()
 		{
 			if (mDeliver.mDeliverCache.empty()) { return; }
@@ -2167,6 +2207,7 @@ namespace tilogspace
 				if (c.empty()) { continue; }
 				mDeliver.mIoBean.clear();
 				mergeLogsToOneString(c);
+				FreeVecMem(mDeliver.mIoBean, TILOG_DELIVER_CACHE_MAX_MEMORY_BYTES);
 				if (!mDeliver.mIoBean.empty())
 				{
 					IOBean* t = mDeliver.mIOBeanPool.acquire();
@@ -2248,7 +2289,7 @@ namespace tilogspace
 		// return false when mToExit is true
 		inline bool TiLogCore::PollThreadSleep()
 		{
-			for (uint32_t t = mPoll.s_pollPeriodSplitNum; t--;)
+			for (uint32_t t = mPoll.mPollPeriodSplitNum; t--;)
 			{
 				this_thread::sleep_for(chrono::milliseconds (mPoll.s_pollPeriodus));
 				if (mToExit) { return false; }
