@@ -493,7 +493,9 @@ namespace tilogspace
 	{
 		class TiLogBean;
 
+		using itid_t = std::conditional<TILOG_IS_64BIT_OS,uint64_t,uint32_t>::type;
 		const String* GetThreadIDString();
+		itid_t GetThreadIntID();
 
 		enum class ELogLevelFlag : char
 		{
@@ -1153,7 +1155,11 @@ namespace tilogspace
 
 		public:
 			DEBUG_CANARY_UINT32(flag1)
-			const String* tid;
+			union //this union is convenient for developers if std::thread::id is not a integer
+			{
+				const String* ptid;
+				itid_t tid;
+			};
 			const char* file;
 			DEBUG_CANARY_UINT32(flag2)
 			TiLogTime tiLogTime;
@@ -1171,7 +1177,7 @@ namespace tilogspace
 			inline static void DestroyInstance(TiLogBean* p)
 			{
 				check(p);
-				DEBUG_RUN(p->file = nullptr, p->tid = nullptr);
+				DEBUG_RUN(p->file = nullptr, p->tid = 0);
 				DEBUG_RUN(p->line = 0, p->fileLen = 0);
 				DEBUG_RUN(p->level = (char)ELogLevelFlag::FREED);
 				tifree(p);
@@ -1180,7 +1186,7 @@ namespace tilogspace
 			inline static void check(const TiLogBean* p)
 			{
 				DEBUG_ASSERT(p != nullptr);	   // in this program,p is not null
-				DEBUG_ASSERT(!(p->file == nullptr || p->tid == nullptr));
+				DEBUG_ASSERT(!(p->file == nullptr || p->tid == 0));
 				DEBUG_ASSERT(!(p->line == 0 || p->fileLen == 0));
 				auto checkLevelFunc = [p]() {
 					for (auto c : LOG_PREFIX)
@@ -1400,7 +1406,7 @@ namespace tilogspace
 			create(TILOG_SINGLE_LOG_RESERVE_LEN);
 			TiLogBean& bean = *ext();
 			new (&bean.tiLogTime) TiLogBean::TiLogTime(EPlaceHolder{});
-			bean.tid = tilogspace::internal::GetThreadIDString();
+			bean.tid = tilogspace::internal::GetThreadIntID();
 			bean.file = file;
 			bean.fileLen = fileLen;
 			bean.line = line;

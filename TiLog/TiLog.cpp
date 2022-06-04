@@ -82,7 +82,7 @@
 #define TILOG_STRING_AND_LEN(char_str) char_str, ((sizeof(char_str) - 1) / sizeof(char_str[0]))
 
 #define TILOG_CTIME_MAX_LEN 32
-#define TILOG_PREFIX_RESERVE_LEN_L1 15	  // reserve for prefix static c-strings;
+#define TILOG_PREFIX_RESERVE_LEN_L1 16	  // reserve for prefix static c-strings;
 
 using SystemTimePoint = std::chrono::system_clock::time_point;
 using SystemClock = std::chrono::system_clock;
@@ -276,24 +276,40 @@ namespace tilogspace
 
 	namespace internal
 	{
-		const String* GetNewThreadIDString()
+		String GetNewThreadIDString()
 		{
 			StringStream os;
 			os << (std::this_thread::get_id());
-			String id = "/" + os.str() + " ";
+			String id = os.str();
 			DEBUG_PRINTI("GetNewThreadIDString, tid %s ,cap %llu\n", id.c_str(), (long long unsigned)id.capacity());
 			if_constexpr(TILOG_THREAD_ID_MAX_LEN != SIZE_MAX)
 			{
 				if (id.size() > TILOG_THREAD_ID_MAX_LEN) { id.resize(TILOG_THREAD_ID_MAX_LEN); }
 			}
-			return new String(std::move(id));
+			return id;
 		}
 
 		const String* GetThreadIDString()
 		{
-			thread_local static const String* s_tid = GetNewThreadIDString();
+			thread_local static const String* s_tid = new String(GetNewThreadIDString());
 			return s_tid;
 		}
+
+		itid_t GetThreadIDInt()
+		{
+			thread_local static const itid_t tid = [] {
+				const String* s = GetThreadIDString();
+				itid_t t = (itid_t)strtoull(s->c_str(), NULL, 0);
+				if (t == 0 || errno == ERANGE)	  // unlikely // As I know,thread id is a integer in Win and Unix
+				{
+					t = (itid_t)s;
+				}
+				return t;
+			}();
+			return tid;
+		}
+
+		itid_t GetThreadIntID() { return GetThreadIDInt(); }
 
 		String GetStringByStdThreadID(std::thread::id val)
 		{
@@ -1263,9 +1279,6 @@ namespace tilogspace
 			atomic_bool mSyncing{};
 
 			ThreadStruQueue mThreadStruQueue;
-			// only all of logs of dead thread have been delivered,
-			// the ThreadStru will be move to toDelQueue
-			atomic_uint32_t mWaitDeliverDeadThreads{ 0 };
 
 			struct PollStru : public CoreThrdStruBase
 			{
@@ -2056,14 +2069,13 @@ namespace tilogspace
 		  // clang-format off
 			auto& logs = mDeliver.mIoBean;
 			auto preSize = logs.size();
-			auto tidSize = bean.tid->size();
 			auto timeSVSize = mDeliver.mLogTimeStringView.size();
 			auto fileLen = bean.fileLen;
 			auto beanSVSize = bean.str_view().size();
 			using llu = long long unsigned;
-			DEBUG_PRINTV("preSize %llu, tid[size %llu,addr %p ,val %.6s], timeSVSize %llu, fileLen %llu, beanSVSize %llu\n",
-				(llu)preSize, (llu)tidSize, bean.tid, bean.tid->c_str(), (llu)timeSVSize, (llu)fileLen, (llu)beanSVSize);
-			size_t reserveSize = L3 + preSize + tidSize + timeSVSize + fileLen + beanSVSize + TILOG_PREFIX_RESERVE_LEN_L1;
+			DEBUG_PRINTV("preSize %llu, tid %llu, timeSVSize %llu, fileLen %llu, beanSVSize %llu\n",
+				(llu)preSize, (llu)bean.tid, (llu)timeSVSize, (llu)fileLen, (llu)beanSVSize);
+			size_t reserveSize = L3 + preSize + TILOG_UINT64_MAX_CHAR_LEN + timeSVSize + fileLen + beanSVSize + TILOG_PREFIX_RESERVE_LEN_L1;
 			DEBUG_PRINTV("logs size %llu capacity %llu \n", (llu)logs.size(), (llu)logs.capacity());
 			logs.reserve(reserveSize);
 
@@ -2073,7 +2085,8 @@ namespace tilogspace
 			logs.writend(' ');										  // L3_2
 #endif
 			logs.writend(bean.level);											  // 1
-			logs.writend(bean.tid->c_str(), bean.tid->size());				  //----bean.tid->size()
+			logs.writend('@');											  // 1
+			logs.writend(bean.tid);				  //----TILOG_UINT64_MAX_CHAR_LEN
 			logs.writend('[');													   // 1
 			logs.writend(mDeliver.mLogTimeStringView.data(), mDeliver.mLogTimeStringView.size());	   //----mLogTimeStringView.size()
 			logs.writestrend("]  [");						  // 4
@@ -2083,7 +2096,7 @@ namespace tilogspace
 			logs.writend((uint32_t)bean.line);							   // 5 see TILOG_UINT16_MAX_CHAR_LEN
 			logs.writestrend("] ");						   // 2
 			logs.writend(bean.str_view().data(), bean.str_view().size());	   //----bean.str_view()->size()
-			// static L1=1+1+1+4+1+5+2=15
+			// static L1=1+1+1+1+4+1+5+2=16
 			// dynamic L2= bean.tid->size() + mLogTimeStringView.size() + bean.fileLen + bean.str_view().size()
 			// dynamic L3= len of steady flag
 			// reserve L1+L2+L3 bytes
@@ -2229,7 +2242,6 @@ namespace tilogspace
 				++mDeliver.mDeliveredTimes;
 				DeliverCallBack* callBack = mDeliver.mCallback;
 				if (callBack) { callBack->onDeliverEnd(); }
-				mWaitDeliverDeadThreads = 0;
 				mDeliver.mDeliverCache.swap(mDeliver.mNeedGCCache);
 				mDeliver.mDeliverCache.clear();
 				NotifyGC();
@@ -2305,9 +2317,6 @@ namespace tilogspace
 				DEBUG_PRINTD("thrdFuncPoll notify merge\n");
 				mMerge.mCV.notify_one();
 
-				// if mWaitDeliverDeadThreads!=0, skip this loop
-				if (mWaitDeliverDeadThreads != 0) { continue; }
-
 				// try lock when first run or deliver complete recently
 				unique_lock<decltype(mThreadStruQueue)> lk_queue(mThreadStruQueue, std::try_to_lock);
 				if (!lk_queue.owns_lock()) { continue; }
@@ -2328,8 +2337,6 @@ namespace tilogspace
 					}
 				}
 
-				// find all of the dead thread and move these to waitMergeQueue
-				uint32_t deadThreads = 0;
 				for (auto it = mThreadStruQueue.availQueue.begin(); it != mThreadStruQueue.availQueue.end();)
 				{
 					ThreadStru& threadStru = *(*it);
@@ -2338,7 +2345,6 @@ namespace tilogspace
 					if (mtx.try_lock())
 					{
 						mtx.unlock();
-						++deadThreads;
 						DEBUG_PRINTV("thrd %s exit.move to waitMergeQueue\n", threadStru.tid->c_str());
 						mThreadStruQueue.waitMergeQueue.emplace_back(*it);
 						it = mThreadStruQueue.availQueue.erase(it);
@@ -2347,10 +2353,6 @@ namespace tilogspace
 						++it;
 					}
 				}
-				mWaitDeliverDeadThreads += deadThreads;
-				// if deadThreads!=0,next poll loop will skip move dead ThreadStrus to toDelQueue to
-				// ensure these dead ThreadStrus will not be gc.
-
 			} while (PollThreadSleep());
 
 			DEBUG_ASSERT(mToExit);
