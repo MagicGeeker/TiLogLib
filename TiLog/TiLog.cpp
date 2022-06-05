@@ -308,7 +308,7 @@ namespace tilogspace
 
 		const String* GetThreadIDString()
 		{
-			thread_local static const String* s_tid = new String(GetNewThreadIDString());
+			thread_local static const String* s_tid = new String(GetNewThreadIDString() + " ");
 			return s_tid;
 		}
 
@@ -1042,7 +1042,7 @@ namespace tilogspace
 					sz += (unsigned)v.size();
 					for (TiLogBean* pBean : v)
 					{
-						DestroyPushedTiLogBean(pBean);
+						TiLogStreamHelper::DestroyPushedTiLogBean(pBean);
 					}
 				}
 				clear();
@@ -2097,15 +2097,17 @@ namespace tilogspace
 			constexpr size_t L3 = 0;
 #endif	  // IUILS_DEBUG_WITH_ASSERT
 		  // clang-format off
+			TiLogStringView logsv = bean.str_view();
 			auto& logs = mDeliver.mIoBean;
 			auto preSize = logs.size();
 			auto timeSVSize = mDeliver.mLogTimeStringView.size();
 			auto fileLen = bean.fileLen;
-			auto beanSVSize = bean.str_view().size();
+			auto beanSVSize = logsv.size();
 			using llu = long long unsigned;
-			DEBUG_PRINTV("preSize %llu, tid %llu, timeSVSize %llu, fileLen %llu, beanSVSize %llu\n",
-				(llu)preSize, (llu)bean.tid, (llu)timeSVSize, (llu)fileLen, (llu)beanSVSize);
-			size_t reserveSize = L3 + preSize + TILOG_UINT64_MAX_CHAR_LEN + timeSVSize + fileLen + beanSVSize + TILOG_PREFIX_RESERVE_LEN_L1;
+			DEBUG_PRINTV(
+				"preSize %llu, tid %.*s, timeSVSize %llu, fileLen %llu, beanSVSize %llu\n", (llu)preSize, (int)bean.tidlen, logsv.data(),
+				(llu)timeSVSize, (llu)fileLen, (llu)beanSVSize);
+			size_t reserveSize = L3 + preSize + (timeSVSize + fileLen + beanSVSize) + TILOG_PREFIX_RESERVE_LEN_L1;
 			DEBUG_PRINTV("logs size %llu capacity %llu \n", (llu)logs.size(), (llu)logs.capacity());
 			logs.reserve(reserveSize);
 
@@ -2115,8 +2117,7 @@ namespace tilogspace
 			logs.writend(' ');										  // L3_2
 #endif
 			logs.writend(bean.level);											  // 1
-			logs.writend('@');											  // 1
-			logs.writend(bean.tid);				  //----TILOG_UINT64_MAX_CHAR_LEN
+			logs.writend('#');											  // 1
 			logs.writend('[');													   // 1
 			logs.writend(mDeliver.mLogTimeStringView.data(), mDeliver.mLogTimeStringView.size());	   //----mLogTimeStringView.size()
 			logs.writestrend("]  [");						  // 4
@@ -2124,12 +2125,12 @@ namespace tilogspace
 			logs.writend(bean.file, bean.fileLen);						   //----bean.fileLen
 			logs.writend(':');											   // 1
 			logs.writend((uint32_t)bean.line);							   // 5 see TILOG_UINT16_MAX_CHAR_LEN
-			logs.writestrend("] ");						   // 2
-			logs.writend(bean.str_view().data(), bean.str_view().size());	   //----bean.str_view()->size()
+			logs.writestrend("]@");						   // 2
+			logs.writend(logsv.data(), logsv.size());	   //----logsv.size()
 			// static L1=1+1+1+1+4+1+5+2=16
-			// dynamic L2= bean.tid->size() + mLogTimeStringView.size() + bean.fileLen + bean.str_view().size()
+			// dynamic L2= mLogTimeStringView.size() + bean.fileLen + logsv.size()
 			// dynamic L3= len of steady flag
-			// reserve L1+L2+L3 bytes
+			// reserve preSize+L1+L2+L3 bytes
 			// clang-format on
 			return TiLogStringView(&logs[preSize], logs.end());
 		}

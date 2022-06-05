@@ -482,6 +482,13 @@ namespace tilogspace
 	constexpr size_t TILOG_INT64_MAX_CHAR_LEN = (20 + 1);
 	constexpr size_t TILOG_DOUBLE_MAX_CHAR_LEN = (25 + 1);
 	constexpr size_t TILOG_FLOAT_MAX_CHAR_LEN = (25 + 1);	  // TODO
+#if TILOG_IS_64BIT_OS
+	constexpr size_t TILOG_TID_T_MAX_CHAR_LEN = TILOG_UINT64_MAX_CHAR_LEN;
+	constexpr size_t TILOG_HEX_TID_T_MAX_CHAR_LEN = 16 + 1;
+#else
+	constexpr size_t TILOG_TID_T_MAX_CHAR_LEN = TILOG_UINT32_MAX_CHAR_LEN;
+	constexpr size_t TILOG_HEX_TID_T_MAX_CHAR_LEN = 8 + 1;
+#endif
 
 }	 // namespace tilogspace
 
@@ -646,13 +653,12 @@ namespace tilogspace
 		public:
 			struct Core
 			{
-				char ex[SIZE_OF_EXTEND];
-				size_type capacity;	   // exclude '\0',it means Core can save capacity + 1 chars include '\0'
 				size_type size;		   // exclude '\0'
+				size_type capacity;	   // exclude '\0',it means Core can save capacity + 1 chars include '\0'
+				char ex[SIZE_OF_EXTEND];
 				char buf[];
 			};
 			using core_class_type = Core;
-			static_assert(offsetof(core_class_type, ex) == 0, "fatal error");
 
 		protected:
 			Core* pCore;
@@ -727,20 +733,16 @@ namespace tilogspace
 			inline constexpr size_type ext_size() const { return SIZE_OF_EXTEND; }
 
 		protected:
-			static_assert(offsetof(Core, ex) == 0, "ex is not first member of Core");
-			inline constexpr static size_type ext_str_offset() { return (size_type)offsetof(core_class_type, buf); }
-			inline constexpr static size_type sz_offset() { return (size_type)offsetof(core_class_type, size); }
 			inline constexpr static size_type size_head() { return (size_type)sizeof(Core); }
 
 		public:
 			inline static TiLogStringView get_str_view_from_ext(const ExtType* ext)
 			{
-				const char* p_front = (const char*)ext + ext_str_offset();
-				size_type sz = *(size_type*)((const char*)ext + sz_offset());
-				return TiLogStringView(p_front, sz);
+				Core* pCore = (Core*)((char*)ext - offsetof(Core, ex));
+				return TiLogStringView(pCore->buf, pCore->size);
 			}
 
-
+			inline static Core* get_core_from_ext(const ExtType* ext) { return (Core*)((char*)ext - offsetof(Core, ex)); }
 
 		public:
 			inline void reserve(size_type capacity) { ensureCap(capacity), ensureZero(); }
@@ -1155,18 +1157,15 @@ namespace tilogspace
 
 		public:
 			DEBUG_CANARY_UINT32(flag1)
-			union //this union is convenient for developers if std::thread::id is not a integer
-			{
-				const String* ptid;
-				itid_t tid;
-			};
 			const char* file;
 			DEBUG_CANARY_UINT32(flag2)
 			TiLogTime tiLogTime;
 			uint16_t line;
 			uint16_t fileLen;
 			char level;
-			DEBUG_CANARY_UINT32(flag3)
+			DEBUG_DECLARE(uint8_t tidlen)
+			DEBUG_CANARY_UINT64(flag3)
+			char datas[];
 
 		public:
 			const TiLogTime& time() const { return tiLogTime; }
@@ -1177,7 +1176,7 @@ namespace tilogspace
 			inline static void DestroyInstance(TiLogBean* p)
 			{
 				check(p);
-				DEBUG_RUN(p->file = nullptr, p->tid = 0);
+				DEBUG_RUN(p->file = nullptr);
 				DEBUG_RUN(p->line = 0, p->fileLen = 0);
 				DEBUG_RUN(p->level = (char)ELogLevelFlag::FREED);
 				tifree(p);
@@ -1185,19 +1184,21 @@ namespace tilogspace
 
 			inline static void check(const TiLogBean* p)
 			{
-				DEBUG_ASSERT(p != nullptr);	   // in this program,p is not null
-				DEBUG_ASSERT(!(p->file == nullptr || p->tid == 0));
-				DEBUG_ASSERT(!(p->line == 0 || p->fileLen == 0));
-				auto checkLevelFunc = [p]() {
+				auto f = [p] {
+					DEBUG_ASSERT(p != nullptr);	   // in this program,p is not null
+					DEBUG_ASSERT(!(p->file == nullptr));
+					DEBUG_ASSERT(!(p->line == 0 || p->fileLen == 0));
 					for (auto c : LOG_PREFIX)
 					{
 						if (c == p->level) { return; }
 					}
 					DEBUG_ASSERT1(false, p->level);
 				};
-				DEBUG_RUN(checkLevelFunc());
+				DEBUG_RUN(f());
 			}
 		};
+		constexpr static uint32_t s_alignof_TiLogBean = alignof(TiLogBean);
+
 #endif
 	}	 // namespace internal
 }	 // namespace tilogspace
@@ -1406,11 +1407,13 @@ namespace tilogspace
 			create(TILOG_SINGLE_LOG_RESERVE_LEN);
 			TiLogBean& bean = *ext();
 			new (&bean.tiLogTime) TiLogBean::TiLogTime(EPlaceHolder{});
-			bean.tid = tilogspace::internal::GetThreadIntID();
 			bean.file = file;
 			bean.fileLen = fileLen;
 			bean.line = line;
 			bean.level = tilogspace::LOG_PREFIX[lv];
+			const String* tidstr = tilogspace::internal::GetThreadIDString();
+			DEBUG_RUN(bean.tidlen = tidstr->size() - 1);
+			this->appends(*tidstr);
 		}
 
 
@@ -1610,12 +1613,15 @@ namespace tilogspace
 
 	namespace internal
 	{
-		inline static void DestroyPushedTiLogBean(TiLogBean* p) { TiLogBean::DestroyInstance(p); }
-
 		struct TiLogStreamHelper : public TiLogObject
 		{
 			using ObjectType = TiLogStream;
-
+			inline static void DestroyPushedTiLogBean(TiLogBean* p)
+			{
+				TiLogBean::check(p);
+				auto ptr = TiLogStream::get_core_from_ext(p);
+				tifree(ptr);
+			}
 			inline static TiLogStream* get_no_used_stream() { return TiLogStream::s_pNoUsedStream; }
 			inline static void free_no_used_stream(TiLogStream* p)
 			{
