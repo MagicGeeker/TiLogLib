@@ -190,9 +190,9 @@ namespace tilogspace
 	constexpr static uint32_t TILOG_POLL_THREAD_MAX_SLEEP_MS = 1000;	// max poll period to ensure print every logs for every thread
 	constexpr static uint32_t TILOG_POLL_THREAD_MIN_SLEEP_MS = 100;	// min poll period to ensure print every logs for every thread
 	constexpr static uint32_t TILOG_POLL_MS_ADJUST_PERCENT_RATE = 50;	// range(0,100),a percent number to adjust poll time
-	constexpr static uint32_t TILOG_CACHE_CAPACITY_ADJUST_PERCENT_RATE = 60;	// range(0,100),a percent number to adjust cache size
-	constexpr static uint32_t TILOG_MERGE_CACHE_MAX_MEMORY_BYTES = 50<<10;	// max memory of a single merge cache
-	constexpr static uint32_t TILOG_DELIVER_CACHE_MAX_MEMORY_BYTES = 50<<10;	// max memory of a single deliver cache
+	constexpr static uint32_t TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MIN_CENTI = 120;	// range(0,200],a min percent number to adjust deliver cache capacity
+	constexpr static uint32_t TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MAX_CENTI = 150;	// range(0,200],a max percent number to adjust deliver cache capacity
+	constexpr static uint32_t TILOG_DELIVER_CACHE_DEFAULT_MEMORY_BYTES = 100<<10;	// default memory of a single deliver cache
 
 	constexpr static size_t TILOG_GLOBAL_BUF_SIZE = ((size_t)1 << 20U);						 // global cache string reserve length
 	constexpr static size_t TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE = ((size_t)1 << 8U);			 // single thread cache queue max length
@@ -1672,7 +1672,9 @@ namespace tilogspace
 
 	static_assert(TILOG_POLL_THREAD_MAX_SLEEP_MS > TILOG_POLL_THREAD_MIN_SLEEP_MS  && TILOG_POLL_THREAD_MIN_SLEEP_MS > 0, "fatal err!");
 	static_assert(TILOG_POLL_MS_ADJUST_PERCENT_RATE > 0 && TILOG_POLL_MS_ADJUST_PERCENT_RATE < 100, "fatal err!");
-	static_assert(TILOG_CACHE_CAPACITY_ADJUST_PERCENT_RATE > 0 && TILOG_CACHE_CAPACITY_ADJUST_PERCENT_RATE < 100, "fatal err!");
+	static_assert(0 < TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MIN_CENTI, "fatal err!");
+	static_assert(TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MIN_CENTI <= TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MAX_CENTI, "fatal err!");
+	static_assert(TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MAX_CENTI <= 200, "fatal err!");
 	static_assert(TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE > 0, "fatal err!");
 	static_assert(TILOG_SINGLE_LOG_RESERVE_LEN > 0, "fatal err!");
 

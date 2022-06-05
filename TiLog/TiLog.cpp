@@ -264,6 +264,23 @@ namespace tiloghelperspace
 		return (uint32_t)sizeof...(Args);
 	}
 
+	struct RangeUInt32
+	{
+		RangeUInt32(uint32_t val, uint32_t minv = 0, uint32_t maxv = UINT32_MAX)
+		{
+			this->val = val;
+			this->minv = minv;
+			this->maxv = maxv;
+		}
+		RangeUInt32& operator+=(uint32_t v) { return val += v, val = (val > maxv ? maxv : val), *this; }
+		RangeUInt32& operator-=(uint32_t v) { return val -= v, val = (val < minv ? minv : val), *this; }
+		bool between(uint32_t L, uint32_t R) { return L <= val && val <= R; }
+		// operator uint32_t() { return val; }
+		uint32_t val;
+		uint32_t minv;
+		uint32_t maxv;
+	};
+
 }	 // namespace tiloghelperspace
 
 using namespace tiloghelperspace;
@@ -408,6 +425,12 @@ namespace tilogspace
 				ensureZero();
 			}
 
+			inline void reserve_exact(size_t size)
+			{
+				ensureCap(2 + size / 2);
+				ensureZero();
+			}
+
 			// will set '\0' if increase
 			inline void resize(size_t sz)
 			{
@@ -418,10 +441,15 @@ namespace tilogspace
 				ensureZero();
 			}
 
-			inline void shrink_to_fit(size_t minCap = DEFAULT_CAPACITY)
+			inline void shrink_to_fit(size_t minCap = DEFAULT_CAPACITY, size_t maxCap = DEFAULT_CAPACITY)
 			{
+				DEBUG_ASSERT2(minCap <= maxCap, minCap, maxCap);
+				if (minCap <= capacity() && capacity() <= maxCap) { return; }
+				TiLogString tmp;
 				minCap = std::max(size(), minCap);
-				do_realloc(minCap);
+				tmp.reserve_exact(minCap);
+				tmp.append(this->data(), this->size());
+				this->swap(tmp);
 			}
 
 			// force set size
@@ -985,6 +1013,9 @@ namespace tilogspace
 
 		struct IOBean : public TiLogCoreString
 		{
+			RangeUInt32 mFreeMemTimesCenti = { 80, 0, 100 };	  // free memory times in last 100 times(not exact)
+			Deque<uint32_t> mSizes = Deque<uint32_t>(10, TILOG_DELIVER_CACHE_DEFAULT_MEMORY_BYTES);
+			uint32_t mSizeSum{ 10 * TILOG_DELIVER_CACHE_DEFAULT_MEMORY_BYTES };
 			TiLogTime mTime;
 			using TiLogCoreString::TiLogCoreString;
 			using TiLogCoreString::operator=;
@@ -1247,8 +1278,7 @@ namespace tilogspace
 
 			void pushLogsToPrinters(IOBean* pIObean);
 
-			template <class VEC>
-			inline void FreeVecMem(VEC& v,size_t newCap);
+			inline void FreeDeliverIoBeanMem();
 
 			inline void DeliverLogs();
 
@@ -2151,7 +2181,6 @@ namespace tilogspace
 
 				{
 					MergeSortForGlobalQueue();
-					FreeVecMem(mMerge.mMergeCaches, TILOG_MERGE_CACHE_MAX_MEMORY_BYTES);
 					mMerge.mRawDatas.clear();
 				}
 
@@ -2197,12 +2226,24 @@ namespace tilogspace
 			TiLogPrinterManager::pushLogsToPrinters({ pIObean, [this](IOBean* p) { mDeliver.mIOBeanPool.release(p); } });
 		}
 
-		template <class VEC>
-		void TiLogCore::FreeVecMem(VEC& v, size_t newCap)
+		void TiLogCore::FreeDeliverIoBeanMem()
 		{
-			if (v.capacity() > newCap)
+			mDeliver.mIoBean.mSizeSum -= mDeliver.mIoBean.mSizes.front();
+			mDeliver.mIoBean.mSizeSum += mDeliver.mIoBean.size();
+			mDeliver.mIoBean.mSizes.pop_front();
+			mDeliver.mIoBean.mSizes.push_back(mDeliver.mIoBean.size());
+
+			auto& centi = mDeliver.mIoBean.mFreeMemTimesCenti;
+			auto& vec = mDeliver.mIoBean;
+			size_t newCap = mDeliver.mIoBean.mSizeSum / 10;
+			DEBUG_PRINTD("mFreeMemTimesCenti:%u \n", centi.val);
+
+			vec.shrink_to_fit(
+				newCap * TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MIN_CENTI / 100, newCap * TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MAX_CENTI / 100);
+			vec.capacity() > TILOG_DELIVER_CACHE_DEFAULT_MEMORY_BYTES ? centi += 1 : centi -= 1;
+			if (!centi.between(10, 90) || centi.between(40, 60)) { return; }
+			if (vec.capacity() > TILOG_DELIVER_CACHE_DEFAULT_MEMORY_BYTES)
 			{
-				v.shrink_to_fit(v.capacity() * TILOG_CACHE_CAPACITY_ADJUST_PERCENT_RATE / 100);
 				mPoll.mPollPeriodSplitNum =
 					std::max(TILOG_POLL_THREAD_MIN_SLEEP_MS, mPoll.mPollPeriodSplitNum * TILOG_POLL_MS_ADJUST_PERCENT_RATE / 100);
 			} else
@@ -2220,7 +2261,7 @@ namespace tilogspace
 				if (c.empty()) { continue; }
 				mDeliver.mIoBean.clear();
 				mergeLogsToOneString(c);
-				FreeVecMem(mDeliver.mIoBean, TILOG_DELIVER_CACHE_MAX_MEMORY_BYTES);
+				FreeDeliverIoBeanMem();
 				if (!mDeliver.mIoBean.empty())
 				{
 					IOBean* t = mDeliver.mIOBeanPool.acquire();
