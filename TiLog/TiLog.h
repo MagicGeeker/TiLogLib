@@ -186,7 +186,8 @@ namespace tilogspace
 
 	inline constexpr ELevel operator&(ELevel a, ELevel b) { return a > b ? a : b; };
 
-	constexpr static uint32_t TILOG_USER_MODE_CLOCK_UPDATE_US = 200;	// interval of user mode clock sync with kernel(microseconds)
+	// interval of user mode clock sync with kernel(microseconds),may affect the order of logs if multi-thread
+	constexpr static uint32_t TILOG_USER_MODE_CLOCK_UPDATE_US = TILOG_IS_WITH_MILLISECONDS ? 100 : 100000;
 
 	constexpr static uint32_t TILOG_NO_USED_STREAM_LENGTH = 64;	// no used stream length
 

@@ -82,8 +82,13 @@
 #define TILOG_STRING_AND_LEN(char_str) char_str, ((sizeof(char_str) - 1) / sizeof(char_str[0]))
 
 #define TILOG_CTIME_MAX_LEN 32
-#define TILOG_PREFIX_RESERVE_LEN_L1 16	  // reserve for prefix static c-strings;
-
+#if TILOG_IS_WITH_MILLISECONDS
+#define TILOG_PREFIX_LOG_SIZE (32)		 // reserve for prefix static c-strings;
+#define TILOG_RESERVE_LEN_L1 (32 + 8)	 // reserve for prefix static c-strings and other;
+#else
+#define TILOG_PREFIX_LOG_SIZE (24)		 // reserve for prefix static c-strings;
+#define TILOG_RESERVE_LEN_L1 (24 + 8)	 // reserve for prefix static c-strings and other;
+#endif
 using SystemTimePoint = std::chrono::system_clock::time_point;
 using SystemClock = std::chrono::system_clock;
 using SteadyTimePoint = std::chrono::steady_clock::time_point;
@@ -187,6 +192,8 @@ namespace tiloghelperspace
 		return false;
 	}
 
+	//return string such as ||2022-06-06  19:35:08.064|| (24Bytes)
+	//or return string such as ||2022-06-06 19:25:10|| (19Bytes)
 	static size_t TimePointToTimeCStr(char* dst, SystemTimePoint nowTime)
 	{
 		time_t t = std::chrono::system_clock::to_time_t(nowTime);
@@ -194,10 +201,13 @@ namespace tiloghelperspace
 		do
 		{
 			if (tmd == nullptr) { break; }
+#if TILOG_IS_WITH_MILLISECONDS == FALSE
+			size_t len = strftime(dst, TILOG_CTIME_MAX_LEN, "%Y-%m-%d %H:%M:%S", tmd);	   // 19B
+			if (len == 0) { break; }
+#elif TILOG_IS_WITH_MILLISECONDS == TRUE
 			size_t len = strftime(dst, TILOG_CTIME_MAX_LEN, "%Y-%m-%d  %H:%M:%S", tmd);	   // 24B
 			// len without zero '\0'
 			if (len == 0) { break; }
-#if TILOG_IS_WITH_MILLISECONDS == TRUE
 			auto since_epoch = nowTime.time_since_epoch();
 			std::chrono::seconds s = std::chrono::duration_cast<std::chrono::seconds>(since_epoch);
 			since_epoch -= s;
@@ -1247,8 +1257,6 @@ namespace tilogspace
 
 			void IPushLog(TiLogBean* pBean);
 
-			inline TiLogStringView& GetTimeStrFromSystemClock(const TiLogBean& bean);
-
 			inline TiLogStringView AppendToMergeCacheByMetaData(const TiLogBean& bean);
 
 			void MergeThreadStruQueueToSet(List<ThreadStru*>& thread_queue, TiLogBean& bean);
@@ -1343,12 +1351,16 @@ namespace tilogspace
 
 				atomic_uint64_t mDeliveredTimes{};
 				std::atomic<DeliverCallBack*> mCallback{ nullptr };
-
 				TiLogTime::origin_time_type mPreLogTime{};
-				char mctimestr[TILOG_CTIME_MAX_LEN] = { 0 };
-				TiLogStringView mLogTimeStringView{ mctimestr, TILOG_CTIME_MAX_LEN - 1 };
+				alignas(32) char mlogprefix[TILOG_PREFIX_LOG_SIZE];
+				char* mctimestr;
+				char mlinemp[UINT16_MAX][8];	// use 512KB mem
+
 				IOBean mIoBean;
 				SyncedIOBeanPool mIOBeanPool;
+
+				static_assert(sizeof(mlogprefix) == TILOG_PREFIX_LOG_SIZE, "fatal");
+				DeliverStru();
 				const char* GetName() override { return "deliver"; }
 				CoreThrdEntryFuncType GetThrdEntryFunc() override { return &TiLogCore::thrdFuncDeliverLogs; }
 				bool IsBusy() override { return !mDeliverCache.empty(); }
@@ -1382,6 +1394,33 @@ namespace tilogspace
 			_,_,_,_,_,_,8
 		};
 		// clang-format on
+
+
+#if TILOG_IS_WITH_MILLISECONDS
+		TiLogCore::DeliverStru::DeliverStru()
+		{
+			memcpy(mlogprefix, "\nE# [2022-06-06  19:25:10.763] [", sizeof(mlogprefix));
+			mctimestr = mlogprefix + 5;
+			char mod[8 + 1] = ":00000]@";
+			for (uint32_t i = 0; i < UINT16_MAX; i++)
+			{
+				sprintf(mod, ":%05d]@", i);	   // [1,5]  "00000"-"65535"
+				memcpy(mlinemp[i], mod, 8);
+			}
+		}
+#else
+		DeliverStru()
+		{
+			memcpy(mlogprefix, "\nE[2022-06-06 19:25:10][", sizeof(mlogprefix));
+			mctimestr = mlogprefix + 3;
+			char mod[8 + 1] = ":00000]@";
+			for (uint32_t i = 0; i < UINT16_MAX; i++)
+			{
+				sprintf(mod, ":%05d]@", i);	   // [1,5]  "00000"-"65535"
+				memcpy(mlinemp[i], mod, 8);
+			}
+		}
+#endif
 
 		class TiLogPrinterData
 		{
@@ -2088,66 +2127,7 @@ namespace tilogspace
 			mDeliver.mCV.notify_all();
 		}
 
-		inline TiLogStringView& TiLogCore::GetTimeStrFromSystemClock(const TiLogBean& bean)
-		{
-			TiLogTime::origin_time_type oriTime = bean.time().get_origin_time();
-			if (oriTime == mDeliver.mPreLogTime)
-			{
-				// time is equal to pre,no need to update
-			} else
-			{
-				size_t len = TimePointToTimeCStr(mDeliver.mctimestr, oriTime);
-				mDeliver.mPreLogTime = len == 0 ? TiLogTime::origin_time_type() : oriTime;
-				mDeliver.mLogTimeStringView.resize(len);
-			}
-			return mDeliver.mLogTimeStringView;
-		}
 
-		inline TiLogStringView TiLogCore::AppendToMergeCacheByMetaData(const TiLogBean& bean)
-		{
-#ifdef IUILS_DEBUG_WITH_ASSERT
-			constexpr size_t L3 = sizeof(' ') + TILOG_UINT64_MAX_CHAR_LEN;
-#else
-			constexpr size_t L3 = 0;
-#endif	  // IUILS_DEBUG_WITH_ASSERT
-		  // clang-format off
-			TiLogStringView logsv = bean.str_view();
-			auto& logs = mDeliver.mIoBean;
-			auto preSize = logs.size();
-			auto timeSVSize = mDeliver.mLogTimeStringView.size();
-			auto fileLen = bean.fileLen;
-			auto beanSVSize = logsv.size();
-			using llu = long long unsigned;
-			DEBUG_PRINTV(
-				"preSize %llu, tid %.*s, timeSVSize %llu, fileLen %llu, beanSVSize %llu\n", (llu)preSize, (int)bean.tidlen, logsv.data(),
-				(llu)timeSVSize, (llu)fileLen, (llu)beanSVSize);
-			size_t reserveSize = L3 + preSize + (timeSVSize + fileLen + beanSVSize) + TILOG_PREFIX_RESERVE_LEN_L1;
-			DEBUG_PRINTV("logs size %llu capacity %llu \n", (llu)logs.size(), (llu)logs.capacity());
-			logs.reserve(reserveSize);
-
-			logs.writend('\n');												  // 1
-#if TILOG_INTERNAL_PRINT_STEADY_FLAG
-			logs.writend(bean.time().toSteadyFlag());				  // L3_1
-			logs.writend(' ');										  // L3_2
-#endif
-			logs.writend(bean.level);											  // 1
-			logs.writend('#');											  // 1
-			logs.writend('[');													   // 1
-			logs.writend(mDeliver.mLogTimeStringView.data(), mDeliver.mLogTimeStringView.size());	   //----mLogTimeStringView.size()
-			logs.writestrend("]  [");						  // 4
-
-			logs.writend(bean.file, bean.fileLen);						   //----bean.fileLen
-			logs.writend(':');											   // 1
-			logs.writend((uint32_t)bean.line);							   // 5 see TILOG_UINT16_MAX_CHAR_LEN
-			logs.writestrend("]@");						   // 2
-			logs.writend(logsv.data(), logsv.size());	   //----logsv.size()
-			// static L1=1+1+1+1+4+1+5+2=16
-			// dynamic L2= mLogTimeStringView.size() + bean.fileLen + logsv.size()
-			// dynamic L3= len of steady flag
-			// reserve preSize+L1+L2+L3 bytes
-			// clang-format on
-			return TiLogStringView(&logs[preSize], logs.end());
-		}
 
 		inline std::unique_lock<std::mutex> TiLogCore::GetCoreThrdLock(CoreThrdStru& thrd)
 		{
@@ -2216,6 +2196,48 @@ namespace tilogspace
 			return;
 		}
 
+		inline TiLogStringView TiLogCore::AppendToMergeCacheByMetaData(const TiLogBean& bean)
+		{
+			TiLogStringView logsv = bean.str_view();
+			auto& logs = mDeliver.mIoBean;
+			auto preSize = logs.size();
+			auto fileLen = bean.fileLen;
+			auto beanSVSize = logsv.size();
+			using llu = long long unsigned;
+			size_t reserveSize = preSize + (fileLen + beanSVSize) + TILOG_RESERVE_LEN_L1;
+			logs.reserve(reserveSize);
+
+			DEBUG_PRINTV(
+				"preSize %llu, tid %.*s, fileLen %llu, beanSVSize %llu\n", (llu)preSize, (int)bean.tidlen, logsv.data(), (llu)fileLen,
+				(llu)beanSVSize);
+
+			TiLogTime::origin_time_type oriTime = bean.time().get_origin_time();
+			if (oriTime == mDeliver.mPreLogTime)
+			{
+				// time is equal to pre,no need to update
+			} else
+			{
+				size_t len = TimePointToTimeCStr(mDeliver.mctimestr, oriTime);
+				mDeliver.mPreLogTime = len == 0 ? TiLogTime::origin_time_type() : oriTime;
+#if TILOG_IS_WITH_MILLISECONDS
+				mDeliver.mlogprefix[29] = ']';
+#else
+				mDeliver.mlogprefix[22] = ']';
+#endif
+			}
+			mDeliver.mlogprefix[1] = bean.level;
+			logs.writend(mDeliver.mlogprefix, sizeof(mDeliver.mlogprefix));
+
+			logs.writend(bean.file, bean.fileLen);			 //-----bean.fileLen
+			logs.writend(mDeliver.mlinemp[bean.line], 8);	 // 8
+			logs.writend(logsv.data(), beanSVSize);			 //-----logsv.size()
+
+			// static L1= sizeof(mDeliver.mlogprefix)+8
+			// dynamic L2= bean.fileLen + logsv.size()
+			// reserve preSize+L1+L2 bytes
+			return TiLogStringView(&logs[preSize], logs.end());
+		}
+
 		TiLogTime TiLogCore::mergeLogsToOneString(VecLogCache& deliverCache)
 		{
 			DEBUG_ASSERT(!deliverCache.empty());
@@ -2226,7 +2248,6 @@ namespace tilogspace
 				DEBUG_RUN(TiLogBean::check(pBean));
 				TiLogBean& bean = *pBean;
 
-				GetTimeStrFromSystemClock(bean);
 				TiLogStringView&& log = AppendToMergeCacheByMetaData(bean);
 			}
 			mPrintedLogs += deliverCache.size();
