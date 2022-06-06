@@ -103,6 +103,8 @@ namespace tilogspace
 		namespace tilogtimespace
 		{
 			TILOG_SINGLE_INSTANCE_DECLARE_OUTER(steady_flag_helper)
+			TILOG_SINGLE_INSTANCE_DECLARE_OUTER(UserModeSystemClock)
+			TILOG_SINGLE_INSTANCE_DECLARE_OUTER(UserModeSteadyClock)
 			SteadyClockImpl::SystemTimePoint SteadyClockImpl::initSystemTime{};
 			SteadyClockImpl::TimePoint SteadyClockImpl::initSteadyTime{};
 		}	 // namespace tilogtimespace
@@ -1762,7 +1764,19 @@ namespace tilogspace
 #endif
 		TiLogCore::TiLogCore()
 		{
+#if TILOG_USE_USER_MODE_CLOCK
+#if TILOG_TIME_IMPL_TYPE == TILOG_INTERNAL_STD_STEADY_CLOCK
+			tilogspace::internal::tilogtimespace::UserModeSteadyClock::init();
 			tilogspace::internal::tilogtimespace::SteadyClockImpl::init();
+#elif TILOG_TIME_IMPL_TYPE == TILOG_INTERNAL_STD_SYSTEM_CLOCK
+			tilogspace::internal::tilogtimespace::UserModeSystemClock::init();
+#endif
+#else
+#if TILOG_TIME_IMPL_TYPE == TILOG_INTERNAL_STD_STEADY_CLOCK
+			tilogspace::internal::tilogtimespace::SteadyClockImpl::init();
+#endif
+#endif
+			
 			CreateCoreThread(mPoll);
 			CreateCoreThread(mMerge);
 			CreateCoreThread(mDeliver);
@@ -2523,6 +2537,13 @@ namespace tilogspace
 		delete tilogspace::internal::tilogtimespace::steady_flag_helper::getInstance();
 		delete tilogspace::internal::TiLogPrinterManager::getInstance();
 		delete tilogspace::internal::TiLogCore::getInstance();
+#if TILOG_USE_USER_MODE_CLOCK
+#if TILOG_TIME_IMPL_TYPE == TILOG_INTERNAL_STD_STEADY_CLOCK
+		tilogspace::internal::tilogtimespace::UserModeSteadyClock::uninit();
+#elif TILOG_TIME_IMPL_TYPE == TILOG_INTERNAL_STD_SYSTEM_CLOCK
+		tilogspace::internal::tilogtimespace::UserModeSystemClock::uninit();
+#endif
+#endif
 	}
 
 #if TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL == TRUE

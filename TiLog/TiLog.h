@@ -113,6 +113,7 @@
 #define TILOG_IS_AUTO_INIT FALSE  // TRUE or FALSE,if false must call tilogspace::TiLog::Init() once before use
 
 #define TILOG_TIME_IMPL_TYPE TILOG_INTERNAL_STD_STEADY_CLOCK //choose what clock to use
+#define TILOG_USE_USER_MODE_CLOCK  TRUE  // TRUE or FALSE,if true use user mode clock,otherwise use kernel mode clock
 #define TILOG_IS_WITH_MILLISECONDS TRUE  // TRUE or FALSE,if false no ms info in timestamp
 
 #define TILOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER "a:/" // define the defeult file printer ouput path,must a ANSI string and end with /
@@ -184,6 +185,8 @@ namespace tilogspace
 	};
 
 	inline constexpr ELevel operator&(ELevel a, ELevel b) { return a > b ? a : b; };
+
+	constexpr static uint32_t TILOG_USER_MODE_CLOCK_UPDATE_US = 200;	// interval of user mode clock sync with kernel(microseconds)
 
 	constexpr static uint32_t TILOG_NO_USED_STREAM_LENGTH = 64;	// no used stream length
 
@@ -951,12 +954,44 @@ namespace tilogspace
 				steady_flag_t steadyT;
 			};
 
-			TILOG_ABSTRACT class SystemClockBase : BaseTimeImpl
+			class UserModeSystemClock
 			{
 			public:
 				using Clock = std::chrono::system_clock;
 				using TimePoint = std::chrono::system_clock::time_point;
+				constexpr static bool is_steady=true;
+
+				UserModeSystemClock()
+				{
+					th = std::thread([this] {
+						while (!toExit)
+						{
+							TimePoint tp = Clock::now();
+							if (s_now.load() < tp) { s_now = tp; }
+							std::this_thread::sleep_for(std::chrono::microseconds(TILOG_USER_MODE_CLOCK_UPDATE_US));
+						}
+						delete this;
+					});
+					th.detach();
+				}
+				static TimePoint now() noexcept { return getRInstance().s_now.load(); };
+				static void uninit() { getRInstance().toExit = true; }
+				TILOG_SINGLE_INSTANCE_DECLARE(UserModeSystemClock)
+				static time_t to_time_t(const TimePoint& point) { return (Clock::to_time_t(getRInstance().s_now)); }
+
+			protected:
+				std::thread th{};
+				std::atomic<TimePoint> s_now{ Clock::now() };
+				volatile bool toExit{};
+			};
+
+			TILOG_ABSTRACT class SystemClockBase : BaseTimeImpl
+			{
+			public:
+				using Clock = std::conditional<TILOG_USE_USER_MODE_CLOCK, UserModeSystemClock, std::chrono::system_clock>::type;
+				using TimePoint = std::chrono::system_clock::time_point;
 				using origin_time_type = TimePoint;
+				constexpr static bool is_steady = Clock::is_steady;
 
 			public:
 				inline time_t to_time_t() const { return Clock::to_time_t(chronoTime); }
@@ -970,10 +1005,10 @@ namespace tilogspace
 			};
 
 			// to use this class ,make sure system_lock is steady
-			class NativeSteadySystemClockWrapper : SystemClockBase
+			class NativeSteadySystemClockWrapper : public SystemClockBase
 			{
 			public:
-				using steady_flag_t = Clock::rep;
+				using steady_flag_t = std::chrono::system_clock::rep;
 
 			public:
 				inline NativeSteadySystemClockWrapper() { chronoTime = TimePoint::min(); }
@@ -1016,15 +1051,43 @@ namespace tilogspace
 			};
 
 			using SystemClockImpl = std::conditional<
-				std::chrono::system_clock::is_steady, NativeSteadySystemClockWrapper, NativeNoSteadySystemClockWrapper>::type;
+				SystemClockBase::is_steady, NativeSteadySystemClockWrapper, NativeNoSteadySystemClockWrapper>::type;
 
-			class SteadyClockImpl : public BaseTimeImpl
+			class UserModeSteadyClock
 			{
 			public:
 				using Clock = std::chrono::steady_clock;
 				using TimePoint = std::chrono::steady_clock::time_point;
+
+				UserModeSteadyClock()
+				{
+					th = std::thread([this] {
+						while (!toExit)
+						{
+							s_now = Clock ::now();
+							std::this_thread::sleep_for(std::chrono::microseconds(TILOG_USER_MODE_CLOCK_UPDATE_US));
+						}
+						delete this;
+					});
+					th.detach();
+				}
+				static TimePoint now() noexcept { return getRInstance().s_now.load(); };
+				static void uninit() { getRInstance().toExit = true; }
+				TILOG_SINGLE_INSTANCE_DECLARE(UserModeSteadyClock)
+
+			protected:
+				std::thread th{};
+				std::atomic<TimePoint> s_now{Clock::now()};
+				volatile bool toExit{ };
+			};
+
+			class SteadyClockImpl : public BaseTimeImpl
+			{
+			public:
+				using Clock = std::conditional<TILOG_USE_USER_MODE_CLOCK, UserModeSteadyClock, std::chrono::steady_clock>::type;
+				using TimePoint = std::chrono::steady_clock::time_point;
 				using origin_time_type = TimePoint;
-				using steady_flag_t = Clock::rep;
+				using steady_flag_t = std::chrono::steady_clock::rep;
 
 				using SystemClock = std::chrono::system_clock;
 				using SystemTimePoint = std::chrono::system_clock::time_point;
