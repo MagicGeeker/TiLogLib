@@ -1265,6 +1265,8 @@ namespace tilogspace
 
 			void MergeSortForGlobalQueue();
 
+			void CountSortForGlobalQueue();
+
 			inline std::unique_lock<std::mutex> GetCoreThrdLock(CoreThrdStru& thrd);
 			inline std::unique_lock<std::mutex> GetMergeLock();
 			inline std::unique_lock<std::mutex> GetDeliverLock();
@@ -2127,6 +2129,100 @@ namespace tilogspace
 			mDeliver.mCV.notify_all();
 		}
 
+		void TiLogCore::CountSortForGlobalQueue()
+		{
+			auto& v = mMerge.mMergeSortVec;
+			auto& s = mMerge.mThreadStruPriorQueue;
+			v.clear();
+			DEBUG_PRINTI("Begin of MergeSortForGlobalQueue\n");
+			TiLogBean referenceBean;
+			referenceBean.time() = mPoll.s_log_last_time = TiLogTime::now();	// referenceBean's time is the biggest up to now
+
+			synchronized(mThreadStruQueue)
+			{
+				size_t availQueueSize = mThreadStruQueue.availQueue.size();
+				size_t waitMergeQueueSize = mThreadStruQueue.waitMergeQueue.size();
+				InitMergeSort(availQueueSize + waitMergeQueueSize);
+				DEBUG_PRINTI("MergeThreadStruQueueToSet availQueue.size()= %u\n", (unsigned)availQueueSize);
+				MergeThreadStruQueueToSet(mThreadStruQueue.availQueue, referenceBean);
+				DEBUG_PRINTI("MergeThreadStruQueueToSet waitMergeQueue.size()= %u\n", (unsigned)waitMergeQueueSize);
+				MergeThreadStruQueueToSet(mThreadStruQueue.waitMergeQueue, referenceBean);
+			}
+
+			size_t pre_sz = 0, new_sz = 0;
+
+			for (VecLogCache& caches : mMerge.mMergeLogVecVec)
+			{
+				pre_sz += caches.size();
+			}
+
+			struct CacheSeg
+			{
+				size_t vecIdx;
+				size_t begIdx;
+				size_t endIdx;
+			};
+			// struct TiLogTimeHash{
+			//	size_t operator()(const TiLogTime* t)const{
+			//		return t->hash();
+			//	}
+			// };
+			// struct TiLogTimeEqualTo{
+			//	bool operator()(const TiLogTime* lhs, const TiLogTime* rhs) const {
+			//		return lhs->compare(*rhs)==0;
+			//	}
+			// };
+			struct TiLogTimeComp
+			{
+				bool operator()(const TiLogTime* lhs, const TiLogTime* rhs) const { return *lhs < *rhs; }
+			};
+
+			// UnorderedMap<TiLogTime*,Vector<CacheSeg>,CacheSeg::Hash,CacheSeg::EqualTo> mSortMap;
+			Map<TiLogTime*, Vector<CacheSeg>, TiLogTimeComp> mSortMap;
+
+			for (size_t idx = 0; idx < mMerge.mMergeLogVecVec.size(); idx++)
+			{
+				VecLogCache& caches = mMerge.mMergeLogVecVec[idx];
+				for (size_t i = 0; i < caches.size();)
+				{
+					TiLogBean* pBean = caches[i];
+					size_t j = i + 1;
+					for (;;)
+					{
+						if (j < caches.size() && pBean->time().compare(caches[j]->time()) == 0)
+						{
+							j++;
+						} else
+						{
+							mSortMap[&pBean->time()].push_back({ idx, i, j });
+							i = j;
+							break;
+						}
+					}
+					if (i < j) i++;
+				}
+			}
+
+			mMerge.mMergeCaches.clear();
+			for (auto it = mSortMap.begin(); it != mSortMap.end(); ++it)
+			{
+				Vector<CacheSeg>& caches = it->second;
+				for (CacheSeg& seg : caches)
+				{
+					mMerge.mMergeCaches.insert(
+						mMerge.mMergeCaches.end(), mMerge.mMergeLogVecVec[seg.vecIdx].begin() + seg.begIdx,
+						mMerge.mMergeLogVecVec[seg.vecIdx].begin() + seg.endIdx);
+					/*size_t size0 = mMerge.mMergeCaches.size();
+					mMerge.mMergeCaches.resize(mMerge.mMergeCaches.size() + seg.endIdx - seg.begIdx);
+					memcpy(
+						&mMerge.mMergeCaches.front()+size0, &mMerge.mMergeLogVecVec[seg.vecIdx].front() + seg.begIdx,
+						(seg.endIdx - seg.begIdx) * sizeof(TiLogBean*));*/
+				}
+			}
+			mMerge.mMergedSize += mMerge.mMergeCaches.size();
+			DEBUG_RUN(new_sz = mMerge.mMergeCaches.size());
+			DEBUG_ASSERT2(new_sz == pre_sz, pre_sz, new_sz);
+		}
 
 
 		inline std::unique_lock<std::mutex> TiLogCore::GetCoreThrdLock(CoreThrdStru& thrd)
@@ -2176,6 +2272,7 @@ namespace tilogspace
 
 				{
 					MergeSortForGlobalQueue();
+					//CountSortForGlobalQueue();
 					mMerge.mRawDatas.clear();
 				}
 

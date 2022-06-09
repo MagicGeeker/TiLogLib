@@ -206,7 +206,6 @@ namespace tilogspace
 	constexpr static size_t TILOG_GARBAGE_COLLECTION_QUEUE_RATE = ((size_t)4);	// (garbage collection queue length)/(global cache queue max length)
 	constexpr static size_t TILOG_SINGLE_LOG_RESERVE_LEN = 50;	// reserve for every log except for level,tid ...
 	constexpr static size_t TILOG_THREAD_ID_MAX_LEN = SIZE_MAX;	// tid max len,SIZE_MAX means no limit,in popular system limit is TILOG_UINT64_MAX_CHAR_LEN
-	constexpr static size_t TILOG_MAX_LOG_NUM = SIZE_MAX;	// max log numbers
 
 	constexpr static uint32_t TILOG_MAY_MAX_RUNNING_THREAD_NUM = 1024;	// may max running threads
 	constexpr static uint32_t TILOG_AVERAGE_CONCURRENT_THREAD_NUM = 128;	// average concurrent threads
@@ -879,11 +878,9 @@ namespace tilogspace
 				MAX
 			};
 
-			// suppose 1.0e7 logs per second(limit),1year=365.2422days,
-			// need 58455 years to UINT64_MAX,it is enough
-			using steady_flag_t = uint64_t;
-			static_assert(
-				TILOG_MAX_LOG_NUM <= std::numeric_limits<steady_flag_t>::max(), "Fatal error,max++ is equal to min,it will be not steady!");
+
+			// it is enough
+			using steady_flag_t = int64_t;
 
 			struct steady_flag_helper
 			{
@@ -945,9 +942,7 @@ namespace tilogspace
 			public:
 				inline NoSteadyTimeHelper() { steadyT = steady_flag_helper::min(); }
 
-				inline bool operator<(const NoSteadyTimeHelper& rhs) const { return steadyT < rhs.steadyT; }
-
-				inline bool operator<=(const NoSteadyTimeHelper& rhs) const { return steadyT <= rhs.steadyT; }
+				inline steady_flag_t compare(const NoSteadyTimeHelper& rhs) const { return (this->steadyT - rhs.steadyT); }
 
 				inline steady_flag_t toSteadyFlag() const { return steadyT; }
 
@@ -998,6 +993,7 @@ namespace tilogspace
 				inline time_t to_time_t() const { return Clock::to_time_t(chronoTime); }
 				inline void cast_to_sec() { chronoTime = std::chrono::time_point_cast<std::chrono::seconds>(chronoTime); }
 				inline void cast_to_ms() { chronoTime = std::chrono::time_point_cast<std::chrono::milliseconds>(chronoTime); }
+				inline size_t hash() const { return chronoTime.time_since_epoch().count(); }
 
 				inline origin_time_type get_origin_time() const { return chronoTime; }
 
@@ -1016,9 +1012,7 @@ namespace tilogspace
 
 				inline NativeSteadySystemClockWrapper(TimePoint t) { chronoTime = t; }
 
-				inline bool operator<(const NativeSteadySystemClockWrapper& rhs) const { return chronoTime < rhs.chronoTime; }
-
-				inline bool operator<=(const NativeSteadySystemClockWrapper& rhs) const { return chronoTime <= rhs.chronoTime; }
+				inline steady_flag_t compare(const NativeSteadySystemClockWrapper& r) const { return (chronoTime - r.chronoTime).count(); }
 
 				inline NativeSteadySystemClockWrapper& operator=(const NativeSteadySystemClockWrapper& t) = default;
 
@@ -1111,6 +1105,10 @@ namespace tilogspace
 
 				inline bool operator<=(const SteadyClockImpl& rhs) const { return chronoTime <= rhs.chronoTime; }
 
+				inline size_t hash() const { return chronoTime.time_since_epoch().count(); }
+
+				inline steady_flag_t compare(const SteadyClockImpl& r) const { return (chronoTime - r.chronoTime).count(); }
+
 				inline time_t to_time_t() const
 				{
 					auto dura = chronoTime - initSteadyTime;
@@ -1175,9 +1173,11 @@ namespace tilogspace
 					}
 				}
 
-				inline bool operator<(const ITiLogTime& rhs) const { return impl < rhs.impl; }
+				inline bool operator<(const ITiLogTime& rhs) const { return impl.compare(rhs.impl) < 0; }
 
-				inline bool operator<=(const ITiLogTime& rhs) const { return impl <= rhs.impl; }
+				inline tilog_steady_flag_t compare(const ITiLogTime& rhs) const { return impl.compare(rhs.impl); }
+
+				inline size_t hash() const { return impl.hash(); }
 
 				inline ITiLogTime& operator=(const ITiLogTime& rhs) = default;
 
