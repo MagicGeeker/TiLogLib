@@ -273,6 +273,8 @@ namespace tilogspace
 	class TiLogMemoryManager
 	{
 	public:
+		inline static void* operator new(size_t, void* p) { return p; }
+
 		inline static void* operator new(size_t sz) { return TILOG_MALLOC_FUNCTION(sz); }
 
 		inline static void operator delete(void* p) { TILOG_FREE_FUNCTION(p); }
@@ -631,26 +633,45 @@ namespace tilogspace
 		};
 #undef thiz
 
+		struct TiLogStrExDefTrait;
+		template <typename FeatureHelperType = TiLogStrExDefTrait>
+		class TiLogStringExtend;
+
+		struct TiLogStrExDefTrait
+		{
+			using ExtType = char;
+			using ObjectType = TiLogStringExtend<TiLogStrExDefTrait>;
+			using memmgr_type = TiLogMemoryManager;
+
+			inline static void do_destructor(ObjectType* p);
+			inline static void request_new_size(ObjectType* p, const size_type new_size);
+		};
+
+#define thiz reinterpret_cast<this_type>(this)
+
+
 		// notice! For faster in append and etc function, this is not always end with '\0'
 		// if you want to use c-style function on this object, such as strlen(&this->front())
 		// you must call c_str() function before to ensure end with the '\0'
 		// see ensureZero
 		// TiLogStringExtend is a string which include a extend head before front()
 		// not handle copy/move to itself
-		template <typename ExtType, typename FeatureHelperType = std::nullptr_t>
-		class TiLogStringExtend : public TiLogObject, public TiLogStrBase<TiLogStringExtend<ExtType, FeatureHelperType>, size_type>
+		template <typename FeatureHelperType>
+		class TiLogStringExtend : public TiLogObject, public TiLogStrBase<TiLogStringExtend<FeatureHelperType>, size_type>
 		{
+			friend FeatureHelperType;
+			using ExtType = typename FeatureHelperType::ExtType;
 			static_assert(std::is_trivially_copy_assignable<ExtType>::value, "fatal error");
 
 			friend class tilogspace::TiLogStream;
-			friend class TiLogStrBase<TiLogStringExtend<ExtType, FeatureHelperType>, size_type>;
+			friend class TiLogStrBase<TiLogStringExtend<FeatureHelperType>, size_type>;
 
 		protected:
 			constexpr static size_type SIZE_OF_EXTEND = (size_type)sizeof(ExtType);
 
 		public:
-			using class_type = TiLogStringExtend<ExtType, FeatureHelperType>;
-			using this_type = TiLogStringExtend<ExtType, FeatureHelperType>*;
+			using class_type = TiLogStringExtend<FeatureHelperType>;
+			using this_type = typename FeatureHelperType::ObjectType*;
 			using const_this_type = const this_type;
 
 		public:
@@ -678,20 +699,7 @@ namespace tilogspace
 			}
 
 		public:
-			template <typename T = FeatureHelperType, typename std::enable_if<!std::is_same<T, std::nullptr_t>::value, T>::type* = nullptr>
-			inline void do_destructor()
-			{
-				auto thiz = reinterpret_cast<typename FeatureHelperType::ObjectType*>(this);
-				thiz->do_overwrited_super_destructor();
-			}
-
-			template <typename T = FeatureHelperType, typename std::enable_if<std::is_same<T, std::nullptr_t>::value, T>::type* = nullptr>
-			inline void do_destructor()
-			{
-				default_destructor();
-			}
-
-			inline ~TiLogStringExtend() { do_destructor(); }
+			inline ~TiLogStringExtend() { FeatureHelperType::do_destructor(thiz); }
 
 			explicit inline TiLogStringExtend() { create(); }
 
@@ -784,18 +792,7 @@ namespace tilogspace
 				return this->writend(std::forward<Args>(args)...);
 			}
 
-			template <typename T = FeatureHelperType, typename std::enable_if<!std::is_same<T, std::nullptr_t>::value, T>::type* = nullptr>
-			inline void request_new_size(const size_type new_size)
-			{
-				auto thiz = reinterpret_cast<typename FeatureHelperType::ObjectType*>(this);
-				thiz->request_new_size(new_size);
-			}
-
-			template <typename T = FeatureHelperType, typename std::enable_if<std::is_same<T, std::nullptr_t>::value, T>::type* = nullptr>
-			inline void request_new_size(const size_type new_size)
-			{
-				do_request_new_size(new_size);
-			}
+			inline void request_new_size(const size_type new_size) { FeatureHelperType::request_new_size(thiz, new_size); }
 
 			inline void do_request_new_size(const size_type new_size) { ensureCap(new_size + size()); }
 
@@ -835,7 +832,7 @@ namespace tilogspace
 			{
 				DEBUG_ASSERT(size <= cap);
 				size_type mem_size = cap + (size_type)sizeof('\0') + size_head();	 // request extra 1 byte for '\0'
-				Core* p = (Core*)timalloc(mem_size);
+				Core* p = (Core*)FeatureHelperType::memmgr_type::timalloc(mem_size);
 				DEBUG_ASSERT(p != nullptr);
 				pCore = p;
 				this->pCore->size = size;
@@ -848,13 +845,13 @@ namespace tilogspace
 				check();
 				size_type cap = this->capacity();
 				size_type mem_size = new_cap + (size_type)sizeof('\0') + size_head();	 // request extra 1 byte for '\0'
-				Core* p = (Core*)tirealloc(this->pCore, mem_size);
+				Core* p = (Core*)FeatureHelperType::memmgr_type::tirealloc(this->pCore, mem_size);
 				DEBUG_ASSERT(p != nullptr);
 				pCore = p;
 				this->pCore->capacity = new_cap;	// capacity without '\0'
 				check();
 			}
-			inline void do_free() { tifree(this->pCore); }
+			inline void do_free() { FeatureHelperType::memmgr_type::tifree(this->pCore); }
 			inline char* pFront() { return pCore->buf; }
 			inline const char* pFront() const { return pCore->buf; }
 			inline const char* pEnd() const { return pCore->buf + pCore->size; }
@@ -864,8 +861,19 @@ namespace tilogspace
 		protected:
 			constexpr static size_type DEFAULT_CAPACITY = 32;
 		};
+#undef thiz
 
 	}	 // namespace internal
+
+	namespace internal
+	{
+		void TiLogStrExDefTrait::do_destructor(TiLogStrExDefTrait::ObjectType* p) {
+			p->default_destructor();
+		}
+		void TiLogStrExDefTrait::request_new_size(TiLogStrExDefTrait::ObjectType* p, const size_type new_size) {
+			p->do_request_new_size(new_size);
+		}
+	}
 
 	namespace internal
 	{
@@ -1235,7 +1243,6 @@ namespace tilogspace
 			const TiLogTime& time() const { return tiLogTime; }
 
 			TiLogTime& time() { return tiLogTime; }
-			TiLogStringView str_view() const { return TiLogStringExtend<TiLogBean>::get_str_view_from_ext(this); }
 
 			inline static void DestroyInstance(TiLogBean* p)
 			{
@@ -1432,8 +1439,26 @@ namespace tilogspace
 
 #ifdef H__________________________________________________TiLogStream__________________________________________________
 
+namespace internal
+{
+		struct TiLogStreamHelper : public TiLogObject
+			{
+			using ExtType = TiLogBean;
+			using ObjectType = TiLogStream;
+			using memmgr_type = TiLogMemoryManager;
+
+			inline static void do_destructor(ObjectType* p) ;
+			inline static void request_new_size(ObjectType* p,const size_type new_size) ;
+
+			inline static TiLogStringView str_view(const TiLogBean* p);
+			inline static void DestroyPushedTiLogBean(TiLogBean* p);
+			inline static TiLogStream* get_no_used_stream() ;
+			inline static void free_no_used_stream(TiLogStream* p);
+			};
+}	 // namespace internal
+
 #define TILOG_INTERNAL_STRING_TYPE                                                                                                         \
-	tilogspace::internal::TiLogStringExtend<tilogspace::internal::TiLogBean, tilogspace::internal::TiLogStreamHelper>
+	tilogspace::internal::TiLogStringExtend<tilogspace::internal::TiLogStreamHelper>
 	class TiLogStream : protected TILOG_INTERNAL_STRING_TYPE
 	{
 		friend class TILOG_INTERNAL_STRING_TYPE;
@@ -1677,22 +1702,22 @@ namespace tilogspace
 
 	namespace internal
 	{
-		struct TiLogStreamHelper : public TiLogObject
+		void TiLogStreamHelper::do_destructor(TiLogStream* p) { p->do_overwrited_super_destructor(); }
+		void TiLogStreamHelper::request_new_size(TiLogStream* p, const size_type new_size) { p->request_new_size(new_size); }
+
+		TiLogStringView TiLogStreamHelper::str_view(const TiLogBean* p) { return TiLogStream::get_str_view_from_ext(p); }
+		void TiLogStreamHelper::DestroyPushedTiLogBean(TiLogBean* p)
 		{
-			using ObjectType = TiLogStream;
-			inline static void DestroyPushedTiLogBean(TiLogBean* p)
-			{
-				TiLogBean::check(p);
-				auto ptr = TiLogStream::get_core_from_ext(p);
-				tifree(ptr);
-			}
-			inline static TiLogStream* get_no_used_stream() { return TiLogStream::s_pNoUsedStream; }
-			inline static void free_no_used_stream(TiLogStream* p)
-			{
-				p->ext()->level = (char)ELogLevelFlag::INVALID;
-				delete (p);
-			}
-		};
+			TiLogBean::check(p);
+			auto ptr = TiLogStream::get_core_from_ext(p);
+			tifree(ptr);
+		}
+		inline TiLogStream* TiLogStreamHelper::get_no_used_stream() { return TiLogStream::s_pNoUsedStream; }
+		inline void TiLogStreamHelper::free_no_used_stream(TiLogStream* p)
+		{
+			p->ext()->level = (char)ELogLevelFlag::INVALID;
+			delete (p);
+		}
 
 	}	 // namespace internal
 

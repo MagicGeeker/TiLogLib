@@ -2295,7 +2295,7 @@ namespace tilogspace
 
 		inline TiLogStringView TiLogCore::AppendToMergeCacheByMetaData(const TiLogBean& bean)
 		{
-			TiLogStringView logsv = bean.str_view();
+			TiLogStringView logsv = TiLogStreamHelper::str_view(&bean);
 			auto& logs = mDeliver.mIoBean;
 			auto preSize = logs.size();
 			auto fileLen = bean.fileLen;
