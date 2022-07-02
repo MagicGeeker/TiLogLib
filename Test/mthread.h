@@ -22,7 +22,6 @@ public:
 		  })
 	{
 	}
-	using Thread::operator=;
 };
 
 #endif	  // TILOG_MTHREAD_H

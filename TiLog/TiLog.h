@@ -7,6 +7,7 @@
 #include <atomic>
 #include <functional>
 #include <thread>
+#include <condition_variable>
 #include <type_traits>
 #include <iostream>
 
@@ -308,7 +309,7 @@ namespace tilogspace
 	template <uint32_t NRetry, size_t Nanosec>
 	class SpinMutex
 	{
-		std::atomic_flag mLockedFlag = ATOMIC_FLAG_INIT;
+		std::atomic_flag mLockedFlag{};
 
 	public:
 		inline void lock()

@@ -630,9 +630,6 @@ TEST_CASE("terminal_multi_way_log_test_____________________")
 	TILOGI << "e21" << std::endl;
 	TILOGI << "e22" << std::ends;
 	TILOGI << "e23" << std::flush;
-	TILOGE << "e24" << std::endl<signed char, std::char_traits<signed char>>;
-	TILOGE << "e25" << std::ends<unsigned char, std::char_traits<unsigned char>>;
-	TILOGE << "e26" << std::flush<unsigned char, std::char_traits<unsigned char>>;
 
 	{
 		using namespace tilogspace;
