@@ -146,4 +146,12 @@ do{ if(!(what)){std::cerr<<"\n ERROR:\n"<< __FILE__ <<":"<< __LINE__ <<"\n"<<(#w
 #define DEBUG_DECLARE(...) 
 #endif
 
+#ifndef IUILS_NDEBUG_WITHOUT_ASSERT
+#define DEBUG_INITER(...) __VA_ARGS__
+#define RELEASE_INITER(...)
+#else
+#define DEBUG_INITER(...)
+#define RELEASE_INITER(...)	__VA_ARGS__
+#endif
+
 #endif

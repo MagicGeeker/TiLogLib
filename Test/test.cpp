@@ -27,6 +27,7 @@ using namespace tilogspace;
 #define file_time_multi_thread_simulation__log_test_____________________
 #define file_single_thread_benchmark_test_____________________
 #define file_multi_thread_benchmark_test_____________________
+#define file_multi_thread_benchmark_test_with_format_____________________
 #define file_single_thread_operator_test_____________________
 #define terminal_single_thread_long_string_log_test_____________________
 #define file_static_log_test_____________________
@@ -58,6 +59,20 @@ using namespace tilogspace;
 
 bool s_test_init = InitFunc();
 
+
+struct Student
+{
+	Student() {}
+	Student(const Student& rhs) : id(rhs.id), name(rhs.name) {}
+	Student(Student&& rhs) : id(rhs.id), name(std::move(rhs.name)) {}
+	friend TiLogStream& operator<<(TiLogStream& os, const Student& m)
+	{
+		os << "id:" << m.id << " name:" << m.name;
+		return os;
+	}
+	int id{ 100 };
+	std::string name{ "Jack" };
+};
 
 #if USE_COMPLEX_TEST == TEST_WAY
 int main()
@@ -265,6 +280,27 @@ TEST_CASE("file_multi_thread_benchmark_test_____________________")
 		});
 }
 
+#endif
+
+
+#ifdef file_multi_thread_benchmark_test_with_format_____________________
+TEST_CASE("file_multi_thread_benchmark_test_with_format_____________________")
+{
+	struct testLoop_t : multi_thread_test_loop_t
+	{
+		constexpr static int32_t THREADS() { return 10; }
+		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return test_release ? 100 * 100000 : 100000; }
+		constexpr static bool PRINT_LOOP_TIME() { return true; }
+	};
+
+	MultiThreadTest<testLoop_t>(
+		"file_multi_thread_benchmark_test_with_format_____________________", tilogspace::EPrinterID::PRINTER_TILOG_FILE, [](int index) {
+			for (uint64_t j = 0; j < testLoop_t::GET_SINGLE_THREAD_LOOPS(); j++)
+			{
+				TILOGE.format("index= {} j= {}", index, j);
+			}
+		});
+}
 #endif
 
 
@@ -637,6 +673,26 @@ TEST_CASE("terminal_multi_way_log_test_____________________")
 		TILOG(ON_RELEASE & WARN) << "e28 only print on release exe";
 		TILOG_IF(INFO, 10 > 8) << "e29 10>8";
 		TILOG_IF(ERROR, 10 < 8) << "e30 10<8";
+	}
+	{
+		TILOGI.format("\n\n");
+		TILOGI.format("e31 hello {},format test {} !","world",0);
+		TILOGI.format("e32 str{} int{} double{} NP{}!","abc",0,3.56, nullptr);
+		TILOGI.format("hello {\n");
+		TILOGI.format("hello }\n");
+		TILOGI.format("hello {}\n");
+		TILOGI.format("hello }{\n");
+		TILOGI.format("hello {{{{\n");
+		TILOGI.format("hello {{10{{\n");
+		TILOGI.format("hello }}}}\n");
+		TILOGI.format("e33 hello {1},format test {0} !","world",0);
+		TILOGI.format("e34 hello {},format test {} !","world");
+		TILOGI.format("e35 hello {},format test {0} !","world",0);
+		TILOGI.format("e36 hello {},format test {} !","world",5292,"abc");
+		TILOGI.format("e37 format {} ",0).format("format again {} ",1);
+
+		Student st0;
+		TILOGI.format("st0: {}\n\n", st0);
 	}
 }
 #endif

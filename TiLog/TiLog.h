@@ -127,6 +127,7 @@
 
 #define TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL FALSE //TRUE or FALSE,if false TiLog::SetLogLevel no effect
 #define TILOG_STATIC_LOG__LEVEL TILOG_INTERNAL_LEVEL_VERBOSE	 // set the static log level,dynamic log level will always <= static log level
+#define TILOG_ERROR_FORMAT_STRING  " !!!ERR FMT "
 
 /**************************************************user-defined data structure**************************************************/
 namespace tilogspace
@@ -570,20 +571,29 @@ namespace tilogspace
 				DEBUG_RUN(max_size = sz);
 			}
 			template <size_t N>
-			inline TiLogStringView(const char (&s)[N])
+			constexpr inline TiLogStringView(const char (&s)[N])
+				: DEBUG_INITER(m_front(s), m_end(s + N - 1), max_size(m_end - m_front)) RELEASE_INITER(m_front(s), m_end(s + N - 1))
 			{
-				m_front = s;
-				m_end = s + N - 1;
 			}
-			const char* data() const { return m_front; }
+			constexpr inline const char* data() const { return m_front; }
 
-			size_t size() const { return m_end - m_front; }
+			constexpr inline size_t size() const { return m_end - m_front; }
 
 			void resize(size_t sz)
 			{
 				DEBUG_ASSERT(sz <= max_size);
 				m_end = m_front + sz;
 			}
+
+			inline size_t find(char c, size_t idx) const
+			{
+				char* p = (char*)memchr(m_front + idx, c, m_end - (m_front + idx));
+				return p == nullptr ? npos : (p - m_front);
+			}
+			constexpr inline const char* begin() const { return m_front; }
+			constexpr inline const char* end() const { return m_end; }
+			constexpr inline const char& operator[](size_t i) const { return m_front[i]; }
+			constexpr static auto npos = String::npos;
 		};
 
 #define thiz ((TStr&)*this)
@@ -593,6 +603,7 @@ namespace tilogspace
 		public:
 			// length without '\0'
 			inline TStr& append(const char* cstr, sz_t length) { return append_s(length, cstr, length); }
+			inline TStr& append(const char* cstr, const char* cstrend) { return append(cstr, cstrend - cstr); }
 			inline TStr& append(const char* cstr) { return append(cstr, (sz_t)strlen(cstr)); }
 			inline TStr& append(const String& str) { return append(str.data(), (sz_t)str.size()); }
 			inline TStr& append(const TStr& str) { return append(str.data(), str.size()); }
@@ -1455,6 +1466,10 @@ namespace internal
 			inline static void DestroyPushedTiLogBean(TiLogBean* p);
 			inline static TiLogStream* get_no_used_stream() ;
 			inline static void free_no_used_stream(TiLogStream* p);
+			template <typename... Args>
+			static void mini_format_impl(TiLogStream& outs, TiLogStringView fmt, std::tuple<Args...>&& args);
+			template <typename... Args>
+			static void mini_format_append(TiLogStream& outs, TiLogStringView fmt, Args&&... args);
 			};
 }	 // namespace internal
 
@@ -1465,6 +1480,8 @@ namespace internal
 		friend class TILOG_INTERNAL_STRING_TYPE;
 		friend struct tilogspace::internal::TiLogStreamHelper;
 		using StringType = TILOG_INTERNAL_STRING_TYPE;
+		using TiLogStringView = tilogspace::internal::TiLogStringView;
+		using TiLogStreamHelper = tilogspace::internal::TiLogStreamHelper;
 		using TiLogBean = tilogspace::internal::TiLogBean;
 		using EPlaceHolder = tilogspace::internal::EPlaceHolder;
 		using ELogLevelFlag = tilogspace::internal::ELogLevelFlag;
@@ -1548,17 +1565,11 @@ namespace internal
 			} else
 			{
 				resetLogLevel(ELevel::ERROR);
-				this->append("get err format:\n", 16);
+				this->append(TILOG_ERROR_FORMAT_STRING"get err format:\n", 16);
 				this->append(fmt);
 			}
 			va_end(args);
 
-			return *this;
-		}
-
-		inline TiLogStream& resetLogLevel(ELevel lv)
-		{
-			if (!isNoUsedStream()) { this->ext()->level = LOG_PREFIX[lv]; }
 			return *this;
 		}
 
@@ -1572,7 +1583,17 @@ namespace internal
 		{
 			return (*this) << (std::forward<Args0>(args0)), appends(std::forward<Args>(args)...);
 		}
-
+		template <typename... Args>
+		inline TiLogStream& format( TiLogStringView fmt,Args&&... args)
+		{
+			TiLogStreamHelper::mini_format_append(*this, fmt, std::forward<Args>(args)...);
+			return *this;
+		}
+		inline TiLogStream& resetLogLevel(ELevel lv)
+		{
+			if (!isNoUsedStream()) { this->ext()->level = LOG_PREFIX[lv]; }
+			return *this;
+		}
 	public:
 		inline TiLogStream& operator<<(bool b) { return (b ? append("true", 4) : append("false", 5)), *this; }
 		inline TiLogStream& operator<<(unsigned char c) { return append(c), *this; }
@@ -1600,8 +1621,8 @@ namespace internal
 		template <size_t N, typename Ch, typename = typename std::enable_if<internal::ConvertToChar<Ch>::value>::type>
 		inline TiLogStream& operator<<(Ch (&s)[N])
 		{
-			DEBUG_ASSERT(s[N - 1] == '\0');
-			return append(s, N - 1), *this;	   // N with '\0'
+			const size_t SZ = N - (size_t)(s[N - 1] == '\0');
+			return append(s, SZ), *this;	// SZ with '\0'
 		}
 
 		inline TiLogStream& operator<<(const void* ptr)
@@ -1720,12 +1741,133 @@ namespace internal
 			delete (p);
 		}
 
+		struct Functor
+		{
+			template <typename T>
+			inline void operator()(TiLogStream& out, const T& t) const
+			{
+				out.appends(t);
+			}
+		};
+
+		template <std::size_t I = 0, typename FuncT, typename... Tp>
+		inline typename std::enable_if<I == sizeof...(Tp), void>::type for_index(int, std::tuple<Tp...>&, FuncT, TiLogStream&)
+		{
+		}
+
+		template <std::size_t I = 0, typename FuncT, typename... Tp>
+			inline typename std::enable_if
+			< I<sizeof...(Tp), void>::type for_index(int index, std::tuple<Tp...>& t, FuncT f,TiLogStream& s)
+		{
+			if (index == 0)
+				f(s, std::get<I>(t));
+			else
+				for_index<I + 1, FuncT, Tp...>(index - 1, t, f, s);
+		}
+
+
+		template <typename... Args>
+		void TiLogStreamHelper::mini_format_impl(TiLogStream& outs, TiLogStringView fmt, std::tuple<Args...>&& args)
+		{
+			size_t sz = sizeof...(Args);
+			size_t start = 0;
+			size_t i = 0;
+			bool autoIndex = false;
+			bool manIndex = false;
+			for (; start < fmt.size();)
+			{
+				std::size_t pos = fmt.find('{', start), pos2;
+				if (pos == TiLogStringView::npos)
+				{
+					pos2 = fmt.find('}', start);
+					if (pos2 != std::string::npos && pos2 != fmt.size() - 1 && fmt[pos2 + 1] == '}')
+					{
+						outs.append(fmt.begin() + start, fmt.begin() + pos2);
+						outs.append("}");
+						start = pos2 + 2;
+						continue;
+					}
+					break;
+				}
+				if (pos == fmt.size() - 1) break;
+
+				if (fmt[pos + 1] == '{')
+				{
+					outs.append(fmt.begin() + start, fmt.begin() + pos);
+					outs.append("{");
+					start = pos + 2;
+				} else
+				{
+					pos2 = fmt.find('}', pos);
+					if (pos2 == std::string::npos) break;
+					if (pos2 == pos + 1)
+					{
+						if (i >= sz)
+						{
+							outs.append(TILOG_ERROR_FORMAT_STRING"Too much {}\n");
+							outs.resetLogLevel(ELevel::ERROR);
+							return;
+						}
+						if (manIndex)
+						{
+							outs.append(TILOG_ERROR_FORMAT_STRING"Cannot mix format {0} with {}\n");
+							outs.resetLogLevel(ELevel::ERROR);
+							return;
+						}
+						outs.append(fmt.begin() + start, fmt.begin() + pos);
+						for_index(i, args, Functor(), outs);
+						start = pos + 2 /* length of "{}" */;
+						i++;
+						autoIndex = true;
+						continue;
+					} else
+					{
+						char* numEnd = nullptr;
+						unsigned long idx = strtoul(&fmt[pos + 1], &numEnd, 0);
+						if (idx == LONG_MAX)
+						{
+							break;
+						} else if (idx == 0)
+						{
+							if (pos2 != pos + 2) { break; }
+							// idx==0;
+						}
+						if (i >= sz)
+						{
+							outs.append(TILOG_ERROR_FORMAT_STRING"Too much {}\n");
+							outs.resetLogLevel(ELevel::ERROR);
+							return;
+						}
+						if (autoIndex)
+						{
+							outs.append(TILOG_ERROR_FORMAT_STRING"Cannot mix format {0} with {}\n");
+							outs.resetLogLevel(ELevel::ERROR);
+							return;
+						}
+						outs.append(fmt.begin() + start, fmt.begin() + pos);
+						for_index(idx, args, Functor(), outs);
+						start = pos2 + 1 /* length of "{123}" */;
+						manIndex = true;
+						continue;
+					}
+				}
+			}
+			outs.append(fmt.begin() + start, fmt.end());
+		}
+
+
+		template <typename... Args>
+		void TiLogStreamHelper::mini_format_append(TiLogStream& outs, TiLogStringView fmt, Args&&... args)
+		{
+			mini_format_impl(outs, fmt, std::forward_as_tuple(args...));
+		}
 	}	 // namespace internal
 
 	class TiLogNoneStream
 	{
 	public:
-		inline TiLogNoneStream() noexcept = default;
+		template <typename... Args>
+		inline TiLogNoneStream(Args&&... args) noexcept {};
 
 		inline ~TiLogNoneStream() noexcept = default;
 
@@ -1745,6 +1887,12 @@ namespace internal
 		}
 
 		inline TiLogNoneStream& operator()(const char* fmt, ...) noexcept { return *this; }
+		template <typename... Args>
+		inline TiLogNoneStream& format( internal::TiLogStringView fmt,Args&&... args)
+		{
+			return *this;
+		}
+		inline TiLogNoneStream& resetLogLevel(ELevel lv) { return *this; }
 	};
 }	 // namespace tilogspace
 
