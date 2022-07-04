@@ -1219,7 +1219,7 @@ namespace tilogspace
 
 		using VecLogCachePtrPriorQueue = PriorQueue<VecLogCachePtr, Vector<VecLogCachePtr>, VecLogCachePtrLesser>;
 
-		class TiLogCore : public TiLogObject
+		class TiLogCore : public TiLogAlignedObject<TiLogCore>
 		{
 		public:
 			inline static void PushLog(TiLogBean* pBean);
@@ -1384,6 +1384,7 @@ namespace tilogspace
 		};
 
 		constexpr uint32_t TiLogCore::PollStru::s_pollPeriodus;   //fix link error in debug mode in GCC before cpp17
+		constexpr size_t TiLogCoreAlign = alignof(TiLogCore);	   // debug for TiLogCore
 
 		// clang-format off
 		static constexpr int32_t _ = -1;

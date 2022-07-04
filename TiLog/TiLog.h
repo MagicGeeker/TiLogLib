@@ -4,6 +4,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <stdlib.h>
+#include <cstddef>
 #include <atomic>
 #include <functional>
 #include <thread>
@@ -117,13 +118,16 @@
 #define TILOG_USE_USER_MODE_CLOCK  TRUE  // TRUE or FALSE,if true use user mode clock,otherwise use kernel mode clock
 #define TILOG_IS_WITH_MILLISECONDS TRUE  // TRUE or FALSE,if false no ms info in timestamp
 
-#define TILOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER "a:/" // define the defeult file printer ouput path,must a ANSI string and end with /
+#define TILOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER "a:/" // define the default file printer output path,MUST be an ANSI string and end with /
 
 //define global memory manage functions
 #define TILOG_MALLOC_FUNCTION(size) malloc(size)
 #define TILOG_CALLOC_FUNCTION(num_elements, size_of_element) calloc(num_elements, size_of_element)
 #define TILOG_REALLOC_FUNCTION(ptr, new_size) realloc(ptr, new_size)
 #define TILOG_FREE_FUNCTION(ptr) free(ptr)
+//define aligned new delete functions
+//#define TILOG_ALIGNED_OPERATOR_NEW(size,alignment) ::operator new(size,(std::align_val_t)alignment,std::nothrow)
+//#define TILOG_ALIGNED_OPERATOR_DELETE(ptr, alignment) ::operator delete(ptr,(std::align_val_t)alignment,std::nothrow)
 
 #define TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL FALSE //TRUE or FALSE,if false TiLog::SetLogLevel no effect
 #define TILOG_STATIC_LOG__LEVEL TILOG_INTERNAL_LEVEL_VERBOSE	 // set the static log level,dynamic log level will always <= static log level
@@ -272,28 +276,68 @@ namespace tilogspace
 #define TILOG_INTERFACE
 
 
-	class TiLogMemoryManager
+	typedef enum TiLogAlignVal : size_t
 	{
-	public:
-		inline static void* operator new(size_t, void* p) { return p; }
+	} tilog_align_val_t;
+
+	struct TiLogMemoryManager
+	{
+		// placement new delete
+		inline static void* operator new(size_t, void* p) noexcept { return p; }
+		inline static void operator delete(void* ptr, void* place) noexcept {};
 
 		inline static void* operator new(size_t sz) { return TILOG_MALLOC_FUNCTION(sz); }
-
 		inline static void operator delete(void* p) { TILOG_FREE_FUNCTION(p); }
 
+#ifdef TILOG_ALIGNED_OPERATOR_NEW
+		inline static void* operator new(size_t sz, tilog_align_val_t alignv) { return TILOG_ALIGNED_OPERATOR_NEW(sz, alignv); }
+		inline static void operator delete(void* p, tilog_align_val_t alignv) { TILOG_ALIGNED_OPERATOR_DELETE(p, alignv); }
+#else
+		inline static void* operator new(size_t sz, tilog_align_val_t alignv)
+		{
+			// We want it to be a power of two since
+			DEBUG_ASSERT((alignv & (alignv - 1)) == 0);
+			size_t av = alignv < 16 ? 16 : alignv;
+			char* ptr = (char*)TILOG_MALLOC_FUNCTION(sz + av);	  // alloc enough space
+
+			char* p = (char*)((uintptr_t(ptr) & ~(av - 1)) + av);	 // find the next aligned address after ptr
+			// char* p = (char*)( (uintptr_t)ptr / av * av + av );   //it is equal
+
+			static_assert(alignof(std::max_align_t) >= sizeof(void*), "fatal err,(void**)p - 1 < (void*)ptr");
+			DEBUG_ASSERT((uintptr_t)p % (av) == 0);
+			DEBUG_ASSERT((void**)p - 1 >= (void*)ptr);
+			*((void**)p - 1) = ptr;
+			return p;
+		}
+		inline static void operator delete(void* p, tilog_align_val_t alignv)
+		{
+			DEBUG_ASSERT((uintptr_t)p % (alignv) == 0);
+			void* ptr = *((void**)p - 1);
+			TILOG_FREE_FUNCTION(ptr);
+		}
+#endif
+
 		inline static void* timalloc(size_t sz) { return TILOG_MALLOC_FUNCTION(sz); }
-
 		inline static void* ticalloc(size_t num_ele, size_t sz_ele) { return TILOG_CALLOC_FUNCTION(num_ele, sz_ele); }
-
 		inline static void* tirealloc(void* p, size_t sz) { return TILOG_REALLOC_FUNCTION(p, sz); }
-
 		inline static void tifree(void* p) { TILOG_FREE_FUNCTION(p); }
+	};
+
+
+	template <typename T>
+	struct TiLogAlignedMemMgr : TiLogMemoryManager
+	{
+		inline static void* operator new(size_t sz) { return TiLogMemoryManager::operator new(sz, (tilog_align_val_t)alignof(T)); }
+		inline static void operator delete(void* p) { TiLogMemoryManager::operator delete(p, (tilog_align_val_t)alignof(T)); }
 	};
 
 	class TiLogObject : public TiLogMemoryManager
 	{
 	};
-
+	template <typename T>
+	class TiLogAlignedObject : public TiLogAlignedMemMgr<T>
+	{
+	};
 
 #define TILOG_MUTEXABLE_CLASS_MACRO(mtx_type, mtx_name)                                                                                    \
 	mtx_type mtx_name;                                                                                                                     \
@@ -902,7 +946,7 @@ namespace tilogspace
 			// it is enough
 			using steady_flag_t = int64_t;
 
-			struct steady_flag_helper
+			struct steady_flag_helper : TiLogObject
 			{
 				TILOG_SINGLE_INSTANCE_DECLARE(steady_flag_helper)
 
@@ -970,7 +1014,7 @@ namespace tilogspace
 				steady_flag_t steadyT;
 			};
 
-			class UserModeSystemClock
+			class UserModeSystemClock : public TiLogObject
 			{
 			public:
 				using Clock = std::chrono::system_clock;
@@ -1068,7 +1112,7 @@ namespace tilogspace
 			using SystemClockImpl = std::conditional<
 				SystemClockBase::is_steady, NativeSteadySystemClockWrapper, NativeNoSteadySystemClockWrapper>::type;
 
-			class UserModeSteadyClock
+			class UserModeSteadyClock : public TiLogObject
 			{
 			public:
 				using Clock = std::chrono::steady_clock;
