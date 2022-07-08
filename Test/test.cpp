@@ -669,7 +669,9 @@ TEST_CASE("terminal_multi_way_log_test_____________________")
 
 	{
 		using namespace tilogspace;
-		TILOG(ON_DEBUG & WARN) << "e27 only print on debug exe";
+		TILOG_FAST(ON_DEV & ALWAYS) << "e25 fast only print on debug exe";
+		TILOG_FAST(ON_RELEASE & ALWAYS) << "e26 fast only print on debug exe";
+		TILOG(ON_DEV & WARN) << "e27 only print on debug exe";
 		TILOG(ON_RELEASE & WARN) << "e28 only print on release exe";
 		TILOG_IF(INFO, 10 > 8) << "e29 10>8";
 		TILOG_IF(ERROR, 10 < 8) << "e30 10<8";

@@ -102,15 +102,6 @@
 #define TILOG_INTERNAL_STD_STEADY_CLOCK 1
 #define TILOG_INTERNAL_STD_SYSTEM_CLOCK 2
 
-#define TILOG_INTERNAL_LEVEL_CLOSE 2
-#define TILOG_INTERNAL_LEVEL_ALWAYS 3
-#define TILOG_INTERNAL_LEVEL_FATAL 4
-#define TILOG_INTERNAL_LEVEL_ERROR 5
-#define TILOG_INTERNAL_LEVEL_WARN 6
-#define TILOG_INTERNAL_LEVEL_INFO 7
-#define TILOG_INTERNAL_LEVEL_DEBUG 8
-#define TILOG_INTERNAL_LEVEL_VERBOSE 9
-#define TILOG_INTERNAL_LEVEL_MAX 10
 /**************************************************MACRO FOR USER**************************************************/
 #define TILOG_IS_AUTO_INIT FALSE  // TRUE or FALSE,if false must call tilogspace::TiLog::Init() once before use
 
@@ -130,7 +121,6 @@
 //#define TILOG_ALIGNED_OPERATOR_DELETE(ptr, alignment) ::operator delete(ptr,(std::align_val_t)alignment,std::nothrow)
 
 #define TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL FALSE //TRUE or FALSE,if false TiLog::SetLogLevel no effect
-#define TILOG_STATIC_LOG__LEVEL TILOG_INTERNAL_LEVEL_VERBOSE	 // set the static log level,dynamic log level will always <= static log level
 #define TILOG_ERROR_FORMAT_STRING  " !!!ERR FMT "
 
 /**************************************************user-defined data structure**************************************************/
@@ -180,13 +170,13 @@ namespace tilogspace
 		GLOBAL_CLOSED = 2,			//only used in TiLog::SetLogLevel()
 		ALWAYS, FATAL, ERROR, WARN, INFO, DEBUG, VERBOSE,
 		GLOBAL_OPEN = VERBOSE,
-		STATIC_LOG_LEVEL = TILOG_STATIC_LOG__LEVEL,
+		STATIC_LOG_LEVEL = VERBOSE, // set the static log level,dynamic log level will always <= static log level
 		MIN = ALWAYS,
 		MAX = VERBOSE + 1,
 #ifdef NDEBUG
-		ON_RELEASE = 0, ON_DEBUG = MAX
+		ON_RELEASE = 0, ON_DEV = MAX
 #else
-		ON_RELEASE = MAX, ON_DEBUG = 0
+		ON_RELEASE = MAX, ON_DEV = 0
 #endif
 	};
 
@@ -1633,11 +1623,6 @@ namespace internal
 			TiLogStreamHelper::mini_format_append(*this, fmt, std::forward<Args>(args)...);
 			return *this;
 		}
-		inline TiLogStream& resetLogLevel(ELevel lv)
-		{
-			if (!isNoUsedStream()) { this->ext()->level = LOG_PREFIX[lv]; }
-			return *this;
-		}
 	public:
 		inline TiLogStream& operator<<(bool b) { return (b ? append("true", 4) : append("false", 5)), *this; }
 		inline TiLogStream& operator<<(unsigned char c) { return append(c), *this; }
@@ -1703,6 +1688,12 @@ namespace internal
 		}
 
 	protected:
+		inline TiLogStream& resetLogLevel(ELevel lv)
+		{
+			if (!isNoUsedStream()) { this->ext()->level = LOG_PREFIX[lv]; }
+			return *this;
+		}
+
 		template <typename CharT>
 		TiLogStream& callStdFunc(const void* func)
 		{
@@ -1925,18 +1916,17 @@ namespace internal
 		}
 
 		template <typename... Args>
-		inline TiLogNoneStream& appends(Args&&...)
+		inline TiLogNoneStream& appends(Args&&...) noexcept
 		{
 			return *this;
 		}
 
 		inline TiLogNoneStream& operator()(const char* fmt, ...) noexcept { return *this; }
 		template <typename... Args>
-		inline TiLogNoneStream& format( internal::TiLogStringView fmt,Args&&... args)
+		inline TiLogNoneStream& format(internal::TiLogStringView fmt, Args&&... args) noexcept
 		{
 			return *this;
 		}
-		inline TiLogNoneStream& resetLogLevel(ELevel lv) { return *this; }
 	};
 }	 // namespace tilogspace
 
@@ -1950,6 +1940,29 @@ inline static tilogspace::TiLogStream TiLogCreateNewTiLogStream(const char* file
 	return tilogspace::TiLogStream(lv, file, fileLen, line);
 }
 
+namespace tilogspace
+{
+	template <uint32_t fileLen, uint32_t line, uint32_t level>
+	inline static auto CreateNewTiLogStream(const char* file) ->
+		typename std::conditional<level <= STATIC_LOG_LEVEL, TiLogStream, TiLogNoneStream>::type
+	{
+		static_assert(fileLen <= UINT16_MAX, "fatal error,file path is too long");
+		static_assert(line <= UINT16_MAX, "fatal error,file line too big");
+		static_assert(level >= tilogspace::ELevel::MIN, "fatal error,level overflow");
+		static_assert(level <= tilogspace::ELevel::MAX, "fatal error,level overflow");
+		return { level, file, fileLen, line };
+	}
+
+	template <uint32_t fileLen, uint32_t line>
+	inline static TiLogStream CreateNewTiLogStream(const char* file, uint32_t level)
+	{
+		static_assert(fileLen <= UINT16_MAX, "fatal error,file path is too long");
+		static_assert(line <= UINT16_MAX, "fatal error,file line too big");
+		DEBUG_ASSERT3(level >= tilogspace::ELevel::MIN, file, line, level);
+		DEBUG_ASSERT3(level <= tilogspace::ELevel::MAX, file, line, level);
+		return { level, file, fileLen, line };
+	}
+}	 // namespace tilogspace
 
 namespace tilogspace
 {
@@ -1972,21 +1985,12 @@ namespace tilogspace
 
 // clang-format off
 
-#define TILOG_INTERNAL_GET_LEVEL(LV)                                                                                                       \
-	[&]() {                                                                                                                                \
-		static_assert((sizeof(__FILE__) - 1) <= UINT16_MAX, "fatal error,file path is too long");                                          \
-		static_assert(__LINE__ <= UINT16_MAX, "fatal error,file line too big");                                                            \
-		auto lv=(LV);                                                                                                                      \
-		DEBUG_ASSERT((lv) >= tilogspace::ELevel::MIN);                                                                                     \
-		DEBUG_ASSERT((lv) <= tilogspace::ELevel::MAX);                                                                                     \
-		return (lv);                                                                                                                       \
-	}()
+#define TILOG_INTERNAL_CREATE_TILOG_STREAM_DYNAMIC_LV(lv)                                                                                             \
+	tilogspace::CreateNewTiLogStream<(sizeof(__FILE__) - 1), __LINE__>(__FILE__, (lv))
 
 #define TILOG_INTERNAL_CREATE_TILOG_STREAM(lv)                                                                                             \
-	TiLogCreateNewTiLogStream<(sizeof(__FILE__) - 1), __LINE__>(__FILE__, TILOG_INTERNAL_GET_LEVEL(lv))
+	tilogspace::CreateNewTiLogStream<(sizeof(__FILE__) - 1), __LINE__, (lv)>(__FILE__)
 
-#define TILOG_INTERNAL_CREATE_TILOG_NONE_STREAM()                                                                                           \
-	TiLogCreateNewTiLogNoneStream(TILOG_INTERNAL_GET_LEVEL(TILOG_INTERNAL_LEVEL_DEBUG))
 // clang-format on
 
 //------------------------------------------define micro for user------------------------------------------//
@@ -1995,51 +1999,19 @@ namespace tilogspace
 #define TICERR std::cerr
 #define TICLOG std::clog
 
-#if TILOG_STATIC_LOG__LEVEL >= TILOG_INTERNAL_LEVEL_ALWAYS
-#define TILOGA TILOG_INTERNAL_CREATE_TILOG_STREAM(TILOG_INTERNAL_LEVEL_ALWAYS)
-#else
-#define TILOGA TILOG_INTERNAL_CREATE_TILOG_NONE_STREAM()
-#endif
+#define TILOGA TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::ELevel::ALWAYS)
+#define TILOGF TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::ELevel::FATAL)
+#define TILOGE TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::ELevel::ERROR)
+#define TILOGW TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::ELevel::WARN)
+#define TILOGI TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::ELevel::INFO)
+#define TILOGD TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::ELevel::DEBUG)
+#define TILOGV TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::ELevel::VERBOSE)
 
-#if TILOG_STATIC_LOG__LEVEL >= TILOG_INTERNAL_LEVEL_FATAL
-#define TILOGF TILOG_INTERNAL_CREATE_TILOG_STREAM(TILOG_INTERNAL_LEVEL_FATAL)
-#else
-#define TILOGF TILOG_INTERNAL_CREATE_TILOG_NONE_STREAM()
-#endif
-
-#if TILOG_STATIC_LOG__LEVEL >= TILOG_INTERNAL_LEVEL_ERROR
-#define TILOGE TILOG_INTERNAL_CREATE_TILOG_STREAM(TILOG_INTERNAL_LEVEL_ERROR)
-#else
-#define TILOGE TILOG_INTERNAL_CREATE_TILOG_NONE_STREAM()
-#endif
-
-#if TILOG_STATIC_LOG__LEVEL >= TILOG_INTERNAL_LEVEL_WARN
-#define TILOGW TILOG_INTERNAL_CREATE_TILOG_STREAM(TILOG_INTERNAL_LEVEL_WARN)
-#else
-#define TILOGW TILOG_INTERNAL_CREATE_TILOG_NONE_STREAM()
-#endif
-
-#if TILOG_STATIC_LOG__LEVEL >= TILOG_INTERNAL_LEVEL_INFO
-#define TILOGI TILOG_INTERNAL_CREATE_TILOG_STREAM(TILOG_INTERNAL_LEVEL_INFO)
-#else
-#define TILOGI TILOG_INTERNAL_CREATE_TILOG_NONE_STREAM()
-#endif
-
-#if TILOG_STATIC_LOG__LEVEL >= TILOG_INTERNAL_LEVEL_DEBUG
-#define TILOGD TILOG_INTERNAL_CREATE_TILOG_STREAM(TILOG_INTERNAL_LEVEL_DEBUG)
-#else
-#define TILOGD TILOG_INTERNAL_CREATE_TILOG_NONE_STREAM()
-#endif
-
-#if TILOG_STATIC_LOG__LEVEL >= TILOG_INTERNAL_LEVEL_VERBOSE
-#define TILOGV TILOG_INTERNAL_CREATE_TILOG_STREAM(TILOG_INTERNAL_LEVEL_VERBOSE)
-#else
-#define TILOGV TILOG_INTERNAL_CREATE_TILOG_NONE_STREAM()
-#endif
-
-// not recommend,use TICOUT to TILOGV for better performance
-#define TILOG(lv) TILOG_INTERNAL_CREATE_TILOG_STREAM(lv)
-#define TILOG_IF(lv,cond) TILOG_INTERNAL_CREATE_TILOG_STREAM((cond)?(lv):TILOG_INTERNAL_LEVEL_MAX)
+// constexpr level only (better performace)
+#define TILOG_FAST(constexpr_lv) TILOG_INTERNAL_CREATE_TILOG_STREAM(constexpr_lv)
+// support dynamic log level
+#define TILOG(lv) TILOG_INTERNAL_CREATE_TILOG_STREAM_DYNAMIC_LV(lv)
+#define TILOG_IF(lv,cond) TILOG_INTERNAL_CREATE_TILOG_STREAM_DYNAMIC_LV((cond)?(lv):tilogspace::ELevel::MAX)
 //------------------------------------------end define micro for user------------------------------------------//
 
 

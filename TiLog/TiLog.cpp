@@ -38,7 +38,15 @@
 
 #define __________________________________________________TiLog__________________________________________________
 
-
+#define TILOG_INTERNAL_LEVEL_CLOSE 2
+#define TILOG_INTERNAL_LEVEL_ALWAYS 3
+#define TILOG_INTERNAL_LEVEL_FATAL 4
+#define TILOG_INTERNAL_LEVEL_ERROR 5
+#define TILOG_INTERNAL_LEVEL_WARN 6
+#define TILOG_INTERNAL_LEVEL_INFO 7
+#define TILOG_INTERNAL_LEVEL_DEBUG 8
+#define TILOG_INTERNAL_LEVEL_VERBOSE 9
+#define TILOG_INTERNAL_LEVEL_MAX 10
 //#define TILOG_ENABLE_PRINT_ON_RELEASE
 
 #define TILOG_INTERNAL_LOG_MAX_LEN 200
