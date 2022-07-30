@@ -1047,7 +1047,7 @@ namespace tilogspace
 				inline time_t to_time_t() const { return Clock::to_time_t(chronoTime); }
 				inline void cast_to_sec() { chronoTime = std::chrono::time_point_cast<std::chrono::seconds>(chronoTime); }
 				inline void cast_to_ms() { chronoTime = std::chrono::time_point_cast<std::chrono::milliseconds>(chronoTime); }
-				inline size_t hash() const { return chronoTime.time_since_epoch().count(); }
+				inline size_t hash() const { return (size_t)chronoTime.time_since_epoch().count(); }
 
 				inline origin_time_type get_origin_time() const { return chronoTime; }
 
@@ -1159,7 +1159,7 @@ namespace tilogspace
 
 				inline bool operator<=(const SteadyClockImpl& rhs) const { return chronoTime <= rhs.chronoTime; }
 
-				inline size_t hash() const { return chronoTime.time_since_epoch().count(); }
+				inline size_t hash() const { return (size_t)chronoTime.time_since_epoch().count(); }
 
 				inline steady_flag_t compare(const SteadyClockImpl& r) const { return (chronoTime - r.chronoTime).count(); }
 
@@ -1513,6 +1513,7 @@ namespace internal
 	{
 		friend class TILOG_INTERNAL_STRING_TYPE;
 		friend struct tilogspace::internal::TiLogStreamHelper;
+	protected:
 		using StringType = TILOG_INTERNAL_STRING_TYPE;
 		using TiLogStringView = tilogspace::internal::TiLogStringView;
 		using TiLogStreamHelper = tilogspace::internal::TiLogStreamHelper;
@@ -1553,7 +1554,7 @@ namespace internal
 			bean.line = line;
 			bean.level = tilogspace::LOG_PREFIX[lv];
 			const String* tidstr = tilogspace::internal::GetThreadIDString();
-			DEBUG_RUN(bean.tidlen = tidstr->size() - 1);
+			DEBUG_RUN(bean.tidlen = (uint8_t)(tidstr->size() - 1));
 			this->appends(*tidstr);
 		}
 
@@ -1714,6 +1715,11 @@ namespace internal
 			}
 			return *this;
 		}
+		// special constructor for s_pNoUsedStream
+		inline TiLogStream(EPlaceHolder, bool) : StringType(EPlaceHolder{}, TILOG_NO_USED_STREAM_LENGTH) { setAsNoUsedStream(); }
+		inline bool isNoUsedStream() { return ext()->level == (char)ELogLevelFlag::NO_USE; }
+		inline void setAsNoUsedStream() { ext()->level = (char)ELogLevelFlag::NO_USE; }
+		inline void bindToNoUseStream() { this->pCore = s_pNoUsedStream->pCore; }
 
 	private:
 		// force overwrite super destructor,do nothing
@@ -1744,11 +1750,6 @@ namespace internal
 			}
 		}
 
-		// special constructor for s_pNoUsedStream
-		inline TiLogStream(EPlaceHolder, bool) : StringType(EPlaceHolder{}, TILOG_NO_USED_STREAM_LENGTH) { setAsNoUsedStream(); }
-		inline bool isNoUsedStream() { return ext()->level == (char)ELogLevelFlag::NO_USE; }
-		inline void setAsNoUsedStream() { ext()->level = (char)ELogLevelFlag::NO_USE; }
-		inline void bindToNoUseStream() { this->pCore = s_pNoUsedStream->pCore; }
 
 	private:
 		thread_local static TiLogStream* s_pNoUsedStream;
