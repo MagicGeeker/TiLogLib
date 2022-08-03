@@ -1,16 +1,6 @@
 #include "inc.h"
 #include "func.h"
 
-bool InitFunc()
-{
-	static bool r = []() {
-		tilogspace::TiLog::Init();
-		tilogspace::TiLog::InitForThisThread();
-		return true;
-	}();
-	return r;
-}
-bool s_main_init = InitFunc();
 synccout_t mycout;
 
 #if USE_MAIN_TEST == TEST_WAY

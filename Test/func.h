@@ -16,7 +16,7 @@ bool InitFunc();
 
 struct ThreadIniter
 {
-	void operator()() { tilogspace::TiLog::InitForThisThread(); }
+	void operator()() {}
 };
 using TestThread = MThread<ThreadIniter>;
 

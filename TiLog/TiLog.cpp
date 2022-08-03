@@ -16,6 +16,7 @@
 #include <atomic>
 #include <utility>
 
+#define TILOG_INTERNAL_MACROS
 #include "TiLog.h"
 #ifdef TILOG_OS_WIN
 #ifndef NOMINMAX
@@ -116,13 +117,11 @@ namespace tilogspace
 		namespace tilogtimespace
 		{
 			TILOG_SINGLE_INSTANCE_DECLARE_OUTER(steady_flag_helper)
-			TILOG_SINGLE_INSTANCE_DECLARE_OUTER(UserModeSystemClock)
-			TILOG_SINGLE_INSTANCE_DECLARE_OUTER(UserModeSteadyClock)
 			SteadyClockImpl::SystemTimePoint SteadyClockImpl::initSystemTime{};
 			SteadyClockImpl::TimePoint SteadyClockImpl::initSteadyTime{};
 		}	 // namespace tilogtimespace
 	}		 // namespace internal
-	thread_local TiLogStream* TiLogStream::s_pNoUsedStream = new TiLogStream(EPlaceHolder{}, false);
+
 };	  // namespace tilogspace
 
 namespace tiloghelperspace
@@ -861,7 +860,7 @@ namespace tilogspace
 		class TiLogNonePrinter : public TiLogPrinter
 		{
 		public:
-			TILOG_SINGLE_INSTANCE_DECLARE(TiLogNonePrinter)
+			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE(TiLogNonePrinter)
 			EPrinterID getUniqueID() const override { return PRINTER_ID_NONE; };
 			void onAcceptLogs(MetaData metaData) override {}
 			void sync() override{};
@@ -875,7 +874,7 @@ namespace tilogspace
 		{
 
 		public:
-			TILOG_SINGLE_INSTANCE_DECLARE(TiLogTerminalPrinter)
+			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE(TiLogTerminalPrinter)
 
 			void onAcceptLogs(MetaData metaData) override;
 			void sync() override;
@@ -889,7 +888,7 @@ namespace tilogspace
 		{
 
 		public:
-			TILOG_SINGLE_INSTANCE_DECLARE(TiLogFilePrinter)
+			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE(TiLogFilePrinter)
 
 			void onAcceptLogs(MetaData metaData) override;
 			void sync() override;
@@ -1133,7 +1132,7 @@ namespace tilogspace
 			{
 				stop();
 				DEBUG_PRINTI("loop %p wait end loop, thread id %s\n", this, looptid.c_str());
-				if (loopThread.joinable()) { loopThread.join(); }
+				if (loopThread.joinable()) { loopThread.join(); }	 // wait for not handled tasks
 				DEBUG_PRINTI("loop %p end loop, thread id %s\n", this, looptid.c_str());
 			}
 
@@ -1227,7 +1226,7 @@ namespace tilogspace
 
 		using VecLogCachePtrPriorQueue = PriorQueue<VecLogCachePtr, Vector<VecLogCachePtr>, VecLogCachePtrLesser>;
 
-		class TiLogCore : public TiLogAlignedObject<TiLogCore>
+		class TiLogCore : public TiLogObject
 		{
 		public:
 			inline static void PushLog(TiLogBean* pBean);
@@ -1236,9 +1235,7 @@ namespace tilogspace
 
 			inline static void ClearPrintedLogsNumber();
 
-			TILOG_SINGLE_INSTANCE_DECLARE(TiLogCore)
-
-			inline static ThreadStru* InitForEveryThread();
+			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE(TiLogCore)
 
 			inline static void InitPrinterThreadBeforeRun();
 
@@ -1246,12 +1243,14 @@ namespace tilogspace
 			inline static void Sync();
 			inline static void SyncAndSetPrinter(callback_t func);
 
-		private:
 			TiLogCore();
+			~TiLogCore();
+
+		private:
 
 			inline void CreateCoreThread(CoreThrdStruBase& thrd);
 
-			void AtExit();
+			void DestroyThreadStrus(List<ThreadStru*>& listStru);
 
 			bool Prepared();
 
@@ -1261,7 +1260,7 @@ namespace tilogspace
 
 			void ISyncAndSetPrinter(callback_t func);
 
-			inline ThreadStru* IInitForEveryThread();
+			inline ThreadStru* GetThreadStru(List<ThreadStru*>* pDstQueue = nullptr);
 
 			void IPushLog(TiLogBean* pBean);
 
@@ -1310,18 +1309,20 @@ namespace tilogspace
 
 			inline void IInitCoreThreadBeforeRun(List<ThreadStru*>& dstQueue, atomic_int32_t& counter);
 
-			inline bool LocalCircularQueuePushBack(TiLogBean* obj);
+			inline bool LocalCircularQueuePushBack(ThreadStru& stru, TiLogBean* obj);
 
 			inline bool MoveLocalCacheToGlobal(ThreadStru& bean);
 
 		private:
 			static constexpr size_t GLOBAL_SIZE = TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE * TILOG_MERGE_QUEUE_RATE;
+			static constexpr uint64_t MAGIC_NUMBER = 0x1234abcd1234abcd;
 
 			thread_local static ThreadStru* s_pThreadLocalStru;
 
+			uint64_t mMagicNumber{ MAGIC_NUMBER };
 			atomic_int32_t mExistPrinters{ 0 };
 			atomic_int32_t mExistThreads{ 0 };
-			bool mToExit{};
+			atomic_bool mToExit{};
 			atomic_bool mInited{};
 
 			atomic_uint64_t mPrintedLogs{ 0 };
@@ -1473,7 +1474,7 @@ namespace tilogspace
 			friend class tilogspace::TiLogStream;
 
 		public:
-			TILOG_SINGLE_INSTANCE_DECLARE(TiLogPrinterManager)
+			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE(TiLogPrinterManager)
 
 			static printer_ids_t GetPrinters();
 			static bool IsPrinterActive(EPrinterID printer);
@@ -1489,6 +1490,7 @@ namespace tilogspace
 			~TiLogPrinterManager();
 
 		public:	   // internal public
+			static void DestroyPrinters();
 			void addPrinter(TiLogPrinter* printer);
 			static void pushLogsToPrinters(IOBeanSharedPtr spLogs);
 			static void pushLogsToPrinters(IOBeanSharedPtr spLogs, const printer_ids_t& printerIds);
@@ -1600,10 +1602,10 @@ namespace tilogspace
 #endif
 
 
-		TILOG_SINGLE_INSTANCE_DECLARE_OUTER(TiLogNonePrinter)
+		TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_OUTER(TiLogNonePrinter)
 
 #ifdef __________________________________________________TiLogTerminalPrinter__________________________________________________
-		TILOG_SINGLE_INSTANCE_DECLARE_OUTER(TiLogTerminalPrinter)
+		TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_OUTER(TiLogTerminalPrinter)
 
 		TiLogTerminalPrinter::TiLogTerminalPrinter(){};
 		void TiLogTerminalPrinter::onAcceptLogs(MetaData metaData) { fwrite(metaData->logs, metaData->logs_size, 1, stdout); }
@@ -1615,7 +1617,7 @@ namespace tilogspace
 
 
 #ifdef __________________________________________________TiLogFilePrinter__________________________________________________
-		TILOG_SINGLE_INSTANCE_DECLARE_OUTER(TiLogFilePrinter)
+		TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_OUTER(TiLogFilePrinter)
 
 		TiLogFilePrinter::TiLogFilePrinter()
 		{
@@ -1697,7 +1699,7 @@ namespace tilogspace
 #endif
 
 #ifdef __________________________________________________TiLogPrinterManager__________________________________________________
-		TILOG_SINGLE_INSTANCE_DECLARE_OUTER(TiLogPrinterManager)
+		TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_OUTER(TiLogPrinterManager)
 		TiLogPrinterManager::TiLogPrinterManager()
 			: m_printers(GetPrinterNum()), m_dest(DEFAULT_ENABLED_PRINTERS), m_level(STATIC_LOG_LEVEL)
 		{
@@ -1708,13 +1710,14 @@ namespace tilogspace
 			DoRegisterForPrinter<TILOG_REGISTER_PRINTERS>(*this);
 		}
 
-		TiLogPrinterManager::~TiLogPrinterManager()
+		void TiLogPrinterManager::DestroyPrinters()
 		{
-			for (TiLogPrinter* x : m_printers)
+			for (TiLogPrinter* x : TiLogPrinterManager::getRInstance().m_printers)
 			{
-				delete x;
+				x->~TiLogPrinter();   //wait for printers
 			}
 		}
+		TiLogPrinterManager::~TiLogPrinterManager() {}
 		printer_ids_t TiLogPrinterManager::GetPrinters() { return getInstance()->m_dest; }
 		bool TiLogPrinterManager::IsPrinterActive(EPrinterID printer) { return getInstance()->m_dest & printer; }
 		bool TiLogPrinterManager::IsPrinterInPrinters(EPrinterID printer, printer_ids_t printers) { return printer & printers; }
@@ -1806,33 +1809,16 @@ namespace tilogspace
 	namespace internal
 	{
 #ifdef __________________________________________________TiLogCore__________________________________________________
-		TILOG_SINGLE_INSTANCE_DECLARE_OUTER(TiLogCore)
-#if TILOG_IS_AUTO_INIT
-		thread_local ThreadStru* TiLogCore::s_pThreadLocalStru = TiLogCore::getRInstance().InitForEveryThread();
-#else
-		thread_local ThreadStru* TiLogCore::s_pThreadLocalStru = nullptr;
-#endif
+
+		TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_OUTER(TiLogCore)
+
 		TiLogCore::TiLogCore()
 		{
-#if TILOG_USE_USER_MODE_CLOCK
-#if TILOG_TIME_IMPL_TYPE == TILOG_INTERNAL_STD_STEADY_CLOCK
-			tilogspace::internal::tilogtimespace::UserModeSteadyClock::init();
-			tilogspace::internal::tilogtimespace::SteadyClockImpl::init();
-#elif TILOG_TIME_IMPL_TYPE == TILOG_INTERNAL_STD_SYSTEM_CLOCK
-			tilogspace::internal::tilogtimespace::UserModeSystemClock::init();
-#endif
-#else
-#if TILOG_TIME_IMPL_TYPE == TILOG_INTERNAL_STD_STEADY_CLOCK
-			tilogspace::internal::tilogtimespace::SteadyClockImpl::init();
-#endif
-#endif
-			
 			CreateCoreThread(mPoll);
 			CreateCoreThread(mMerge);
 			CreateCoreThread(mDeliver);
 			CreateCoreThread(mGC);
 
-			atexit([] { getRInstance().AtExit(); });
 			mInited = true;
 		}
 
@@ -1843,11 +1829,10 @@ namespace tilogspace
 			th.detach();
 		}
 
-		inline bool TiLogCore::LocalCircularQueuePushBack(TiLogBean* obj)
+		inline bool TiLogCore::LocalCircularQueuePushBack(ThreadStru& stru, TiLogBean* obj)
 		{
-			// DEBUG_ASSERT(!s_pThreadLocalStru->qCache.full());
-			s_pThreadLocalStru->qCache.emplace_back(obj);
-			return s_pThreadLocalStru->qCache.full();
+			stru.qCache.emplace_back(obj);
+			return stru.qCache.full();
 		}
 
 		inline bool TiLogCore::MoveLocalCacheToGlobal(ThreadStru& bean)
@@ -1860,34 +1845,26 @@ namespace tilogspace
 			return mMerge.mRawDatas.may_full();
 		}
 
-		inline ThreadStru* TiLogCore::InitForEveryThread()
+		ThreadStru* TiLogCore::GetThreadStru(List<ThreadStru*>* pDstQueue)
 		{
-			DEBUG_ASSERT(getInstance() != nullptr);			// must call Init() first
-			DEBUG_ASSERT(s_pThreadLocalStru == nullptr);	// must be called only once
-			return getRInstance().IInitForEveryThread();
+			static thread_local ThreadStru* p = [&, pDstQueue] {
+				ThreadStru* pStru = new ThreadStru(TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE);
+				DEBUG_ASSERT(pStru != nullptr);
+				DEBUG_ASSERT(pStru->tid != nullptr);
+
+				synchronized(mThreadStruQueue)
+				{
+					DEBUG_PRINTV("availQueue insert thrd tid= %s\n", pStru->tid->c_str());
+					pDstQueue->emplace_back(pStru);
+				}
+				unique_lock<mutex> lk(pStru->thrdExistMtx);
+				notify_all_at_thread_exit(pStru->thrdExistCV, std::move(lk));
+				return pStru;
+			}();
+			return p;
 		}
 
-		ThreadStru* TiLogCore::IInitForEveryThread()
-		{
-			s_pThreadLocalStru = new ThreadStru(TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE);
-			DEBUG_ASSERT(s_pThreadLocalStru != nullptr);
-			DEBUG_ASSERT(s_pThreadLocalStru->tid != nullptr);
-
-			synchronized(mThreadStruQueue.mAvailQueueMtx) {}
-			synchronized(mThreadStruQueue)
-			{
-				DEBUG_PRINTV("availQueue insert thrd tid= %s\n", s_pThreadLocalStru->tid->c_str());
-				mThreadStruQueue.availQueue.emplace_back(s_pThreadLocalStru);
-			}
-			unique_lock<mutex> lk(s_pThreadLocalStru->thrdExistMtx);
-			notify_all_at_thread_exit(s_pThreadLocalStru->thrdExistCV, std::move(lk));
-			return s_pThreadLocalStru;
-		}
-
-		//根据c++11标准，在atexit函数构造前的全局变量会在atexit函数结束后析构，
-		//在atexit后构造的函数会先于atexit函数析构，
-		// 故用到全局变量需要在此函数前构造
-		void TiLogCore::AtExit()
+		TiLogCore::~TiLogCore()
 		{
 			// this program run too fast ,even main function end before Prepared
 			WaitPrepared("AtExit: Wow,main function end too fast\n");
@@ -1904,8 +1881,29 @@ namespace tilogspace
 			{
 				this_thread::yield();
 			}
+			DestroyThreadStrus(mThreadStruQueue.priThrdQueue);
+			TiLogPrinterManager::DestroyPrinters();   //make sure printers output all logs and free to SyncedIOBeanPool
+			DestroyThreadStrus(mThreadStruQueue.printerQueue);
 			DEBUG_PRINTI("exit\n");
-			TiLog::Destroy();
+		}
+
+		void TiLogCore::DestroyThreadStrus(List<ThreadStru*>& listStru)
+		{
+			for (auto it = listStru.begin(); !listStru.empty();)
+			{
+				ThreadStru& threadStru = *(*it);
+				std::mutex& mtx = threadStru.thrdExistMtx;
+
+				while (true)
+				{
+					mtx.lock();	   // wait for  thread end, unlock by notify_all_at_thread_exit
+					mtx.unlock();
+					DEBUG_PRINTV("listStru %p delete internal thrd %s\n", &listStru,threadStru.tid->c_str());
+					delete &threadStru;								 // delete current thread stru
+					it = listStru.erase(it);	 // move to next
+					break;
+				}
+			}
 		}
 
 		bool TiLogCore::Prepared() { return mExistPrinters == TiLogPrinterManager::GetPrinterNum() && mExistThreads == 4; }
@@ -1967,16 +1965,15 @@ namespace tilogspace
 
 		inline void TiLogCore::PushLog(TiLogBean* pBean)
 		{
-			DEBUG_ASSERT(getInstance() != nullptr);			// must call Init() first
-			DEBUG_ASSERT(s_pThreadLocalStru != nullptr);	// must call InitForEveryThread() first
+			DEBUG_ASSERT(getInstance()->mMagicNumber == MAGIC_NUMBER);			// assert TiLogCore inited
 			getRInstance().IPushLog(pBean);
 		}
 
 		void TiLogCore::IPushLog(TiLogBean* pBean)
 		{
-			ThreadStru& stru = *s_pThreadLocalStru;
+			ThreadStru& stru = *GetThreadStru(&mThreadStruQueue.availQueue);
 			unique_lock<ThreadLocalSpinMutex> lk_local(stru.spinMtx);
-			bool isLocalFull = LocalCircularQueuePushBack(pBean);
+			bool isLocalFull = LocalCircularQueuePushBack(stru, pBean);
 
 			if (isLocalFull)
 			{
@@ -2545,14 +2542,7 @@ namespace tilogspace
 			return;
 		}
 
-		void TiLogCore::InitPrinterThreadBeforeRun()
-		{
-			while (getInstance() == nullptr)
-			{
-				this_thread::yield();
-			}
-			getRInstance().IInitPrinterThreadBeforeRun();
-		}
+		void TiLogCore::InitPrinterThreadBeforeRun() { getRInstance().IInitPrinterThreadBeforeRun(); }
 		void TiLogCore::IInitPrinterThreadBeforeRun() { IInitCoreThreadBeforeRun(mThreadStruQueue.printerQueue, mExistPrinters); }
 
 		inline void TiLogCore::InitInternalThreadBeforeRun() { IInitCoreThreadBeforeRun(mThreadStruQueue.priThrdQueue, mExistThreads); }
@@ -2563,17 +2553,7 @@ namespace tilogspace
 			{
 				this_thread::yield();
 			}
-			if (s_pThreadLocalStru == nullptr) { goto func_end; }
-			synchronized(mThreadStruQueue)
-			{
-				auto it = std::find(mThreadStruQueue.availQueue.begin(), mThreadStruQueue.availQueue.end(), s_pThreadLocalStru);
-				DEBUG_ASSERT(it != mThreadStruQueue.availQueue.end());
-				mThreadStruQueue.availQueue.erase(it);
-				// thrdExistMtx and thrdExistCV is not deleted here
-				// erase from availQueue,and s_pThreadLocalStru will be deleted by system at exit,no need to delete here.
-				dstQueue.emplace_back(s_pThreadLocalStru);
-			}
-		func_end:
+			GetThreadStru(&dstQueue);
 			++counter;
 			return;
 		}
@@ -2612,6 +2592,31 @@ namespace tilogspace
 }	 // namespace tilogspace
 using namespace tilogspace::internal;
 
+namespace tilogspace
+{
+	namespace internal
+	{
+		inline static void InitClocks()
+		{
+			tilogspace::internal::tilogtimespace::steady_flag_helper::init();
+#if TILOG_USE_USER_MODE_CLOCK
+			tilogspace::internal::tilogtimespace::UserModeClock::init();
+#endif
+#if TILOG_TIME_IMPL_TYPE == TILOG_INTERNAL_STD_STEADY_CLOCK
+			tilogspace::internal::tilogtimespace::SteadyClockImpl::init();
+#endif
+		}
+
+		inline static void UnInitClocks()
+		{
+#if TILOG_USE_USER_MODE_CLOCK
+			tilogspace::internal::tilogtimespace::UserModeClock::uninit();
+#endif
+			tilogspace::internal::tilogtimespace::steady_flag_helper::uninit();
+		}
+	}	 // namespace internal
+}	 // namespace tilogspace
+
 
 namespace tilogspace
 {
@@ -2649,28 +2654,18 @@ namespace tilogspace
 		TiLogCore::SyncAndSetPrinter([printerIds] { AsyncSetPrinters(printerIds); });
 	}
 
-#if !TILOG_IS_AUTO_INIT
-	void TiLog::Init()
+	TiLog::TiLog()
 	{
-		tilogspace::internal::tilogtimespace::steady_flag_helper::init();
+		tilogspace::internal::InitClocks();
 		tilogspace::internal::TiLogPrinterManager::init();
 		tilogspace::internal::TiLogCore::init();
 	}
-	void TiLog::InitForThisThread() { tilogspace::internal::TiLogCore::InitForEveryThread(); }
-#endif
 
-	void TiLog::Destroy()
+	TiLog::~TiLog()
 	{
-		delete tilogspace::internal::tilogtimespace::steady_flag_helper::getInstance();
-		delete tilogspace::internal::TiLogPrinterManager::getInstance();
-		delete tilogspace::internal::TiLogCore::getInstance();
-#if TILOG_USE_USER_MODE_CLOCK
-#if TILOG_TIME_IMPL_TYPE == TILOG_INTERNAL_STD_STEADY_CLOCK
-		tilogspace::internal::tilogtimespace::UserModeSteadyClock::uninit();
-#elif TILOG_TIME_IMPL_TYPE == TILOG_INTERNAL_STD_SYSTEM_CLOCK
-		tilogspace::internal::tilogtimespace::UserModeSystemClock::uninit();
-#endif
-#endif
+		TiLogCore::uninit();
+		tilogspace::internal::TiLogPrinterManager::uninit();
+		tilogspace::internal::UnInitClocks();
 	}
 
 #if TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL == TRUE
@@ -2681,4 +2676,22 @@ namespace tilogspace
 #endif
 
 
+}	 // namespace tilogspace
+
+namespace tilogspace
+{
+	namespace internal
+	{
+		static uint32_t tilog_nifty_counter;	// zero initialized at load time
+		static uint8_t tilogbuf[sizeof(TiLog)];
+
+		TiLogNiftyCounterIniter::TiLogNiftyCounterIniter()
+		{
+			if (tilog_nifty_counter++ == 0) new ((TiLog*)&tilogbuf) TiLog();	// placement new
+		}
+		TiLogNiftyCounterIniter::~TiLogNiftyCounterIniter()
+		{
+			if (--tilog_nifty_counter == 0) ((TiLog*)&tilogbuf)->~TiLog();
+		}
+	}	 // namespace internal
 }	 // namespace tilogspace

@@ -103,8 +103,6 @@
 #define TILOG_INTERNAL_STD_SYSTEM_CLOCK 2
 
 /**************************************************MACRO FOR USER**************************************************/
-#define TILOG_IS_AUTO_INIT FALSE  // TRUE or FALSE,if false must call tilogspace::TiLog::Init() once before use
-
 #define TILOG_TIME_IMPL_TYPE TILOG_INTERNAL_STD_STEADY_CLOCK //choose what clock to use
 #define TILOG_USE_USER_MODE_CLOCK  TRUE  // TRUE or FALSE,if true use user mode clock,otherwise use kernel mode clock
 #define TILOG_IS_WITH_MILLISECONDS TRUE  // TRUE or FALSE,if false no ms info in timestamp
@@ -370,6 +368,7 @@ namespace tilogspace
 		inline void unlock() { mLockedFlag.clear(); }
 	};
 
+// clang-format off
 #define TILOG_AUTO_SINGLE_INSTANCE_DECLARE(CLASS_NAME, ...)                                                                                \
 	inline static CLASS_NAME* getInstance()                                                                                                \
 	{                                                                                                                                      \
@@ -378,12 +377,6 @@ namespace tilogspace
 	};                                                                                                                                     \
 	inline static CLASS_NAME& getRInstance() { return *getInstance(); };
 
-#if TILOG_IS_AUTO_INIT
-#define TILOG_SINGLE_INSTANCE_DECLARE_OUTER(CLASS_NAME)
-#define TILOG_SINGLE_INSTANCE_DECLARE(CLASS_NAME, ...)                                                                                     \
-	TILOG_AUTO_SINGLE_INSTANCE_DECLARE(CLASS_NAME)                                                                                         \
-	static inline void init() {}
-#else
 #define TILOG_SINGLE_INSTANCE_DECLARE_OUTER(CLASS_NAME) CLASS_NAME* CLASS_NAME::s_instance;
 #define TILOG_SINGLE_INSTANCE_DECLARE(CLASS_NAME, ...)                                                                                     \
 	inline static CLASS_NAME* getInstance() { return CLASS_NAME::s_instance; };                                                            \
@@ -393,8 +386,29 @@ namespace tilogspace
 		DEBUG_ASSERT(CLASS_NAME::s_instance == nullptr); /*must be called only once*/                                                      \
 		CLASS_NAME::s_instance = new CLASS_NAME(__VA_ARGS__);                                                                              \
 	}                                                                                                                                      \
+	static inline void uninit()                                                                                                            \
+	{                                                                                                                                      \
+		DEBUG_ASSERT(CLASS_NAME::s_instance != nullptr);                                                                                   \
+		delete CLASS_NAME::s_instance;                                                                                                     \
+	}                                                                                                                                      \
 	static CLASS_NAME* s_instance;
-#endif
+
+#define TILOG_CONCAT(a, b) TILOG_CONCAT_INNER(a, b)
+#define TILOG_CONCAT_INNER(a, b) a##b
+#define TILOG_SINGLE_INSTANCE_UNIQUE_NAME TILOG_CONCAT(s_instance, __LINE__)
+
+#define TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_OUTER(CLASS_NAME)                                                         			   \
+	alignas(alignof(CLASS_NAME)) static uint8_t TILOG_SINGLE_INSTANCE_UNIQUE_NAME[sizeof(CLASS_NAME)];                         			   \
+	void CLASS_NAME::init() { new ((void*)&TILOG_SINGLE_INSTANCE_UNIQUE_NAME) CLASS_NAME(); }                                  			   \
+	void CLASS_NAME::uninit() { reinterpret_cast<CLASS_NAME*>(&TILOG_SINGLE_INSTANCE_UNIQUE_NAME)->~CLASS_NAME(); }            			   \
+	CLASS_NAME* CLASS_NAME::getInstance() { return reinterpret_cast<CLASS_NAME*>(&TILOG_SINGLE_INSTANCE_UNIQUE_NAME); }        			   \
+	CLASS_NAME& CLASS_NAME::getRInstance() { return *reinterpret_cast<CLASS_NAME*>(&TILOG_SINGLE_INSTANCE_UNIQUE_NAME); }
+#define TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE(CLASS_NAME, ...)                                                          			   \
+	inline static CLASS_NAME* getInstance();                                                                                   			   \
+	inline static CLASS_NAME& getRInstance();                                                                                  			   \
+	inline static void init();                                                                                                 			   \
+	inline static void uninit();
+	// clang-format on
 
 	struct TiLogObjectPoolFeat
 	{
@@ -1004,29 +1018,32 @@ namespace tilogspace
 				steady_flag_t steadyT;
 			};
 
-			class UserModeSystemClock : public TiLogObject
+			//Clock:  std::chrono::steady_clock  std::chrono::system_clock
+			template<typename Clock>
+			class UserModeClockT : public TiLogObject
 			{
 			public:
-				using Clock = std::chrono::system_clock;
-				using TimePoint = std::chrono::system_clock::time_point;
-				constexpr static bool is_steady=true;
+				using TimePoint = typename Clock::time_point;
+				constexpr static bool is_steady = true;
 
-				UserModeSystemClock()
+				UserModeClockT()
 				{
 					th = std::thread([this] {
 						while (!toExit)
 						{
 							TimePoint tp = Clock::now();
-							if (s_now.load() < tp) { s_now = tp; }
+							if (Clock::is_steady || s_now.load() < tp) { s_now = tp; }
 							std::this_thread::sleep_for(std::chrono::microseconds(TILOG_USER_MODE_CLOCK_UPDATE_US));
 						}
-						delete this;
 					});
-					th.detach();
+				}
+				~UserModeClockT()
+				{
+					getRInstance().toExit = true;
+					if (th.joinable()) { th.join(); }
 				}
 				static TimePoint now() noexcept { return getRInstance().s_now.load(); };
-				static void uninit() { getRInstance().toExit = true; }
-				TILOG_SINGLE_INSTANCE_DECLARE(UserModeSystemClock)
+				TILOG_SINGLE_INSTANCE_DECLARE(UserModeClockT<Clock>)
 				static time_t to_time_t(const TimePoint& point) { return (Clock::to_time_t(getRInstance().s_now)); }
 
 			protected:
@@ -1035,10 +1052,19 @@ namespace tilogspace
 				volatile bool toExit{};
 			};
 
+			// template static member declare
+			template <typename Clock>
+			TILOG_SINGLE_INSTANCE_DECLARE_OUTER(UserModeClockT<Clock>)
+
+			using UserModeClock = typename std::conditional<
+				TILOG_TIME_IMPL_TYPE == TILOG_INTERNAL_STD_STEADY_CLOCK, UserModeClockT<std::chrono::steady_clock>,
+				UserModeClockT<std::chrono::system_clock>>::type;
+
 			TILOG_ABSTRACT class SystemClockBase : BaseTimeImpl
 			{
 			public:
-				using Clock = std::conditional<TILOG_USE_USER_MODE_CLOCK, UserModeSystemClock, std::chrono::system_clock>::type;
+				using Clock =
+					std::conditional<TILOG_USE_USER_MODE_CLOCK, UserModeClockT<std::chrono::system_clock>, std::chrono::system_clock>::type;
 				using TimePoint = std::chrono::system_clock::time_point;
 				using origin_time_type = TimePoint;
 				constexpr static bool is_steady = Clock::is_steady;
@@ -1102,38 +1128,12 @@ namespace tilogspace
 			using SystemClockImpl = std::conditional<
 				SystemClockBase::is_steady, NativeSteadySystemClockWrapper, NativeNoSteadySystemClockWrapper>::type;
 
-			class UserModeSteadyClock : public TiLogObject
-			{
-			public:
-				using Clock = std::chrono::steady_clock;
-				using TimePoint = std::chrono::steady_clock::time_point;
-
-				UserModeSteadyClock()
-				{
-					th = std::thread([this] {
-						while (!toExit)
-						{
-							s_now = Clock ::now();
-							std::this_thread::sleep_for(std::chrono::microseconds(TILOG_USER_MODE_CLOCK_UPDATE_US));
-						}
-						delete this;
-					});
-					th.detach();
-				}
-				static TimePoint now() noexcept { return getRInstance().s_now.load(); };
-				static void uninit() { getRInstance().toExit = true; }
-				TILOG_SINGLE_INSTANCE_DECLARE(UserModeSteadyClock)
-
-			protected:
-				std::thread th{};
-				std::atomic<TimePoint> s_now{Clock::now()};
-				volatile bool toExit{ };
-			};
 
 			class SteadyClockImpl : public BaseTimeImpl
 			{
 			public:
-				using Clock = std::conditional<TILOG_USE_USER_MODE_CLOCK, UserModeSteadyClock, std::chrono::steady_clock>::type;
+				using Clock =
+					std::conditional<TILOG_USE_USER_MODE_CLOCK, UserModeClockT<std::chrono::steady_clock>, std::chrono::steady_clock>::type;
 				using TimePoint = std::chrono::steady_clock::time_point;
 				using origin_time_type = TimePoint;
 				using steady_flag_t = std::chrono::steady_clock::rep;
@@ -1327,6 +1327,7 @@ namespace tilogspace
 	{
 		class TiLogPrinterManager;
 		class TiLogPrinterData;
+		struct TiLogNiftyCounterIniter;
 	}	 // namespace internal
 	TILOG_ABSTRACT class TiLogPrinter : public TiLogObject
 	{
@@ -1362,6 +1363,7 @@ namespace tilogspace
 #ifdef H__________________________________________________TiLog__________________________________________________
 	class TiLog final
 	{
+		friend struct internal::TiLogNiftyCounterIniter;
 	public:
 		TILOG_COMPLEXITY_FOR_THESE_FUNCTIONS(TILOG_TIME_COMPLEXITY_O(1), TILOG_SPACE_COMPLEXITY_O(1))
 		// printer must be static and always valid,so it can NOT be removed but can be disabled
@@ -1400,15 +1402,6 @@ namespace tilogspace
 		// set printed log number=0
 		static void ClearPrintedLogsNumber();
 
-	public:
-#if TILOG_IS_AUTO_INIT
-		static void Init(){};
-		static void InitForThisThread(){};
-#else
-		static void Init();					// This function is NOT thread safe.Make sure call ONLY ONCE before first log.
-		static void InitForThisThread();	// Must be called for every thread.Make sure call ONLY ONCE before first log of thread.
-		// before call InitForThisThread(),must call Init() first
-#endif
 
 	public:
 		TILOG_COMPLEXITY_FOR_THESE_FUNCTIONS(TILOG_TIME_COMPLEXITY_O(1), TILOG_SPACE_COMPLEXITY_O(1))
@@ -1426,12 +1419,22 @@ namespace tilogspace
 		static void Destroy();
 
 	private:
-		TiLog() = delete;
+		TiLog();
 
-		~TiLog() = delete;
+		~TiLog();
 	};
 
 #endif
+
+	namespace internal
+	{
+		// nifty counter for TiLog
+		static struct TiLogNiftyCounterIniter
+		{
+			TiLogNiftyCounterIniter();
+			~TiLogNiftyCounterIniter();
+		} tiLogNiftyCounterIniter;
+	}	 // namespace internal
 
 	class TiLogNoneStream;
 	namespace internal
@@ -1719,7 +1722,7 @@ namespace internal
 		inline TiLogStream(EPlaceHolder, bool) : StringType(EPlaceHolder{}, TILOG_NO_USED_STREAM_LENGTH) { setAsNoUsedStream(); }
 		inline bool isNoUsedStream() { return ext()->level == (char)ELogLevelFlag::NO_USE; }
 		inline void setAsNoUsedStream() { ext()->level = (char)ELogLevelFlag::NO_USE; }
-		inline void bindToNoUseStream() { this->pCore = s_pNoUsedStream->pCore; }
+		inline void bindToNoUseStream() { this->pCore = get_no_used_stream()->pCore; }
 
 	private:
 		// force overwrite super destructor,do nothing
@@ -1745,14 +1748,17 @@ namespace internal
 				} else
 				{
 					ensureCapNoCheck(ensure_cap);
-					s_pNoUsedStream->pCore = this->pCore;	 // update the s_pNoUsedStream->pCore
+					get_no_used_stream()->pCore = this->pCore;	 // update the s_pNoUsedStream->pCore
 				}
 			}
 		}
 
 
-	private:
-		thread_local static TiLogStream* s_pNoUsedStream;
+		inline static TiLogStream* get_no_used_stream()
+		{
+			static thread_local auto s_pNoUsedStream = new TiLogStream(EPlaceHolder{}, false);
+			return s_pNoUsedStream;
+		}
 	};
 #undef TILOG_INTERNAL_STRING_TYPE
 
@@ -1770,7 +1776,7 @@ namespace internal
 			auto ptr = TiLogStream::get_core_from_ext(p);
 			tifree(ptr);
 		}
-		inline TiLogStream* TiLogStreamHelper::get_no_used_stream() { return TiLogStream::s_pNoUsedStream; }
+		inline TiLogStream* TiLogStreamHelper::get_no_used_stream() { return TiLogStream::get_no_used_stream(); }
 		inline void TiLogStreamHelper::free_no_used_stream(TiLogStream* p)
 		{
 			p->ext()->level = (char)ELogLevelFlag::INVALID;
@@ -1968,7 +1974,6 @@ namespace tilogspace
 namespace tilogspace
 {
 	static_assert(sizeof(size_type) <= sizeof(size_t), "fatal err!");
-	static_assert(true || TILOG_IS_AUTO_INIT, "this micro must be defined");
 	static_assert(true || TILOG_IS_WITH_MILLISECONDS, "this micro must be defined");
 	static_assert(true || TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL, "this micro must be defined");
 
@@ -2015,5 +2020,10 @@ namespace tilogspace
 #define TILOG_IF(lv,cond) TILOG_INTERNAL_CREATE_TILOG_STREAM_DYNAMIC_LV((cond)?(lv):tilogspace::ELevel::MAX)
 //------------------------------------------end define micro for user------------------------------------------//
 
+
+#ifndef TILOG_INTERNAL_MACROS
+//TODO
+#undef TILOG_SINGLE_INSTANCE_UNIQUE_NAME
+#endif
 
 #endif	  // TILOG_TILOG_H
