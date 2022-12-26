@@ -1594,20 +1594,23 @@ namespace internal
 			size_type size_pre = this->size();
 			va_list args;
 			va_start(args, fmt);
+			va_list args2;
+			va_copy(args2, args);
 			int sz = vsnprintf(NULL, 0, fmt, args);
+			va_end(args);
 			if (sz > 0)
 			{
 				this->reserve(size_pre + sz);
-				vsprintf(this->pEnd(), fmt, args);
+				int write_size = vsprintf(this->pEnd(), fmt, args2);
+				if (sz != write_size) { DEBUG_ASSERT3(sz == write_size, sz, write_size, fmt); }
 				this->resetsize(size_pre + sz);
 			} else
 			{
 				resetLogLevel(ELevel::ERROR);
-				this->append(TILOG_ERROR_FORMAT_STRING"get err format:\n", 16);
+				this->appends(TILOG_ERROR_FORMAT_STRING "get err format:\n");
 				this->append(fmt);
 			}
-			va_end(args);
-
+			va_end(args2);
 			return *this;
 		}
 

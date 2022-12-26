@@ -1814,12 +1814,16 @@ namespace tilogspace
 
 		TiLogCore::TiLogCore()
 		{
+			DEBUG_PRINTA("TiLogCore::TiLogCore %p", this);
+			//TODO only happens in mingw64,Windows,maybe a mingw64 bug? see DEBUG_PRINTA("test printf lf %lf\n",1.0)
+			DEBUG_PRINTA("TiLogCore fix dtoa deadlock in (s)printf for mingw64 %f %f", 1.0f,1.0);
 			CreateCoreThread(mPoll);
 			CreateCoreThread(mMerge);
 			CreateCoreThread(mDeliver);
 			CreateCoreThread(mGC);
 
 			mInited = true;
+			WaitPrepared("TiLogCore::TiLogCore waiting\n");
 		}
 
 		inline void TiLogCore::CreateCoreThread(CoreThrdStruBase& thrd)
@@ -2376,6 +2380,7 @@ namespace tilogspace
 			auto& vec = mDeliver.mIoBean;
 			size_t newCap = mDeliver.mIoBean.mSizeSum / 10;
 			DEBUG_PRINTD("mFreeMemTimesCenti:%u \n", centi.val);
+			//DEBUG_PRINTA("test printf lf %lf\n",1.0);  //may deadlock in mingw64/Windows
 
 			vec.shrink_to_fit(
 				newCap * TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MIN_CENTI / 100, newCap * TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MAX_CENTI / 100);
