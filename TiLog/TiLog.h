@@ -1,6 +1,8 @@
 #ifndef TILOG_TILOG_H
 #define TILOG_TILOG_H
 
+#include <stdint.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <string.h>
 #include <stdlib.h>
@@ -906,7 +908,7 @@ namespace tilogspace
 				size_type cap = this->capacity();
 				size_type mem_size = new_cap + (size_type)sizeof('\0') + size_head();	 // request extra 1 byte for '\0'
 				Core* p = (Core*)FeatureHelperType::memmgr_type::tirealloc(this->pCore, mem_size);
-				DEBUG_ASSERT(p != nullptr);
+				DEBUG_ASSERT2(p != nullptr,cap,mem_size);
 				pCore = p;
 				this->pCore->capacity = new_cap;	// capacity without '\0'
 				check();
@@ -1635,10 +1637,21 @@ namespace internal
 		inline TiLogStream& operator<<(unsigned char c) { return append(c), *this; }
 		inline TiLogStream& operator<<(signed char c) { return append(c), *this; }
 		inline TiLogStream& operator<<(char c) { return append(c), *this; }
-		inline TiLogStream& operator<<(int32_t val) { return append(val), *this; }
-		inline TiLogStream& operator<<(uint32_t val) { return append(val), *this; }
-		inline TiLogStream& operator<<(int64_t val) { return append(val), *this; }
-		inline TiLogStream& operator<<(uint64_t val) { return append(val), *this; }
+		inline TiLogStream& operator<<(int val) { return append((int32_t)val), *this; }
+		inline TiLogStream& operator<<(unsigned val) { return append((uint32_t)val), *this; }
+#if LONG_MAX==INT32_MAX && ULONG_MAX==UINT32_MAX
+		inline TiLogStream& operator<<(long val) { return append((int32_t)val), *this; }
+		inline TiLogStream& operator<<(unsigned long val) { return append((uint32_t)val), *this; }
+#elif LONG_MAX==INT64_MAX && ULONG_MAX==UINT64_MAX
+		inline TiLogStream& operator<<(long val) { return append((int64_t)val), *this; }
+		inline TiLogStream& operator<<(unsigned long val) { return append((uint64_t)val), *this; }
+#endif
+#if LONG_LONG_MAX==INT64_MAX && ULONG_LONG_MAX==UINT64_MAX
+		inline TiLogStream& operator<<(long long val) { return append((int64_t)val), *this; }
+		inline TiLogStream& operator<<(unsigned long long val) { return append((uint64_t)val), *this; }
+#else
+		static_assert(false,"long long too big");
+#endif
 		inline TiLogStream& operator<<(float val) { return append(val), *this; }
 		inline TiLogStream& operator<<(double val) { return append(val), *this; }
 		inline TiLogStream& operator<<(std::nullptr_t) { return append("nullptr", 7), *this; }

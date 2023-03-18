@@ -1303,11 +1303,9 @@ namespace tilogspace
 
 			inline bool PollThreadSleep();
 
-			inline void InitInternalThreadBeforeRun();
+			inline void InitInternalThreadBeforeRun(const char* tag);
 
-			inline void IInitPrinterThreadBeforeRun();
-
-			inline void IInitCoreThreadBeforeRun(List<ThreadStru*>& dstQueue, atomic_int32_t& counter);
+			inline void IInitCoreThreadBeforeRun(List<ThreadStru*>& dstQueue, atomic_int32_t& counter, const char* tag);
 
 			inline bool LocalCircularQueuePushBack(ThreadStru& stru, TiLogBean* obj);
 
@@ -2273,7 +2271,7 @@ namespace tilogspace
 
 		void TiLogCore::thrdFuncMergeLogs()
 		{
-			InitInternalThreadBeforeRun();	  // this thread is no need log
+			InitInternalThreadBeforeRun(" Merge ");	  // this thread is no need log
 			while (true)
 			{
 				std::unique_lock<std::mutex> lk_merge(mMerge.mMtx);
@@ -2417,7 +2415,7 @@ namespace tilogspace
 
 		void TiLogCore::thrdFuncDeliverLogs()
 		{
-			InitInternalThreadBeforeRun();	  // this thread is no need log
+			InitInternalThreadBeforeRun(" Deliver ");	  // this thread is no need log
 			while (true)
 			{
 				std::unique_lock<std::mutex> lk_deliver(mDeliver.mMtx);
@@ -2446,7 +2444,7 @@ namespace tilogspace
 
 		void TiLogCore::thrdFuncGarbageCollection()
 		{
-			InitInternalThreadBeforeRun();	  // this thread is no need log
+			InitInternalThreadBeforeRun(" GC ");	  // this thread is no need log
 			while (true)
 			{
 				std::unique_lock<std::mutex> lk_del(mGC.mMtx);
@@ -2496,7 +2494,7 @@ namespace tilogspace
 
 		void TiLogCore::thrdFuncPoll()
 		{
-			InitInternalThreadBeforeRun();	  // this thread is no need log
+			InitInternalThreadBeforeRun(" Poll ");	  // this thread is no need log
 			do
 			{
 				DEBUG_PRINTD("thrdFuncPoll notify merge\n");
@@ -2547,13 +2545,20 @@ namespace tilogspace
 			return;
 		}
 
-		void TiLogCore::InitPrinterThreadBeforeRun() { getRInstance().IInitPrinterThreadBeforeRun(); }
-		void TiLogCore::IInitPrinterThreadBeforeRun() { IInitCoreThreadBeforeRun(mThreadStruQueue.printerQueue, mExistPrinters); }
-
-		inline void TiLogCore::InitInternalThreadBeforeRun() { IInitCoreThreadBeforeRun(mThreadStruQueue.priThrdQueue, mExistThreads); }
-
-		inline void TiLogCore::IInitCoreThreadBeforeRun(List<ThreadStru*>& dstQueue, atomic_int32_t& counter)
+		void TiLogCore::InitPrinterThreadBeforeRun()
 		{
+			TiLogCore& tiLogCore = getRInstance();
+			tiLogCore.IInitCoreThreadBeforeRun(tiLogCore.mThreadStruQueue.printerQueue, tiLogCore.mExistPrinters, "printer");
+		}
+
+		inline void TiLogCore::InitInternalThreadBeforeRun(const char* tag)
+		{
+			IInitCoreThreadBeforeRun(mThreadStruQueue.priThrdQueue, mExistThreads, tag);
+		}
+
+		inline void TiLogCore::IInitCoreThreadBeforeRun(List<ThreadStru*>& dstQueue, atomic_int32_t& counter, const char* tag)
+		{
+			DEBUG_PRINTA("IInitCoreThreadBeforeRun %s\n", tag);
 			while (!mInited)	// make sure all variables are inited
 			{
 				this_thread::yield();

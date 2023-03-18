@@ -631,8 +631,13 @@ TEST_CASE("terminal_multi_way_log_test_____________________")
 
 	TILOGE << true;
 	TILOGE << 'e';
+	TILOGE << -100;
 	TILOGE << 101;
+	TILOGE << 102L;
+	TILOGE << 103U;
+	TILOGE << 104UL;
 	TILOGE << 8295934959567868956LL;
+	TILOGE << ULONG_LONG_MAX;
 	TILOGE << nullptr;
 	TILOGE << NULL;
 	TILOGE << "e0";
