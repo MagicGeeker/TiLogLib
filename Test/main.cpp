@@ -1,8 +1,6 @@
 #include "inc.h"
 #include "func.h"
 
-synccout_t mycout;
-
 #if USE_MAIN_TEST == TEST_WAY
 #include <iostream>
 #include <stdlib.h>

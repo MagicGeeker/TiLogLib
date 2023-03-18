@@ -112,6 +112,9 @@ using namespace tilogspace;
 
 namespace tilogspace
 {
+	sync_ostream_mtx_t ticout_mtx;
+	sync_ostream_mtx_t ticerr_mtx;
+	sync_ostream_mtx_t ticlog_mtx;
 	namespace internal
 	{
 		namespace tilogtimespace
@@ -1250,6 +1253,7 @@ namespace tilogspace
 
 			inline void CreateCoreThread(CoreThrdStruBase& thrd);
 
+			void FreeMemory();
 			void DestroyThreadStrus(List<ThreadStru*>& listStru);
 
 			bool Prepared();
@@ -1328,6 +1332,7 @@ namespace tilogspace
 			atomic_bool mSyncing{};
 
 			ThreadStruQueue mThreadStruQueue;
+			Vector<thread> mCoreThreads;
 
 			struct PollStru : public CoreThrdStruBase
 			{
@@ -1821,14 +1826,14 @@ namespace tilogspace
 			CreateCoreThread(mGC);
 
 			mInited = true;
+			atexit([] { TICOUT << "###atexit\n"; });
 			WaitPrepared("TiLogCore::TiLogCore waiting\n");
 		}
 
 		inline void TiLogCore::CreateCoreThread(CoreThrdStruBase& thrd)
 		{
 			thrd.mExist = true;
-			thread th(thrd.GetThrdEntryFunc(), this);
-			th.detach();
+			mCoreThreads.push_back(std::thread(thrd.GetThrdEntryFunc(), this));
 		}
 
 		inline bool TiLogCore::LocalCircularQueuePushBack(ThreadStru& stru, TiLogBean* obj)
@@ -1883,10 +1888,21 @@ namespace tilogspace
 			{
 				this_thread::yield();
 			}
+			for (auto& th : mCoreThreads)
+			{
+				th.join();
+			}
+			TiLogPrinterManager::DestroyPrinters();	   // make sure printers output all logs and free to SyncedIOBeanPool
+			// TiLogCore::getRInstance().FreeMemory(); // TODO DestroyThreadStrus cause deadlock???
+			DEBUG_PRINTA("~TiLogCore exit\n");
+		}
+
+		void TiLogCore::FreeMemory()
+		{
+			DEBUG_PRINTA("FreeMemory begin\n");
 			DestroyThreadStrus(mThreadStruQueue.priThrdQueue);
-			TiLogPrinterManager::DestroyPrinters();   //make sure printers output all logs and free to SyncedIOBeanPool
 			DestroyThreadStrus(mThreadStruQueue.printerQueue);
-			DEBUG_PRINTI("exit\n");
+			DEBUG_PRINTA("FreeMemory exit\n");
 		}
 
 		void TiLogCore::DestroyThreadStrus(List<ThreadStru*>& listStru)
@@ -2048,12 +2064,13 @@ namespace tilogspace
 				auto sorted_judge_func = [&v]() {
 					if (!std::is_sorted(v.begin(), v.end(), TiLogBeanPtrComp()))
 					{
+						std::ostringstream os;
 						for (uint32_t index = 0; index != v.size(); index++)
 						{
-							cerr << v[index]->time().toSteadyFlag() << " ";
-							if (index % 6 == 0) { cerr << "\n"; }
+							os << v[index]->time().toSteadyFlag() << " ";
+							if (index % 6 == 0) { os << "\n"; }
 						}
-						DEBUG_ASSERT(false);
+						DEBUG_ASSERT1(false, os.str());
 					}
 				};
 				DEBUG_RUN(sorted_judge_func());
@@ -2466,6 +2483,7 @@ namespace tilogspace
 					for (auto it = mThreadStruQueue.toDelQueue.begin(); it != mThreadStruQueue.toDelQueue.end();)
 					{
 						ThreadStru& threadStru = **it;
+						DEBUG_PRINTA("thrd %s exit delete thread stru\n", threadStru.tid->c_str());
 						mMerge.mRawDatas.remove(threadStru.tid);
 						delete (&threadStru);
 						it = mThreadStruQueue.toDelQueue.erase(it);

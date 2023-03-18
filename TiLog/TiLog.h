@@ -329,6 +329,11 @@ namespace tilogspace
 	{
 	};
 
+	using sync_ostream_mtx_t=std::mutex;
+	extern sync_ostream_mtx_t ticout_mtx;
+	extern sync_ostream_mtx_t ticerr_mtx;
+	extern sync_ostream_mtx_t ticlog_mtx;
+
 #define TILOG_MUTEXABLE_CLASS_MACRO(mtx_type, mtx_name)                                                                                    \
 	mtx_type mtx_name;                                                                                                                     \
 	inline void lock() { mtx_name.lock(); };                                                                                               \
@@ -2017,9 +2022,9 @@ namespace tilogspace
 
 //------------------------------------------define micro for user------------------------------------------//
 
-#define TICOUT std::cout
-#define TICERR std::cerr
-#define TICLOG std::clog
+#define TICOUT (std::unique_lock<tilogspace::sync_ostream_mtx_t>(tilogspace::ticout_mtx), std::cout)
+#define TICERR (std::unique_lock<tilogspace::sync_ostream_mtx_t>(tilogspace::ticerr_mtx), std::cout)
+#define TICLOG (std::unique_lock<tilogspace::sync_ostream_mtx_t>(tilogspace::ticlog_mtx), std::cout)
 
 #define TILOGA TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::ELevel::ALWAYS)
 #define TILOGF TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::ELevel::FATAL)

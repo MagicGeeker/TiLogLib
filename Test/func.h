@@ -20,19 +20,7 @@ struct ThreadIniter
 };
 using TestThread = MThread<ThreadIniter>;
 
-struct synccout_t
-{
-	template <typename T>
-	inline synccout_t& operator<<(T&& t)
-	{
-		std::lock_guard<std::mutex> lgd(mtx);
-		TICOUT << t;
-		return *this;
-	}
-
-	std::mutex mtx;
-};
-extern synccout_t mycout;
+#define mycout TICOUT
 
 
 /**************************************************   **************************************************/

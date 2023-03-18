@@ -17,14 +17,15 @@ using namespace std;
 using namespace tilogspace;
 //__________________________________________________major test__________________________________________________//
 #define do_nothing_test_____________________
+#define single_thread_cout_test_____________________
 #define single_thread_log_test_____________________
 #define multi_thread_log_test_____________________
 #define file_multi_thread_log_test_____________________
 #define terminal_many_thread_cout_test_____________________
 #define terminal_many_thread_log_test_____________________
+#define none_single_thread_multi_size_log_test_____________________
 #define file_many_thread_log_test_____________________
 #define file_time_many_thread_log_test_with_sleep_____________________
-#define file_time_multi_thread_simulation__log_test_____________________
 #define file_single_thread_benchmark_test_____________________
 #define file_multi_thread_benchmark_test_____________________
 #define file_multi_thread_benchmark_test_with_format_____________________
@@ -37,6 +38,7 @@ using namespace tilogspace;
 
 //__________________________________________________long time test__________________________________________________//
 //#define terminal_multi_thread_poll__log_test_____________________
+//#define file_time_multi_thread_simulation__log_test_____________________
 #define none_multi_thread_memory_leak_stress_test_____________________
 //#define none_multi_thread_set_printer_test_____________________
 
@@ -86,11 +88,21 @@ TEST_CASE("do_nothing_test_____________________")
 
 #endif
 
+#ifdef single_thread_cout_test_____________________
+TEST_CASE("single_thread_cout_test_____________________")
+{
+	TICOUT << "single_thread_cout_test_____________________ cout\n";
+	TICERR << "single_thread_cout_test_____________________ cerr\n";
+	TICLOG << "single_thread_cout_test_____________________ clog\n";
+}
+#endif
+
 #ifdef single_thread_log_test_____________________
 
 TEST_CASE("single_thread_log_test_____________________")
 {
 	TICOUT << "single_thread_log_test_____________________\n";
+	TILOGD << "abcde";
 }
 
 #endif
@@ -167,6 +179,26 @@ TEST_CASE("terminal_many_thread_log_test_____________________")
 			TILOGD << "LOGD thr " << index << " " << &a;
 			TILOGV << "LOGV thr " << index << " " << &a;
 		});
+}
+
+#endif
+
+
+#ifdef none_single_thread_multi_size_log_test_____________________
+
+TEST_CASE("none_single_thread_multi_size_log_test_____________________")
+{
+	TICOUT << "none_single_thread_multi_size_log_test_____________________\n";
+	TiLog::SetPrinters(tilogspace::EPrinterID::PRINTER_ID_NONE);
+	std::string str;
+	for (int i = 0; i < 10240; i++)
+	{
+		TILOGD << str;
+		TILOGD << str;
+		TILOGD << str;
+		TILOGD << str;
+		str.append("A");
+	}
 }
 
 #endif
