@@ -315,10 +315,14 @@ namespace tilogspace
 
 	namespace internal
 	{
-		String GetNewHexThreadIDString()
+		String GetNewThreadIDString()
 		{
 			StringStream os;
+#ifdef TILOG_OS_WIN
+			os << (std::this_thread::get_id());
+#else  // linux mac freebsd...
 			os << std::hex << (std::this_thread::get_id());
+#endif
 			String id = os.str();
 			DEBUG_PRINTI("GetNewThreadIDString, tid %s ,cap %llu\n", id.c_str(), (long long unsigned)id.capacity());
 			if_constexpr(TILOG_THREAD_ID_MAX_LEN != SIZE_MAX)
@@ -330,7 +334,7 @@ namespace tilogspace
 
 		const String* GetThreadIDString()
 		{
-			thread_local static const String* s_tid = new String(GetNewHexThreadIDString() + " ");
+			thread_local static const String* s_tid = new String(GetNewThreadIDString() + " ");
 			return s_tid;
 		}
 
