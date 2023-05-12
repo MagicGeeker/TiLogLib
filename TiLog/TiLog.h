@@ -1651,7 +1651,7 @@ namespace internal
 		inline TiLogStream& operator<<(long val) { return append((int64_t)val), *this; }
 		inline TiLogStream& operator<<(unsigned long val) { return append((uint64_t)val), *this; }
 #endif
-#if LONG_LONG_MAX==INT64_MAX && ULONG_LONG_MAX==UINT64_MAX
+#if LLONG_MAX==INT64_MAX && ULLONG_MAX==UINT64_MAX
 		inline TiLogStream& operator<<(long long val) { return append((int64_t)val), *this; }
 		inline TiLogStream& operator<<(unsigned long long val) { return append((uint64_t)val), *this; }
 #else
@@ -2023,8 +2023,8 @@ namespace tilogspace
 //------------------------------------------define micro for user------------------------------------------//
 
 #define TICOUT (std::unique_lock<tilogspace::sync_ostream_mtx_t>(tilogspace::ticout_mtx), std::cout)
-#define TICERR (std::unique_lock<tilogspace::sync_ostream_mtx_t>(tilogspace::ticerr_mtx), std::cout)
-#define TICLOG (std::unique_lock<tilogspace::sync_ostream_mtx_t>(tilogspace::ticlog_mtx), std::cout)
+#define TICERR (std::unique_lock<tilogspace::sync_ostream_mtx_t>(tilogspace::ticerr_mtx), std::cerr)
+#define TICLOG (std::unique_lock<tilogspace::sync_ostream_mtx_t>(tilogspace::ticlog_mtx), std::clog)
 
 #define TILOGA TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::ELevel::ALWAYS)
 #define TILOGF TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::ELevel::FATAL)

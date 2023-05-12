@@ -669,7 +669,7 @@ TEST_CASE("terminal_multi_way_log_test_____________________")
 	TILOGE << 103U;
 	TILOGE << 104UL;
 	TILOGE << 8295934959567868956LL;
-	TILOGE << ULONG_LONG_MAX;
+	TILOGE << ULLONG_MAX;
 	TILOGE << nullptr;
 	TILOGE << NULL;
 	TILOGE << "e0";

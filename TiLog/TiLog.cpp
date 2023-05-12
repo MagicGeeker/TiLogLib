@@ -315,10 +315,10 @@ namespace tilogspace
 
 	namespace internal
 	{
-		String GetNewThreadIDString()
+		String GetNewHexThreadIDString()
 		{
 			StringStream os;
-			os << (std::this_thread::get_id());
+			os << std::hex << (std::this_thread::get_id());
 			String id = os.str();
 			DEBUG_PRINTI("GetNewThreadIDString, tid %s ,cap %llu\n", id.c_str(), (long long unsigned)id.capacity());
 			if_constexpr(TILOG_THREAD_ID_MAX_LEN != SIZE_MAX)
@@ -330,25 +330,9 @@ namespace tilogspace
 
 		const String* GetThreadIDString()
 		{
-			thread_local static const String* s_tid = new String(GetNewThreadIDString() + " ");
+			thread_local static const String* s_tid = new String(GetNewHexThreadIDString() + " ");
 			return s_tid;
 		}
-
-		itid_t GetThreadIDInt()
-		{
-			thread_local static const itid_t tid = [] {
-				const String* s = GetThreadIDString();
-				itid_t t = (itid_t)strtoull(s->c_str(), NULL, 0);
-				if (t == 0 || errno == ERANGE)	  // unlikely // As I know,thread id is a integer in Win and Unix
-				{
-					t = (itid_t)s;
-				}
-				return t;
-			}();
-			return tid;
-		}
-
-		itid_t GetThreadIntID() { return GetThreadIDInt(); }
 
 		String GetStringByStdThreadID(std::thread::id val)
 		{
