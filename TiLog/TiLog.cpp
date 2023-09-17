@@ -1188,10 +1188,22 @@ namespace tilogspace
 
 		class TiLogCore;
 		using CoreThrdEntryFuncType = void (TiLogCore::*)();
+
+		enum CoreThrdStruBaseStatus
+		{
+			NORUN,
+			RUN,
+			PREPARE_FINAL_LOOP,
+			ON_FINAL_LOOP,
+			TO_EXIT,
+			WAIT_NEXT_THREAD,
+			DEAD
+		};
+
 		struct CoreThrdStruBase : public TiLogObject
 		{
-			std::atomic_bool mToExit = { false };
-			std::atomic_bool mExist = { false };
+			std::atomic<CoreThrdStruBaseStatus> mStatus{ NORUN };
+			void SetStatus(CoreThrdStruBaseStatus s) { mStatus = s; }
 			virtual ~CoreThrdStruBase() = default;
 			virtual const char* GetName() = 0;
 			virtual CoreThrdEntryFuncType GetThrdEntryFunc() = 0;
@@ -1820,7 +1832,7 @@ namespace tilogspace
 
 		inline void TiLogCore::CreateCoreThread(CoreThrdStruBase& thrd)
 		{
-			thrd.mExist = true;
+			thrd.mStatus=RUN;
 			mCoreThreads.push_back(std::thread(thrd.GetThrdEntryFunc(), this));
 		}
 
@@ -1861,21 +1873,10 @@ namespace tilogspace
 
 		TiLogCore::~TiLogCore()
 		{
-			// this program run too fast ,even main function end before Prepared
-			WaitPrepared("AtExit: Wow,main function end too fast\n");
-
 			DEBUG_PRINTI("exit,wait poll\n");
 			mToExit = true;
 
-			while (mPoll.mExist)
-			{
-				this_thread::yield();
-			}
 
-			while (mExistThreads != 0)
-			{
-				this_thread::yield();
-			}
 			for (auto& th : mCoreThreads)
 			{
 				th.join();
@@ -1931,14 +1932,11 @@ namespace tilogspace
 
 		void TiLogCore::ISync()
 		{
-			// wait for merge etc. internal thread inited
-			WaitPrepared({ "ISync: Wow,call this function before core prepared\n" });
-
 			uint64_t counter = mDeliver.mDeliveredTimes;
 
 			while (mDeliver.mDeliveredTimes == counter)	   // make sure deliver at least once
 			{
-				mMerge.mCV.notify_all();	  // notify merge thread
+				mMerge.mCV.notify_one();	  // notify merge thread
 				std::this_thread::yield();	  // wait for deliver thread
 			}
 		}
@@ -1987,7 +1985,7 @@ namespace tilogspace
 				lk_local.unlock();
 				if (isGlobalFull)
 				{
-					mMerge.mCV.notify_all();
+					mMerge.mCV.notify_one();
 					GetMergeLock();	   // wait for merge thread
 				}
 			}
@@ -2279,6 +2277,8 @@ namespace tilogspace
 			InitInternalThreadBeforeRun(" Merge ");	  // this thread is no need log
 			while (true)
 			{
+				if (mMerge.mStatus == ON_FINAL_LOOP) { break; }
+				if (mMerge.mStatus == PREPARE_FINAL_LOOP) { mMerge.mStatus = ON_FINAL_LOOP; }
 				std::unique_lock<std::mutex> lk_merge(mMerge.mMtx);
 				mMerge.mCV.wait(lk_merge);
 				mMerge.mDoing = true;
@@ -2299,7 +2299,6 @@ namespace tilogspace
 					mMerge.mCvWait.notify_all();
 				}
 				this_thread::yield();
-				if (!mPoll.mExist) { break; }
 			}
 			DEBUG_PRINTA("mMerge.mMergedSize %llu\n", (long long unsigned)mMerge.mMergedSize);
 			AtInternalThreadExit(&mMerge, &mDeliver);
@@ -2317,9 +2316,11 @@ namespace tilogspace
 			size_t reserveSize = preSize + (fileLen + beanSVSize) + TILOG_RESERVE_LEN_L1;
 			logs.reserve(reserveSize);
 
+#ifndef IUILS_NDEBUG_WITHOUT_ASSERT
 			DEBUG_PRINTV(
 				"preSize %llu, tid %.*s, fileLen %llu, beanSVSize %llu\n", (llu)preSize, (int)bean.tidlen, logsv.data(), (llu)fileLen,
 				(llu)beanSVSize);
+#endif
 
 			TiLogTime::origin_time_type oriTime = bean.time().get_origin_time();
 			if (oriTime == mDeliver.mPreLogTime)
@@ -2423,6 +2424,8 @@ namespace tilogspace
 			InitInternalThreadBeforeRun(" Deliver ");	  // this thread is no need log
 			while (true)
 			{
+				if (mDeliver.mStatus== ON_FINAL_LOOP) { break; }
+				if (mDeliver.mStatus== PREPARE_FINAL_LOOP) { mDeliver.mStatus= ON_FINAL_LOOP; }
 				std::unique_lock<std::mutex> lk_deliver(mDeliver.mMtx);
 				mDeliver.mCV.wait(lk_deliver);
 				mDeliver.mDoing = true;
@@ -2441,7 +2444,6 @@ namespace tilogspace
 					lk_wait.unlock();
 					mDeliver.mCvWait.notify_all();
 				}
-				if (!mMerge.mExist) { break; }
 			}
 			AtInternalThreadExit(&mDeliver, &mGC);
 			return;
@@ -2452,6 +2454,9 @@ namespace tilogspace
 			InitInternalThreadBeforeRun(" GC ");	  // this thread is no need log
 			while (true)
 			{
+				if (mGC.mStatus == ON_FINAL_LOOP) { break; }
+				if (mGC.mStatus == PREPARE_FINAL_LOOP) { mGC.mStatus = ON_FINAL_LOOP; }
+
 				std::unique_lock<std::mutex> lk_del(mGC.mMtx);
 				mGC.mCV.wait(lk_del);
 				mGC.mDoing = true;
@@ -2466,6 +2471,7 @@ namespace tilogspace
 				}
 
 				unique_lock<decltype(mThreadStruQueue)> lk_queue(mThreadStruQueue, std::try_to_lock);
+				if (mGC.mStatus == ON_FINAL_LOOP && !lk_queue.owns_lock()) { lk_queue.lock(); }
 				if (lk_queue.owns_lock())
 				{
 					for (auto it = mThreadStruQueue.toDelQueue.begin(); it != mThreadStruQueue.toDelQueue.end();)
@@ -2480,7 +2486,6 @@ namespace tilogspace
 				}
 
 				this_thread::yield();
-				if (!mDeliver.mExist) { break; }
 			}
 			DEBUG_PRINTA("gcsize %llu\n",(long long unsigned)mGC.mGCList.gcsize);
 			AtInternalThreadExit(&mGC, nullptr);
@@ -2501,16 +2506,20 @@ namespace tilogspace
 		void TiLogCore::thrdFuncPoll()
 		{
 			InitInternalThreadBeforeRun(" Poll ");	  // this thread is no need log
-			do
+			for (;; PollThreadSleep())
 			{
+				if (mPoll.mStatus == ON_FINAL_LOOP) { break; }
+				if (mToExit) { mPoll.mStatus = PREPARE_FINAL_LOOP; }
+				if (mPoll.mStatus == PREPARE_FINAL_LOOP) { mPoll.mStatus = ON_FINAL_LOOP; }
+
 				DEBUG_PRINTD("thrdFuncPoll notify merge\n");
 				mMerge.mCV.notify_one();
 
 				// try lock when first run or deliver complete recently
 				unique_lock<decltype(mThreadStruQueue)> lk_queue(mThreadStruQueue, std::try_to_lock);
+				if (mPoll.mStatus == ON_FINAL_LOOP && !lk_queue.owns_lock()) { lk_queue.lock(); }
 				if (!lk_queue.owns_lock()) { continue; }
 
-				// if mWaitDeliverDeadThreads==0,move all of the merged and delivered ThreadStrus to toDelQueue
 				for (auto it = mThreadStruQueue.waitMergeQueue.begin(); it != mThreadStruQueue.waitMergeQueue.end();)
 				{
 					ThreadStru& threadStru = *(*it);
@@ -2577,25 +2586,27 @@ namespace tilogspace
 		inline void TiLogCore::AtInternalThreadExit(CoreThrdStruBase* thrd, CoreThrdStruBase* nextExitThrd)
 		{
 			DEBUG_PRINTI("thrd %s to exit.\n", thrd->GetName());
-			thrd->mToExit = true;
+			thrd->mStatus = TO_EXIT;
 			CoreThrdStru* t = dynamic_cast<CoreThrdStru*>(nextExitThrd);
 			if (t)
 			{
 				auto lk = GetCoreThrdLock(*t);	  // wait for "current may working nextExitThrd"
-				thrd->mExist = false;
+				thrd->mStatus = WAIT_NEXT_THREAD;
 				lk.unlock();
-				while (!t->mToExit)		// wait for "nextExitThrd complete all work and prepare to exit"
+				t->mStatus = PREPARE_FINAL_LOOP;
+				while (t->mStatus < TO_EXIT)	// wait for "nextExitThrd complete all work and prepare to exit"
 				{
 					t->mCV.notify_all();
 					std::this_thread::yield();
 				}
 			} else
 			{
-				thrd->mExist = false;
+				thrd->mStatus = WAIT_NEXT_THREAD;
 			}
 
 			DEBUG_PRINTI("thrd %s exit.\n", thrd->GetName());
 			mExistThreads--;
+			thrd->mStatus = DEAD;
 		}
 
 		inline uint64_t TiLogCore::GetPrintedLogs() { return getRInstance().mPrintedLogs; }
