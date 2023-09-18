@@ -326,7 +326,7 @@ TEST_CASE("file_multi_thread_benchmark_test_with_format_____________________")
 		"file_multi_thread_benchmark_test_with_format_____________________", tilogspace::EPrinterID::PRINTER_TILOG_FILE, [](int index) {
 			for (uint64_t j = 0; j < testLoop_t::GET_SINGLE_THREAD_LOOPS(); j++)
 			{
-				TILOGE.format("index= {} j= {}", index, j);
+				TILOGE.print("index= {} j= {}", index, j);
 			}
 		});
 }
@@ -378,7 +378,7 @@ TEST_CASE("file_single_thread_operator_test_____________________")
 			constexpr uint64_t loops = testLoop_t::GET_SINGLE_THREAD_LOOPS();
 			for (uint64_t j = 0; j < loops; j++)
 			{
-				TILOGE("index= %d, j= %lld 666 $$ %%D test %%D", index, (long long int)j);
+				TILOGE.printf("index= %d, j= %lld 666 $$ %%D test %%D", index, (long long int)j);
 			}
 		});
 }
@@ -637,7 +637,7 @@ static bool b0_file_static_log_test = []() {
 	TiLog::SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
 	TICOUT << "Prepare file_static_log_test_____________________\n";
 
-	auto s = std::move(TILOGE("long string \n"));
+	auto s = std::move(TILOGE.printf("long string \n"));
 	for (uint32_t i = 0; i < 10000; i++)
 	{
 		s << (char('a' + i % 26));
@@ -681,19 +681,19 @@ TEST_CASE("terminal_multi_way_log_test_____________________")
 	TILOGE << (const void*)pe1;
 
 	const char e2[] = { 'e', '2', '\0' };
-	TILOGE(e2);
+	TILOGE.printf(e2);
 	const char(&re2)[3] = e2;
 	TILOGE << re2;
 
 	TILOGE << 54231.0f;
 	TILOGE << 54231.0e6;
 	TILOGE << std::string("e3");
-	TILOGE.appends("e4", "e5");
-	TILOGV.appends(" e6 ", 'e', 101, " e7 ", 00.123f, " e8 ", 54231.0e6);
-	TILOGV("%d %s %llf", 888, " e9 ", 0.3556);
-	(TILOGV << " e10 ")("abc %d %lld", 123, 456LL);
-	(TILOGV << "666")("abc %0999999999999999d %", 123, 456LL);	  // TODO error?
-	(TILOGV << "6601000010000000000100000000100000000000230100000000000230002300000000236")(
+	TILOGE.print_obj("e4", "e5");
+	TILOGV.print_obj(" e6 ", 'e', 101, " e7 ", 00.123f, " e8 ", 54231.0e6);
+	TILOGV.printf("%d %s %llf", 888, " e9 ", 0.3556);
+	(TILOGV << " e10 ").printf("abc %d %lld", 123, 456LL);
+	(TILOGV << "666").printf("abc %0999999999999999d %", 123, 456LL);	  // TODO error?
+	(TILOGV << "6601000010000000000100000000100000000000230100000000000230002300000000236").printf(
 		"abc 0100000000010000000000101000000000002300000000000023002301000000000002300023 %d %lld", 123, 456LL);
 
 	TILOGI << "e20" << std::boolalpha;
@@ -704,31 +704,31 @@ TEST_CASE("terminal_multi_way_log_test_____________________")
 	{
 		using namespace tilogspace;
 		TILOG_FAST(ON_DEV & ALWAYS) << "e25 fast only print on debug exe";
-		TILOG_FAST(ON_RELEASE & ALWAYS) << "e26 fast only print on debug exe";
+		TILOG_FAST(ON_RELEASE & ALWAYS) << "e26 fast only print on release exe";
 		TILOG(ON_DEV & WARN) << "e27 only print on debug exe";
 		TILOG(ON_RELEASE & WARN) << "e28 only print on release exe";
 		TILOG_IF(INFO, 10 > 8) << "e29 10>8";
 		TILOG_IF(ERROR, 10 < 8) << "e30 10<8";
 	}
 	{
-		TILOGI.format("\n\n");
-		TILOGI.format("e31 hello {},format test {} !","world",0);
-		TILOGI.format("e32 str{} int{} double{} NP{}!","abc",0,3.56, nullptr);
-		TILOGI.format("hello {\n");
-		TILOGI.format("hello }\n");
-		TILOGI.format("hello {}\n");
-		TILOGI.format("hello }{\n");
-		TILOGI.format("hello {{{{\n");
-		TILOGI.format("hello {{10{{\n");
-		TILOGI.format("hello }}}}\n");
-		TILOGI.format("e33 hello {1},format test {0} !","world",0);
-		TILOGI.format("e34 hello {},format test {} !","world");
-		TILOGI.format("e35 hello {},format test {0} !","world",0);
-		TILOGI.format("e36 hello {},format test {} !","world",5292,"abc");
-		TILOGI.format("e37 format {} ",0).format("format again {} ",1);
+		TILOGI.print("\n\n");
+		TILOGI.print("e31 hello {},format test {} !", "world", 0);
+		TILOGI.print("e32 str{} int{} double{} NP{}!", "abc", 0, 3.56, nullptr);
+		TILOGI.print("hello {\n");
+		TILOGI.print("hello }\n");
+		TILOGI.print("hello {}\n");
+		TILOGI.print("hello }{\n");
+		TILOGI.print("hello {{{{\n");
+		TILOGI.print("hello {{10{{\n");
+		TILOGI.print("hello }}}}\n");
+		TILOGI.print("e33 hello {1},format test {0} !", "world", 0);
+		TILOGI.print("e34 hello {},format test {} !", "world");
+		TILOGI.print("e35 hello {},format test {0} !", "world", 0);
+		TILOGI.print("e36 hello {},format test {} !", "world", 5292, "abc");
+		TILOGI.print("e37 format {} ", 0).print("format again {} ", 1);
 
 		Student st0;
-		TILOGI.format("st0: {}\n\n", st0);
+		TILOGI.print("st0: {}\n\n", st0);
 	}
 }
 #endif

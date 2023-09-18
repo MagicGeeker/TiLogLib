@@ -1613,7 +1613,7 @@ namespace internal
 		}
 
 	public:
-		inline TiLogStream& operator()(const char* fmt, ...)
+		inline TiLogStream& printf(const char* fmt, ...)
 		{
 			size_type size_pre = this->size();
 			va_list args;
@@ -1638,22 +1638,18 @@ namespace internal
 			return *this;
 		}
 
-		template <typename Args0>
-		inline TiLogStream& appends(Args0&& args0)
+		template <typename... Args>
+		inline TiLogStream& print_obj(Args&&... args)
 		{
-			return (*this) << (std::forward<Args0>(args0));
-		}
-		template <typename Args0, typename... Args>
-		inline TiLogStream& appends(Args0&& args0, Args&&... args)
-		{
-			return (*this) << (std::forward<Args0>(args0)), appends(std::forward<Args>(args)...);
+			return appends(std::forward<Args>(args)...);
 		}
 		template <typename... Args>
-		inline TiLogStream& format( TiLogStringView fmt,Args&&... args)
+		inline TiLogStream& print(TiLogStringView fmt, Args&&... args)
 		{
 			TiLogStreamHelper::mini_format_append(*this, fmt, std::forward<Args>(args)...);
 			return *this;
 		}
+
 	public:
 		inline TiLogStream& operator<<(bool b) { return (b ? append("true", 4) : append("false", 5)), *this; }
 		inline TiLogStream& operator<<(unsigned char c) { return append(c), *this; }
@@ -1734,6 +1730,17 @@ namespace internal
 		{
 			if (!isNoUsedStream()) { this->ext()->level = LOG_PREFIX[lv]; }
 			return *this;
+		}
+
+		template <typename Args0>
+		inline TiLogStream& appends(Args0&& args0)
+		{
+			return (*this) << (std::forward<Args0>(args0));
+		}
+		template <typename Args0, typename... Args>
+		inline TiLogStream& appends(Args0&& args0, Args&&... args)
+		{
+			return (*this) << (std::forward<Args0>(args0)), appends(std::forward<Args>(args)...);
 		}
 
 		template <typename CharT>
@@ -1826,7 +1833,7 @@ namespace internal
 			template <typename T>
 			inline void operator()(TiLogStream& out, const T& t) const
 			{
-				out.appends(t);
+				out.print_obj(t);
 			}
 		};
 
@@ -1961,14 +1968,13 @@ namespace internal
 		}
 
 		template <typename... Args>
-		inline TiLogNoneStream& appends(Args&&...) noexcept
+		inline TiLogNoneStream& print_obj(Args&&...) noexcept
 		{
 			return *this;
 		}
-
-		inline TiLogNoneStream& operator()(const char* fmt, ...) noexcept { return *this; }
+		inline TiLogNoneStream& printf(const char* fmt, ...) noexcept { return *this; }
 		template <typename... Args>
-		inline TiLogNoneStream& format(internal::TiLogStringView fmt, Args&&... args) noexcept
+		inline TiLogNoneStream& print(internal::TiLogStringView fmt, Args&&... args) noexcept
 		{
 			return *this;
 		}
