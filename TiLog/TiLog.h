@@ -97,6 +97,22 @@
 #define TILOG_CPP20_FEATURE(...)
 #endif
 
+#if defined(__GNUC__)
+#define TILOG_FORCEINLINE __inline __attribute__((always_inline))
+#elif defined(_MSC_VER)
+#define TILOG_FORCEINLINE __forceinline
+#else
+#define TILOG_FORCEINLINE inline
+#endif
+
+#if defined(__GNUC__)
+#define TILOG_NOINLINE __attribute__((noinline))
+#elif defined(_MSC_VER)
+#define TILOG_NOINLINE __declspec(noinline)
+#else
+#define TILOG_NOINLINE
+#endif
+
 
 
 #define  TILOG_INTERNAL_REGISTER_PRINTERS_MACRO(...)  __VA_ARGS__
@@ -349,6 +365,7 @@ namespace tilogspace
 	template <uint32_t NRetry, size_t Nanosec>
 	class SpinMutex
 	{
+		static_assert(NRetry >= 1, "must retry at least once");
 		std::atomic_flag mLockedFlag{};
 
 	public:
@@ -356,7 +373,7 @@ namespace tilogspace
 		{
 			for (uint32_t n = 0; mLockedFlag.test_and_set();)
 			{
-				if (n++ < NRetry) { continue; }
+				if (++n < NRetry) { continue; }
 				if_constexpr(Nanosec == size_t(-1)) { std::this_thread::yield(); }
 				else if_constexpr(Nanosec != 0) { std::this_thread::sleep_for(std::chrono::nanoseconds(Nanosec)); }
 			}
@@ -366,7 +383,7 @@ namespace tilogspace
 		{
 			for (uint32_t n = 0; mLockedFlag.test_and_set();)
 			{
-				if (n++ < NRetry) { continue; }
+				if (++n < NRetry) { continue; }
 				return false;
 			}
 			return true;
