@@ -1064,14 +1064,15 @@ namespace tilogspace
 
 		struct ThreadStruQueue : public TiLogObject, public std::mutex
 		{
-			List<ThreadStru*> availQueue;		 // thread is live
-			List<ThreadStru*> waitMergeQueue;	 // thread is dead, but some logs have not merge to global print string
-			List<ThreadStru*> toDelQueue;		 // thread is dead and no logs exist,need to delete by gc thread
+			List<ThreadStru*> availQueue;			 // thread is live
+			UnorderedSet<ThreadStru*> dyingQueue;	 // thread is dying(is destroying thread_local variables)
+			List<ThreadStru*> waitMergeQueue;		 // thread is dead, but some logs have not merge to global print string
+			List<ThreadStru*> toDelQueue;			 // thread is dead and no logs exist,need to delete by gc thread
 
-			List<ThreadStru*> printerQueue;		 // queue for printer threads
-			List<ThreadStru*> priThrdQueue;		 // queue for internal threads
+			List<ThreadStru*> printerQueue;	   // queue for printer threads
+			List<ThreadStru*> priThrdQueue;	   // queue for internal threads
 
-			MiniSpinMutex mAvailQueueMtx; //mutex for insert to availQueue
+			MiniSpinMutex mAvailQueueMtx;	 // mutex for insert to availQueue
 		};
 
 
@@ -1246,6 +1247,8 @@ namespace tilogspace
 			inline static void Sync();
 			inline static void AfterDeliver(callback_t func);
 
+			inline static void markThreadDying(ThreadStru* pStru);
+
 			TiLogCore();
 			~TiLogCore();
 
@@ -1265,6 +1268,8 @@ namespace tilogspace
 			void IAfterDeliver(callback_t func);
 
 			inline ThreadStru* GetThreadStru(List<ThreadStru*>* pDstQueue = nullptr);
+
+			inline void IMarkThreadDying(ThreadStru* pStru);
 
 			void IPushLog(TiLogBean* pBean);
 
@@ -1305,7 +1310,7 @@ namespace tilogspace
 
 			inline void DeliverLogs();
 
-			inline bool PollThreadSleep();
+			inline void PollThreadSleep();
 
 			inline void InitInternalThreadBeforeRun(const char* tag);
 
@@ -1318,6 +1323,7 @@ namespace tilogspace
 		private:
 			static constexpr size_t GLOBAL_SIZE = TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE * TILOG_MERGE_QUEUE_RATE;
 			static constexpr uint64_t MAGIC_NUMBER = 0x1234abcd1234abcd;
+			static constexpr uint64_t MAGIC_NUMBER_DEAD = 0x1234dead1234dead;
 
 			thread_local static ThreadStru* s_pThreadLocalStru;
 
@@ -1336,11 +1342,12 @@ namespace tilogspace
 
 			struct PollStru : public CoreThrdStruBase
 			{
-				atomic<uint32_t> mPollPeriodSplitNum = { TILOG_POLL_THREAD_MAX_SLEEP_MS};
-				static constexpr uint32_t s_pollPeriodus{ 1 };
+				Vector<ThreadStru*> mDyingThreadStrus;
+				atomic<uint32_t> mPollPeriodMs = { TILOG_POLL_THREAD_MAX_SLEEP_MS };
 				TiLogTime s_log_last_time{ tilogtimespace::ELogTime::MAX };
 				const char* GetName() override { return "poll"; }
 				CoreThrdEntryFuncType GetThrdEntryFunc() override { return &TiLogCore::thrdFuncPoll; }
+				void SetPollPeriodMs(uint32_t ms) { mPollPeriodMs = ms; }
 			} mPoll;
 
 			struct MergeStru : public CoreThrdStru
@@ -1395,7 +1402,6 @@ namespace tilogspace
 			} mGC;
 		};
 
-		constexpr uint32_t TiLogCore::PollStru::s_pollPeriodus;   //fix link error in debug mode in GCC before cpp17
 		constexpr size_t TiLogCoreAlign = alignof(TiLogCore);	   // debug for TiLogCore
 
 		// clang-format off
@@ -1811,6 +1817,19 @@ namespace tilogspace
 
 	namespace internal
 	{
+		thread_local static struct ThreadExitWatcher
+		{
+			ThreadExitWatcher() = default;
+			void init(void* pThreadStru) { this->pThreadStru = pThreadStru; }
+			~ThreadExitWatcher() { TiLogCore::markThreadDying((ThreadStru*)pThreadStru); }
+			// pThreadStru will be always nullptr if thread not push ang log and not call init()
+			void* pThreadStru{ nullptr };
+		} threadExitWater;
+
+	}	 // namespace internal
+
+	namespace internal
+	{
 #ifdef __________________________________________________TiLogCore__________________________________________________
 
 		TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_OUTER(TiLogCore)
@@ -1826,7 +1845,7 @@ namespace tilogspace
 			CreateCoreThread(mGC);
 
 			mInited = true;
-			atexit([] { TICOUT << "###atexit\n"; });
+			atexit([] { printf("###atexit\n"); });
 			WaitPrepared("TiLogCore::TiLogCore waiting\n");
 		}
 
@@ -1859,6 +1878,7 @@ namespace tilogspace
 				DEBUG_ASSERT(pStru != nullptr);
 				DEBUG_ASSERT(pStru->tid != nullptr);
 
+				threadExitWater.init(pStru);
 				synchronized(mThreadStruQueue)
 				{
 					DEBUG_PRINTV("availQueue insert thrd tid= %s\n", pStru->tid->c_str());
@@ -1871,11 +1891,24 @@ namespace tilogspace
 			return p;
 		}
 
+		inline void TiLogCore::markThreadDying(ThreadStru* pStru) { getRInstance().IMarkThreadDying(pStru); }
+
+		inline void TiLogCore::IMarkThreadDying(ThreadStru* pStru)
+		{
+			if (this->mMagicNumber == MAGIC_NUMBER_DEAD)
+			{
+				printf("skip handle pStru %p because TiLogCore is destroyed\n",pStru);
+				return;
+			}
+			mPoll.SetPollPeriodMs(TILOG_POLL_THREAD_SLEEP_MS_IF_EXIST_THREAD_DYING);
+			synchronized(mThreadStruQueue) { mThreadStruQueue.dyingQueue.emplace(pStru); }
+		}
+
 		TiLogCore::~TiLogCore()
 		{
 			DEBUG_PRINTI("exit,wait poll\n");
 			mToExit = true;
-
+			mPoll.SetPollPeriodMs(1);
 
 			for (auto& th : mCoreThreads)
 			{
@@ -1884,6 +1917,7 @@ namespace tilogspace
 			TiLogPrinterManager::DestroyPrinters();	   // make sure printers output all logs and free to SyncedIOBeanPool
 			// TiLogCore::getRInstance().FreeMemory(); // TODO DestroyThreadStrus cause deadlock???
 			DEBUG_PRINTA("~TiLogCore exit\n");
+			this->mMagicNumber = MAGIC_NUMBER_DEAD;
 		}
 
 		void TiLogCore::FreeMemory()
@@ -2395,12 +2429,12 @@ namespace tilogspace
 			if (!centi.between(10, 90) || centi.between(40, 60)) { return; }
 			if (vec.capacity() > TILOG_DELIVER_CACHE_DEFAULT_MEMORY_BYTES)
 			{
-				mPoll.mPollPeriodSplitNum =
-					std::max(TILOG_POLL_THREAD_MIN_SLEEP_MS, mPoll.mPollPeriodSplitNum * TILOG_POLL_MS_ADJUST_PERCENT_RATE / 100);
+				mPoll.mPollPeriodMs =
+					std::max(TILOG_POLL_THREAD_MIN_SLEEP_MS, mPoll.mPollPeriodMs * TILOG_POLL_MS_ADJUST_PERCENT_RATE / 100);
 			} else
 			{
-				mPoll.mPollPeriodSplitNum =
-					std::min(TILOG_POLL_THREAD_MAX_SLEEP_MS, mPoll.mPollPeriodSplitNum * 100 / TILOG_POLL_MS_ADJUST_PERCENT_RATE);
+				mPoll.mPollPeriodMs =
+					std::min(TILOG_POLL_THREAD_MAX_SLEEP_MS, mPoll.mPollPeriodMs * 100 / TILOG_POLL_MS_ADJUST_PERCENT_RATE);
 			}
 		}
 
@@ -2495,15 +2529,13 @@ namespace tilogspace
 			return;
 		}
 
-		// return false when mToExit is true
-		inline bool TiLogCore::PollThreadSleep()
+		inline void TiLogCore::PollThreadSleep()
 		{
-			for (uint32_t t = mPoll.mPollPeriodSplitNum; t--;)
+			for (uint32_t t0 = mPoll.mPollPeriodMs, t = t0; t--;)
 			{
-				this_thread::sleep_for(chrono::milliseconds (mPoll.s_pollPeriodus));
-				if (mToExit) { return false; }
+				this_thread::sleep_for(chrono::milliseconds(1));
+				if (t0 != mPoll.mPollPeriodMs) { return; }
 			}
-			return true;
 		}
 
 		void TiLogCore::thrdFuncPoll()
@@ -2519,9 +2551,16 @@ namespace tilogspace
 				mMerge.mCV.notify_one();
 
 				// try lock when first run or deliver complete recently
-				unique_lock<decltype(mThreadStruQueue)> lk_queue(mThreadStruQueue, std::try_to_lock);
-				if (mPoll.mStatus == ON_FINAL_LOOP && !lk_queue.owns_lock()) { lk_queue.lock(); }
-				if (!lk_queue.owns_lock()) { continue; }
+				// force lock if in TiLogCore exit or exist dying threads
+				unique_lock<decltype(mThreadStruQueue)> lk_queue(mThreadStruQueue, std::defer_lock);
+				if (mPoll.mPollPeriodMs == TILOG_POLL_THREAD_SLEEP_MS_IF_EXIST_THREAD_DYING || mPoll.mStatus == ON_FINAL_LOOP)
+				{
+					lk_queue.lock();
+				} else
+				{
+					bool owns_lock = lk_queue.try_lock();
+					if (!owns_lock) { continue; }
+				}
 
 				for (auto it = mThreadStruQueue.waitMergeQueue.begin(); it != mThreadStruQueue.waitMergeQueue.end();)
 				{
@@ -2538,9 +2577,16 @@ namespace tilogspace
 					}
 				}
 
+				if (mThreadStruQueue.dyingQueue.empty()) { goto loop_end; }	   // no thread dying,skip find dead threads in availQueue
 				for (auto it = mThreadStruQueue.availQueue.begin(); it != mThreadStruQueue.availQueue.end();)
 				{
+					ThreadStru* pThreadStru = *it;
 					ThreadStru& threadStru = *(*it);
+					if (mThreadStruQueue.dyingQueue.count(pThreadStru) == 0)
+					{
+						++it;
+						continue;
+					}
 
 					std::mutex& mtx = threadStru.thrdExistMtx;
 					if (mtx.try_lock())
@@ -2549,12 +2595,18 @@ namespace tilogspace
 						DEBUG_PRINTV("thrd %s exit.move to waitMergeQueue\n", threadStru.tid->c_str());
 						mThreadStruQueue.waitMergeQueue.emplace_back(*it);
 						it = mThreadStruQueue.availQueue.erase(it);
+						mThreadStruQueue.dyingQueue.erase(pThreadStru);
 					} else
 					{
 						++it;
 					}
 				}
-			} while (PollThreadSleep());
+			loop_end:
+				mPoll.SetPollPeriodMs(
+					mThreadStruQueue.dyingQueue.empty()
+						? TILOG_POLL_THREAD_MAX_SLEEP_MS
+						: TILOG_POLL_THREAD_SLEEP_MS_IF_EXIST_THREAD_DYING);	// if exist dying threads , will search again
+			}
 
 			DEBUG_ASSERT(mToExit);
 			DEBUG_PRINTI("poll thrd prepare to exit,try last poll\n");

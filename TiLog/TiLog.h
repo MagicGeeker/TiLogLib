@@ -205,6 +205,7 @@ namespace tilogspace
 
 	constexpr static uint32_t TILOG_POLL_THREAD_MAX_SLEEP_MS = 1000;	// max poll period to ensure print every logs for every thread
 	constexpr static uint32_t TILOG_POLL_THREAD_MIN_SLEEP_MS = 100;	// min poll period to ensure print every logs for every thread
+	constexpr static uint32_t TILOG_POLL_THREAD_SLEEP_MS_IF_EXIST_THREAD_DYING = 5;	// poll period if some user threads are dying
 	constexpr static uint32_t TILOG_POLL_MS_ADJUST_PERCENT_RATE = 50;	// range(0,100),a percent number to adjust poll time
 	constexpr static uint32_t TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MIN_CENTI = 120;	// range(0,200],a min percent number to adjust deliver cache capacity
 	constexpr static uint32_t TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MAX_CENTI = 150;	// range(0,200],a max percent number to adjust deliver cache capacity
@@ -2020,7 +2021,11 @@ namespace tilogspace
 	static_assert(true || TILOG_IS_WITH_MILLISECONDS, "this micro must be defined");
 	static_assert(true || TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL, "this micro must be defined");
 
-	static_assert(TILOG_POLL_THREAD_MAX_SLEEP_MS > TILOG_POLL_THREAD_MIN_SLEEP_MS  && TILOG_POLL_THREAD_MIN_SLEEP_MS > 0, "fatal err!");
+	static_assert(
+		TILOG_POLL_THREAD_MAX_SLEEP_MS > TILOG_POLL_THREAD_MIN_SLEEP_MS
+			&& TILOG_POLL_THREAD_MIN_SLEEP_MS > TILOG_POLL_THREAD_SLEEP_MS_IF_EXIST_THREAD_DYING
+			&& TILOG_POLL_THREAD_SLEEP_MS_IF_EXIST_THREAD_DYING > 0,
+		"fatal err!");
 	static_assert(TILOG_POLL_MS_ADJUST_PERCENT_RATE > 0 && TILOG_POLL_MS_ADJUST_PERCENT_RATE < 100, "fatal err!");
 	static_assert(0 < TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MIN_CENTI, "fatal err!");
 	static_assert(TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MIN_CENTI <= TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MAX_CENTI, "fatal err!");
