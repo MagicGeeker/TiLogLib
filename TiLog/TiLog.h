@@ -1575,7 +1575,6 @@ namespace internal
 			}
 			create(TILOG_SINGLE_LOG_RESERVE_LEN);
 			TiLogBean& bean = *ext();
-			new (&bean.tiLogTime) TiLogBean::TiLogTime(EPlaceHolder{});
 			bean.file = file;
 			bean.fileLen = fileLen;
 			bean.line = line;

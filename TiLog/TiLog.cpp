@@ -1978,6 +1978,8 @@ namespace tilogspace
 			ThreadStru& stru = *GetThreadStru(&mThreadStruQueue.availQueue);
 			unique_lock<ThreadLocalSpinMutex> lk_local(stru.spinMtx);
 			bool isLocalFull = LocalCircularQueuePushBack(stru, pBean);
+			// init log time after stru is inited and push to local queue,to make sure log can be print ordered
+			new (&pBean->tiLogTime) TiLogBean::TiLogTime(EPlaceHolder{});
 
 			if (isLocalFull)
 			{
