@@ -161,14 +161,17 @@ static uint64_t SingleThreadTest(const char* testName, Runnable&& runnable)
 template <size_t N = 50>
 static uint64_t ComplexCalFunc(uint64_t x)
 {
-	int m = 0;
-	srand((unsigned)x);
-	for (int i = 1; i <= N; i++)
+	char buf1[1024] = { 0 };
+	char buf2[1024] = { 0 };
+	for (int i = 0; i < 1024; i++)
 	{
-		int m1 = rand();
-		int m2 = rand() % 10;
-		int m3 = rand() % 1000;
-		m += (m1 + m2 + m3);
+		buf2[i] = (char)i;
+	}
+	uint64_t m = 0;
+	for (int i = 0; i <= N; i++)
+	{
+		memcpy(buf1, buf2, 1024);
+		m += buf1[i % 1024] + x;
 	}
 	return (uint64_t)m;
 }
@@ -186,7 +189,7 @@ static double SingleLoopTimeTestFunc(const char* testName="")
 	constexpr uint64_t threads = testLoop_t::THREADS();
 	constexpr uint64_t LOOPS = testLoop_t::GET_SINGLE_THREAD_LOOPS();
 
-	uint64_t m = 0;
+	std::atomic<uint64_t> m {0};
 	uint64_t ns = MultiThreadTest<testLoop_t>(testName, tilogspace::EPrinterID::PRINTER_TILOG_FILE, [LOOPS, &m](int index) {
 		int a = 0;
 		for (uint64_t loops = LOOPS; loops; loops--)

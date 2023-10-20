@@ -418,6 +418,7 @@ TEST_CASE("none_multi_thread_memory_leak_stress_test_____________________")
 		constexpr static bool ASYNC_SET_PRINTERS() { return true; }
 		constexpr static int32_t THREADS() { return 10; }
 		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return 50; }
+		constexpr static bool PRINT_TOTAL_TIME() { return false; }
 	};
 
 
@@ -430,7 +431,6 @@ TEST_CASE("none_multi_thread_memory_leak_stress_test_____________________")
 				{
 					TILOGE << "loop= " << loops << " j= " << j;
 				}
-				mycout << " " << index << " to exit \n";
 
 			});
 		mycout << "test round " << i << " complete!\n";
@@ -458,7 +458,7 @@ TEST_CASE("none_multi_thread_set_printer_test_____________________")
 			for (uint64_t j = 0; j < loops; j++)
 			{
 				TILOGE << "loop= " << loops << " j= " << j;
-				TiLog::SetPrinters(EPrinterID::PRINTER_ID_NONE);
+				if (j % 10 == 0) { TiLog::SetPrinters(EPrinterID::PRINTER_ID_NONE); }
 			}
 			mycout << " " << index << " to exit \n";
 		});
