@@ -1418,6 +1418,7 @@ namespace tilogspace
 		static void EnablePrinter(EPrinterID printer);
 		static void DisablePrinter(EPrinterID printer);
 		static void SetPrinters(printer_ids_t printerIds);
+		static void AfterSync(callback_t callback);
 
 	public:
 		TILOG_COMPLEXITY_FOR_THESE_FUNCTIONS(TILOG_TIME_COMPLEXITY_O(1), TILOG_SPACE_COMPLEXITY_O(1))
@@ -1440,7 +1441,6 @@ namespace tilogspace
 	public:
 		// usually only use internally
 		static void PushLog(internal::TiLogBean* pBean);
-		static void Destroy();
 
 	private:
 		TiLog();

@@ -1244,7 +1244,7 @@ namespace tilogspace
 
 			using callback_t = TiLog::callback_t;
 			inline static void Sync();
-			inline static void SyncAndSetPrinter(callback_t func);
+			inline static void AfterDeliver(callback_t func);
 
 			TiLogCore();
 			~TiLogCore();
@@ -1262,7 +1262,7 @@ namespace tilogspace
 
 			void ISync();
 
-			void ISyncAndSetPrinter(callback_t func);
+			void IAfterDeliver(callback_t func);
 
 			inline ThreadStru* GetThreadStru(List<ThreadStru*>* pDstQueue = nullptr);
 
@@ -1928,7 +1928,7 @@ namespace tilogspace
 
 		inline void TiLogCore::Sync() { getRInstance().ISync(); }
 
-		void TiLogCore::SyncAndSetPrinter(callback_t func) { getRInstance().ISyncAndSetPrinter(func); }
+		void TiLogCore::AfterDeliver(callback_t func) { getRInstance().IAfterDeliver(func); }
 
 		void TiLogCore::ISync()
 		{
@@ -1937,11 +1937,12 @@ namespace tilogspace
 			while (mDeliver.mDeliveredTimes == counter)	   // make sure deliver at least once
 			{
 				mMerge.mCV.notify_one();	  // notify merge thread
-				std::this_thread::yield();	  // wait for deliver thread
+				// wait for deliver thread, maybe thrd complete at once after notify,so wait_for nanos and wake up to check again.
+				synchronized_u(lk_wait, mDeliver.mMtxWait) { mDeliver.mCvWait.wait_for(lk_wait, std::chrono::nanoseconds(500)); }
 			}
 		}
 
-		void TiLogCore::ISyncAndSetPrinter(callback_t func)
+		void TiLogCore::IAfterDeliver(callback_t func)
 		{
 			struct CallBack : DeliverCallBack
 			{
@@ -2671,17 +2672,20 @@ namespace tilogspace
 	bool TiLog::IsPrinterActive(EPrinterID printer) { return TiLogPrinterManager::IsPrinterActive(printer); }
 	void TiLog::EnablePrinter(EPrinterID printer)
 	{
-		TiLogCore::SyncAndSetPrinter([printer] { AsyncEnablePrinter(printer); });
+		TiLogCore::AfterDeliver([printer] { AsyncEnablePrinter(printer); });
 	}
 	void TiLog::DisablePrinter(EPrinterID printer)
 	{
-		TiLogCore::SyncAndSetPrinter([printer] { AsyncEnablePrinter(printer); });
+		TiLogCore::AfterDeliver([printer] { AsyncEnablePrinter(printer); });
 	}
 
 	void TiLog::SetPrinters(printer_ids_t printerIds)
 	{
-		TiLogCore::SyncAndSetPrinter([printerIds] { AsyncSetPrinters(printerIds); });
+		TiLogCore::AfterDeliver([printerIds] { AsyncSetPrinters(printerIds); });
 	}
+
+	void TiLog::AfterSync(callback_t callback) { TiLogCore::AfterDeliver(callback); }
+
 
 	TiLog::TiLog()
 	{
