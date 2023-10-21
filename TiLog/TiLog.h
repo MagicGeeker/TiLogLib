@@ -125,6 +125,10 @@
 #define TILOG_USE_USER_MODE_CLOCK  TRUE  // TRUE or FALSE,if true use user mode clock,otherwise use kernel mode clock
 #define TILOG_IS_WITH_MILLISECONDS TRUE  // TRUE or FALSE,if false no ms info in timestamp
 
+#define TILOG_DEFINE__FUNC__     constexpr static char __func__[]="not in func";  // if TiLogStream is created not inside function,__func__ may be not defined
+#define TILOG_IS_WITH_FUNCTION_NAME TRUE  // TRUE or FALSE,if false no function name in print
+#define TILOG_IS_WITH_FILE_LINE_INFO FALSE  // TRUE or FALSE,if false no file and line in print
+
 #define TILOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER "a:/" // define the default file printer output path,MUST be an ANSI string and end with /
 
 //define global memory manage functions
@@ -200,6 +204,8 @@ namespace tilogspace
 
 	// interval of user mode clock sync with kernel(microseconds),may affect the order of logs if multi-thread
 	constexpr static uint32_t TILOG_USER_MODE_CLOCK_UPDATE_US = TILOG_IS_WITH_MILLISECONDS ? 100 : 100000;
+
+	constexpr static uint32_t TILOG_CODE_CACHED_LINE_DEC_MAX = (19999 + 1); // cached line -> line string table size
 
 	constexpr static uint32_t TILOG_NO_USED_STREAM_LENGTH = 64;	// no used stream length
 
@@ -1285,6 +1291,19 @@ namespace tilogspace
 	namespace internal
 	{
 #ifdef H__________________________________________________TiLogBean__________________________________________________
+
+#if TILOG_IS_WITH_FILE_LINE_INFO
+#define TILOGBEAN_FILE_LINE_DECLARE(...) __VA_ARGS__;
+#else
+#define TILOGBEAN_FILE_LINE_DECLARE(...)
+#endif
+
+#if TILOG_IS_WITH_FUNCTION_NAME
+#define TILOGBEAN_FUNCTION_DECLARE(...) __VA_ARGS__;
+#else
+#define TILOGBEAN_FUNCTION_DECLARE(...)
+#endif
+
 		class TiLogBean : public TiLogObject
 		{
 		public:
@@ -1300,15 +1319,16 @@ namespace tilogspace
 
 		public:
 			DEBUG_CANARY_UINT32(flag1)
-			const char* file;
-			DEBUG_CANARY_UINT32(flag2)
 			TiLogTime tiLogTime;
-			uint16_t line;
-			uint16_t fileLen;
+			TILOGBEAN_FILE_LINE_DECLARE(const char* file;)
+			TILOGBEAN_FUNCTION_DECLARE(const char* func;)
+			TILOGBEAN_FILE_LINE_DECLARE(uint32_t line;)
+			TILOGBEAN_FILE_LINE_DECLARE(uint16_t fileLen;)
+			TILOGBEAN_FUNCTION_DECLARE(uint8_t funcLen;)
 			char level;
 			DEBUG_DECLARE(uint8_t tidlen)
 			DEBUG_CANARY_UINT64(flag3)
-			char datas[];
+			char datas[];	 //{tid}{userlog}
 
 		public:
 			const TiLogTime& time() const { return tiLogTime; }
@@ -1318,8 +1338,14 @@ namespace tilogspace
 			inline static void DestroyInstance(TiLogBean* p)
 			{
 				check(p);
+#if TILOG_IS_WITH_FILE_LINE_INFO
 				DEBUG_RUN(p->file = nullptr);
 				DEBUG_RUN(p->line = 0, p->fileLen = 0);
+#endif
+#if TILOG_IS_WITH_FUNCTION_NAME
+				DEBUG_RUN(p->func = nullptr);
+				DEBUG_RUN(p->funcLen = 0);
+#endif
 				DEBUG_RUN(p->level = (char)ELogLevelFlag::FREED);
 				tifree(p);
 			}
@@ -1328,8 +1354,14 @@ namespace tilogspace
 			{
 				auto f = [p] {
 					DEBUG_ASSERT(p != nullptr);	   // in this program,p is not null
+#if TILOG_IS_WITH_FILE_LINE_INFO
 					DEBUG_ASSERT(!(p->file == nullptr));
 					DEBUG_ASSERT(!(p->line == 0 || p->fileLen == 0));
+#endif
+#if TILOG_IS_WITH_FUNCTION_NAME
+					DEBUG_ASSERT(!(p->func == nullptr));
+					DEBUG_ASSERT(!(p->funcLen == 0));
+#endif
 					for (auto c : LOG_PREFIX)
 					{
 						if (c == p->level) { return; }
@@ -1567,7 +1599,7 @@ namespace internal
 		inline explicit TiLogStream(EPlaceHolder) noexcept : StringType(EPlaceHolder{}) { bindToNoUseStream(); }
 
 		// make a valid stream
-		inline TiLogStream(uint32_t lv, const char* file, uint16_t fileLen, uint16_t line) : StringType(EPlaceHolder{})
+		inline TiLogStream(uint32_t lv, const char* file, uint16_t fileLen,const char* func, uint8_t funcLen, uint32_t line) : StringType(EPlaceHolder{})
 		{
 			if (lv > tilogspace::TiLog::GetLogLevel())
 			{
@@ -1576,9 +1608,15 @@ namespace internal
 			}
 			create(TILOG_SINGLE_LOG_RESERVE_LEN);
 			TiLogBean& bean = *ext();
+#if TILOG_IS_WITH_FILE_LINE_INFO
 			bean.file = file;
 			bean.fileLen = fileLen;
 			bean.line = line;
+#endif
+#if TILOG_IS_WITH_FUNCTION_NAME
+			bean.func = func;
+			bean.funcLen = funcLen;
+#endif
 			bean.level = tilogspace::LOG_PREFIX[lv];
 			const String* tidstr = tilogspace::internal::GetThreadIDString();
 			DEBUG_RUN(bean.tidlen = (uint8_t)(tidstr->size() - 1));
@@ -1981,37 +2019,34 @@ namespace internal
 	};
 }	 // namespace tilogspace
 
-inline static tilogspace::TiLogNoneStream TiLogCreateNewTiLogNoneStream(uint32_t)
-{
-	return tilogspace::TiLogNoneStream();
-}
-template <uint32_t fileLen, uint32_t line>
-inline static tilogspace::TiLogStream TiLogCreateNewTiLogStream(const char* file, uint32_t lv)
-{
-	return tilogspace::TiLogStream(lv, file, fileLen, line);
-}
 
 namespace tilogspace
 {
-	template <uint32_t fileLen, uint32_t line, uint32_t level>
-	inline static auto CreateNewTiLogStream(const char* file) ->
+	template <uint32_t fileLen, uint32_t funcLen, uint32_t line, uint32_t level>
+	inline static auto CreateNewTiLogStream(const char* file, const char* func) ->
 		typename std::conditional<level <= STATIC_LOG_LEVEL, TiLogStream, TiLogNoneStream>::type
 	{
+		static_assert(
+			std::is_array<typename std::remove_reference<decltype(__FILE__)>::type>::value,
+			"fatal error,only array can use sizeof to calculator length");
+		static_assert(
+			std::is_array<typename std::remove_reference<decltype(__func__)>::type>::value,
+			"fatal error,only array can use sizeof to calculator length");
 		static_assert(fileLen <= UINT16_MAX, "fatal error,file path is too long");
-		static_assert(line <= UINT16_MAX, "fatal error,file line too big");
 		static_assert(level >= tilogspace::ELevel::MIN, "fatal error,level overflow");
 		static_assert(level <= tilogspace::ELevel::MAX, "fatal error,level overflow");
-		return { level, file, fileLen, line };
+		constexpr uint8_t funclen = funcLen > UINT8_MAX ? UINT8_MAX : funcLen;	  // truncate func if >256bytes
+		return { level, file, fileLen, func, funclen, line };
 	}
 
-	template <uint32_t fileLen, uint32_t line>
-	inline static TiLogStream CreateNewTiLogStream(const char* file, uint32_t level)
+	template <uint32_t fileLen, uint32_t funcLen, uint32_t line>
+	inline static TiLogStream CreateNewTiLogStream(const char* file, const char* func, uint32_t level)
 	{
 		static_assert(fileLen <= UINT16_MAX, "fatal error,file path is too long");
-		static_assert(line <= UINT16_MAX, "fatal error,file line too big");
 		DEBUG_ASSERT3(level >= tilogspace::ELevel::MIN, file, line, level);
 		DEBUG_ASSERT3(level <= tilogspace::ELevel::MAX, file, line, level);
-		return { level, file, fileLen, line };
+		constexpr uint8_t funclen = funcLen > UINT8_MAX ? UINT8_MAX : funcLen;	  // truncate func if >256bytes
+		return { level, file, (uint16_t)fileLen, func, funclen, line };
 	}
 }	 // namespace tilogspace
 
@@ -2019,6 +2054,8 @@ namespace tilogspace
 {
 	static_assert(sizeof(size_type) <= sizeof(size_t), "fatal err!");
 	static_assert(true || TILOG_IS_WITH_MILLISECONDS, "this micro must be defined");
+	static_assert(true || TILOG_IS_WITH_FUNCTION_NAME, "this micro must be defined");
+	static_assert(true || TILOG_IS_WITH_FILE_LINE_INFO, "this micro must be defined");
 	static_assert(true || TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL, "this micro must be defined");
 
 	static_assert(
@@ -2039,11 +2076,11 @@ namespace tilogspace
 
 // clang-format off
 
-#define TILOG_INTERNAL_CREATE_TILOG_STREAM_DYNAMIC_LV(lv)                                                                                             \
-	tilogspace::CreateNewTiLogStream<(sizeof(__FILE__) - 1), __LINE__>(__FILE__, (lv))
+#define TILOG_INTERNAL_CREATE_TILOG_STREAM_DYNAMIC_LV(lv)                                                                                  \
+	tilogspace::CreateNewTiLogStream<(sizeof(__FILE__) - 1), (sizeof(__func__) - 1), __LINE__>(__FILE__, __func__, (lv))
 
 #define TILOG_INTERNAL_CREATE_TILOG_STREAM(lv)                                                                                             \
-	tilogspace::CreateNewTiLogStream<(sizeof(__FILE__) - 1), __LINE__, (lv)>(__FILE__)
+	tilogspace::CreateNewTiLogStream<(sizeof(__FILE__) - 1), (sizeof(__func__) - 1), __LINE__, (lv)>(__FILE__, __func__)
 
 // clang-format on
 

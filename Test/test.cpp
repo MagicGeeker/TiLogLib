@@ -33,7 +33,7 @@ using namespace tilogspace;
 #define terminal_single_thread_long_string_log_test_____________________
 #define file_static_log_test_____________________
 #define terminal_multi_way_log_test_____________________
-
+#define terminal_log_show_test_____________________
 
 
 //__________________________________________________long time test__________________________________________________//
@@ -713,7 +713,7 @@ TEST_CASE("terminal_multi_way_log_test_____________________")
 	{
 		TILOGI.print("\n\n");
 		TILOGI.print("e31 hello {},format test {} !", "world", 0);
-		TILOGI.print("e32 str{} int{} double{} NP{}!", "abc", 0, 3.56, nullptr);
+		TILOGI.print("e32 str {} int {} double {} NP {} !", "abc", 0, 3.56, nullptr);
 		TILOGI.print("hello {\n");
 		TILOGI.print("hello }\n");
 		TILOGI.print("hello {}\n");
@@ -732,6 +732,26 @@ TEST_CASE("terminal_multi_way_log_test_____________________")
 	}
 }
 #endif
+
+#ifdef terminal_log_show_test_____________________
+TEST_CASE("terminal_log_show_test_____________________")
+{
+	TICOUT << "terminal_log_show_test_____________________\n";
+	TiLog::SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
+	TILOGI << "line ?";
+#line 66666
+	TILOGI << "line 66666";
+#line 999999
+	TILOGI << "line 999999";
+#line 1000000
+	TILOGI << "line 1000000";
+#line 16777215
+	TILOGI << "line 16,777,215";
+#line INT32_MAX
+	TILOGI << "line INT32_MAX";
+}
+#endif
+
 
 #ifdef special_log_test_____________________
 TEST_CASE("special_log_test_____________________")
