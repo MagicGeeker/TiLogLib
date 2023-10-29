@@ -3,6 +3,9 @@ project(TiLog)
 
 set(CMAKE_CXX_STANDARD 11)
 
+#TILOG_CUSTOMIZATION_H is used for customer to override tilog config
+add_compile_definitions(TILOG_CUSTOMIZATION_H="${PROJECT_SOURCE_DIR}/Test/modtest.h")
+
 if(MSVC)
     add_compile_options(/Zc:__cplusplus)
     add_definitions("-D _CRT_SECURE_NO_WARNINGS")

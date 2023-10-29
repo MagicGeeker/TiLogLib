@@ -78,9 +78,9 @@ namespace funcspace
 	template <typename TestLoopType = multi_thread_test_loop_t, typename Runnable>
 	static uint64_t Test(const char* testName, tilogspace::printer_ids_t ids, Runnable&& runnable)
 	{
-		if_constexpr(TestLoopType::ASYNC_SET_PRINTERS()) { tilogspace::TiLog::AsyncSetPrinters(ids); }
-		else { tilogspace::TiLog::SetPrinters(ids); }
-		bool terminal_enabled = tilogspace::TiLog::IsPrinterInPrinters(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL, ids);
+		if_constexpr(TestLoopType::ASYNC_SET_PRINTERS()) { TILOG_GET_DEFAULT_MODULE_REF.AsyncSetPrinters(ids); }
+		else { TILOG_GET_DEFAULT_MODULE_REF.SetPrinters(ids); }
+		bool terminal_enabled = TILOG_GET_DEFAULT_MODULE_REF.IsPrinterInPrinters(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL, ids);
 		if (!terminal_enabled) { TICOUT << "\n\n========Test: " << testName << '\n'; }
 		TILOGA << "\n\n========Test: " << testName << '\n';
 		constexpr uint64_t loops = TestLoopType::GET_SINGLE_THREAD_LOOPS();

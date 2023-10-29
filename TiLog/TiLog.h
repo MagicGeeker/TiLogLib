@@ -19,6 +19,7 @@
 #include <string_view>
 #endif
 
+#include <array>
 #include <list>
 #include <vector>
 #include <queue>
@@ -113,9 +114,14 @@
 #define TILOG_NOINLINE
 #endif
 
-
+#ifdef __GNUC__
+#ifdef __MINGW32__
+#define TILOG_COMPILER_MINGW
+#endif
+#endif
 
 #define  TILOG_INTERNAL_REGISTER_PRINTERS_MACRO(...)  __VA_ARGS__
+#define  TILOG_INTERNAL_REGISTER_MODULES_MACRO(...)  __VA_ARGS__
 
 #define TILOG_INTERNAL_STD_STEADY_CLOCK 1
 #define TILOG_INTERNAL_STD_SYSTEM_CLOCK 2
@@ -190,7 +196,7 @@ namespace tilogspace
 		GLOBAL_CLOSED = 2,			//only used in TiLog::SetLogLevel()
 		ALWAYS, FATAL, ERROR, WARN, INFO, DEBUG, VERBOSE,
 		GLOBAL_OPEN = VERBOSE,
-		STATIC_LOG_LEVEL = VERBOSE, // set the static log level,dynamic log level will always <= static log level
+
 		MIN = ALWAYS,
 		MAX = VERBOSE + 1,
 #ifdef NDEBUG
@@ -212,7 +218,8 @@ namespace tilogspace
 	constexpr static uint32_t TILOG_POLL_THREAD_MAX_SLEEP_MS = 1000;	// max poll period to ensure print every logs for every thread
 	constexpr static uint32_t TILOG_POLL_THREAD_MIN_SLEEP_MS = 100;	// min poll period to ensure print every logs for every thread
 	constexpr static uint32_t TILOG_POLL_THREAD_SLEEP_MS_IF_EXIST_THREAD_DYING = 5;	// poll period if some user threads are dying
-	constexpr static uint32_t TILOG_POLL_MS_ADJUST_PERCENT_RATE = 50;	// range(0,100),a percent number to adjust poll time
+	constexpr static uint32_t TILOG_POLL_THREAD_SLEEP_MS_IF_TO_EXIT = 1;	// poll period if some user threads are dying
+	constexpr static uint32_t TILOG_POLL_MS_ADJUST_PERCENT_RATE = 75;	// range(0,100),a percent number to adjust poll time
 	constexpr static uint32_t TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MIN_CENTI = 120;	// range(0,200],a min percent number to adjust deliver cache capacity
 	constexpr static uint32_t TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MAX_CENTI = 150;	// range(0,200],a max percent number to adjust deliver cache capacity
 	constexpr static uint32_t TILOG_DELIVER_CACHE_DEFAULT_MEMORY_BYTES = 100<<10;	// default memory of a single deliver cache
@@ -245,17 +252,61 @@ namespace tilogspace
 	enum EPrinterID : printer_ids_t
 	{
 		PRINTER_ID_NONE = 0,
-		PRINTER_ID_BEGIN = 1,				// begin from 1
+		PRINTER_ID_BEGIN = 1,				// not none printer id begin from 1
 		PRINTER_TILOG_FILE = 1 << 0,		// internal file printer
 		PRINTER_TILOG_TERMINAL = 1 << 1,	// internal terminal printer
 											// user-defined printers,must be power of 2
 											// user-defined printers,must be power of 2
 		PRINTER_ID_MAX						// end with PRINTER_ID_MAX
 	};
-	constexpr static printer_ids_t DEFAULT_ENABLED_PRINTERS = PRINTER_TILOG_FILE;	 // main printer
 
+}
+#ifdef TILOG_CUSTOMIZATION_H
+#define TILOG_MODULE_DECLARE
+#include TILOG_CUSTOMIZATION_H
+#undef TILOG_MODULE_DECLARE
+#else
+namespace tilogspace
+{
+	enum ETiLogModule : uint8_t
+	{
+		TILOG_MODULE_START = 0,
+		//...// user defined mod id begin
+		TILOG_MODULE_GLOBAL_FILE = 0,
+		TILOG_MODULE_GLOBAL_TERMINAL = 1,
+		TILOG_MODULE_GLOBAL_FILE_TERMINAL = 2,
+		//...// user defined mod id end
+		TILOG_MODULES
+	};
+
+//#define TILOG_REGISTER_MODULES   TILOG_INTERNAL_REGISTER_MODULES_MACRO(      \
+//        tilogspace::TiLogModFile,                                \
+//        tilogspace::TiLogModTerminal,                                \
+//        tilogspace::TiLogModFileTerminal                                )
+
+#define TILOG_REGISTER_MODULES   TILOG_INTERNAL_REGISTER_MODULES_MACRO(      \
+        tilogspace::TiLogModFile                                )
+
+
+#define TILOG_GET_DEFAULT_MODULE_REF tilogspace::TiLog::getRInstance().GetMoudleRef<tilogspace::TILOG_MODULE_START>()
+
+	struct TiLogModuleSpec
+	{
+		ETiLogModule mod;
+		const char moduleName[32];
+		const char data[256];
+		printer_ids_t defaultEnabledPrinters;
+		ELevel STATIC_LOG_LEVEL; // set the static log level,dynamic log level will always <= static log level
+	};
+
+	constexpr static TiLogModuleSpec TILOG_ACTIVE_MODULE_SPECS[] = {
+		{ TILOG_MODULE_GLOBAL_FILE, "global_f", "a:/global_f/", PRINTER_TILOG_FILE,VERBOSE },
+//		{ TILOG_MODULE_GLOBAL_TERMINAL, "global_t", "", PRINTER_TILOG_TERMINAL,INFO },
+//		{ TILOG_MODULE_GLOBAL_FILE_TERMINAL, "global_ft", "a:/global_ft/", PRINTER_TILOG_FILE | PRINTER_TILOG_TERMINAL,INFO }
+	};
+	constexpr static size_t TILOG_MODULE_SPECS_SIZE= sizeof(TILOG_ACTIVE_MODULE_SPECS)/sizeof(TILOG_ACTIVE_MODULE_SPECS[0]);
 }	 // namespace tilogspace
-
+#endif
 
 
 
@@ -586,9 +637,7 @@ namespace tilogspace
 	{
 		class TiLogBean;
 
-		using itid_t = std::conditional<TILOG_IS_64BIT_OS,uint64_t,uint32_t>::type;
 		const String* GetThreadIDString();
-		itid_t GetThreadIntID();
 
 		enum class ELogLevelFlag : char
 		{
@@ -1326,6 +1375,8 @@ namespace tilogspace
 			TILOGBEAN_FILE_LINE_DECLARE(uint16_t fileLen;)
 			TILOGBEAN_FUNCTION_DECLARE(uint8_t funcLen;)
 			char level;
+			ETiLogModule mod;
+
 			DEBUG_DECLARE(uint8_t tidlen)
 			DEBUG_CANARY_UINT64(flag3)
 			char datas[];	 //{tid}{userlog}
@@ -1385,12 +1436,15 @@ namespace tilogspace
 		class TiLogPrinterManager;
 		class TiLogPrinterData;
 		struct TiLogNiftyCounterIniter;
+		struct TiLogEngine;
+		struct TiLogEngines;
 	}	 // namespace internal
 	TILOG_ABSTRACT class TiLogPrinter : public TiLogObject
 	{
 		friend class internal::TiLogPrinterManager;
 
 	public:
+		using task_t = std::function<void()>;
 		using TiLogBean = tilogspace::internal::TiLogBean;
 		using TiLogTime = tilogspace::internal::TiLogBean::TiLogTime;
 		struct buf_t
@@ -1410,7 +1464,7 @@ namespace tilogspace
 
 		virtual EPrinterID getUniqueID() const = 0;
 
-		TiLogPrinter();
+		TiLogPrinter(void* engine);
 		virtual ~TiLogPrinter();
 
 	private:
@@ -1418,22 +1472,24 @@ namespace tilogspace
 	};
 
 #ifdef H__________________________________________________TiLog__________________________________________________
-	class TiLog final
+	class TiLogModBase
 	{
-		friend struct internal::TiLogNiftyCounterIniter;
+		friend struct internal::TiLogEngine;
+		friend struct internal::TiLogEngines;
+		friend class internal::TiLogPrinterManager;
 	public:
 		TILOG_COMPLEXITY_FOR_THESE_FUNCTIONS(TILOG_TIME_COMPLEXITY_O(1), TILOG_SPACE_COMPLEXITY_O(1))
 		// printer must be static and always valid,so it can NOT be removed but can be disabled
 		// async functions: MAY effect(overwrite) previous printerIds setting
-		static void AsyncEnablePrinter(EPrinterID printer);
-		static void AsyncDisablePrinter(EPrinterID printer);
-		static void AsyncSetPrinters(printer_ids_t printerIds);
+		void AsyncEnablePrinter(EPrinterID printer);
+		void AsyncDisablePrinter(EPrinterID printer);
+		void AsyncSetPrinters(printer_ids_t printerIds);
 		// return current active printers
-		static printer_ids_t GetPrinters();
+		printer_ids_t GetPrinters();
 		// return the printer is active or not
-		static bool IsPrinterActive(EPrinterID printer);
+		bool IsPrinterActive(EPrinterID printer);
 		// return if the printers contain the printer
-		static bool IsPrinterInPrinters(EPrinterID printer, printer_ids_t printers);
+		bool IsPrinterInPrinters(EPrinterID printer, printer_ids_t printers);
 
 	public:
 		TILOG_COMPLEXITY_FOR_THESE_FUNCTIONS(TILOG_TIME_COMPLEXITY_O(n), TILOG_SPACE_COMPLEXITY_O(n))
@@ -1441,43 +1497,86 @@ namespace tilogspace
 		using callback_t = std::function<void()>;
 
 		// sync the cached log to printers's task queue,but NOT wait for IO
-		static void Sync();
+		void Sync();
 		// sync the cached log to printers's task queue,and wait for IO
-		static void FSync();
+		void FSync();
 
 		// printer must be static and always valid,so it can NOT be removed but can be disabled
 		// sync functions: NOT effect(overwrite) previous printerIds setting.
 		// Will call TiLog::Sync() function before set new printers
-		static void EnablePrinter(EPrinterID printer);
-		static void DisablePrinter(EPrinterID printer);
-		static void SetPrinters(printer_ids_t printerIds);
-		static void AfterSync(callback_t callback);
+		void EnablePrinter(EPrinterID printer);
+		void DisablePrinter(EPrinterID printer);
+		void SetPrinters(printer_ids_t printerIds);
+		void AfterSync(callback_t callback);
 
 	public:
 		TILOG_COMPLEXITY_FOR_THESE_FUNCTIONS(TILOG_TIME_COMPLEXITY_O(1), TILOG_SPACE_COMPLEXITY_O(1))
 		// return how many logs has been printed,NOT accurate
-		static uint64_t GetPrintedLogs();
+		uint64_t GetPrintedLogs();
 		// set printed log number=0
-		static void ClearPrintedLogsNumber();
+		void ClearPrintedLogsNumber();
 
 
 	public:
 		TILOG_COMPLEXITY_FOR_THESE_FUNCTIONS(TILOG_TIME_COMPLEXITY_O(1), TILOG_SPACE_COMPLEXITY_O(1))
 		// Set or get dynamic log level.If TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL is FALSE,SetLogLevel take no effect.
-#if TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL == TRUE
-		static void SetLogLevel(ELevel level);
-		static ELevel GetLogLevel();
-#else
-		static void SetLogLevel(ELevel level) {}
-		static constexpr ELevel GetLogLevel() { return ELevel::STATIC_LOG_LEVEL; }
-#endif
+
+		void SetLogLevel(ELevel level);
+		ELevel GetLogLevel();
 	public:
 		// usually only use internally
-		static void PushLog(internal::TiLogBean* pBean);
+		void PushLog(internal::TiLogBean* pBean);
+
+	protected:
+		internal::TiLogEngine* engine{};
+		ETiLogModule mod{};
+	};
+
+#ifdef TILOG_CUSTOMIZATION_H
+#define TILOG_MODULE_IMPLEMENT
+#include TILOG_CUSTOMIZATION_H
+#undef TILOG_MODULE_IMPLEMENT
+#else
+	class TiLogModFile : public TiLogModBase
+	{
+	public:
+		inline TiLogModFile() { mod = ETiLogModule::TILOG_MODULE_GLOBAL_FILE; }
+	};
+
+	class TiLogModTerminal : public TiLogModBase
+	{
+	public:
+		inline TiLogModTerminal() { mod = ETiLogModule::TILOG_MODULE_GLOBAL_TERMINAL; }
+	};
+
+	class TiLogModFileTerminal : public TiLogModBase
+	{
+	public:
+		inline TiLogModFileTerminal() { mod = ETiLogModule::TILOG_MODULE_GLOBAL_FILE_TERMINAL; }
+	};
+#endif
+	using TiLogMods = std::tuple<TILOG_REGISTER_MODULES>;
+
+	class TiLog final
+	{
+		friend struct internal::TiLogNiftyCounterIniter;
+
+	private:
+		TiLogMods* mods;
+
+	public:
+		template <ETiLogModule mod>
+		inline typename std::tuple_element<mod, TiLogMods>::type GetMoudleRef()
+		{
+			return std::get<mod>(*mods);
+		}
+		TiLogModBase& GetMoudleBaseRef(ETiLogModule mod);
+
+		static TiLog& getRInstance();
+
 
 	private:
 		TiLog();
-
 		~TiLog();
 	};
 
@@ -1599,15 +1698,18 @@ namespace internal
 		inline explicit TiLogStream(EPlaceHolder) noexcept : StringType(EPlaceHolder{}) { bindToNoUseStream(); }
 
 		// make a valid stream
-		inline TiLogStream(uint32_t lv, const char* file, uint16_t fileLen,const char* func, uint8_t funcLen, uint32_t line) : StringType(EPlaceHolder{})
+		inline TiLogStream(
+			ETiLogModule mod, uint32_t lv, const char* file, uint16_t fileLen, const char* func, uint8_t funcLen, uint32_t line)
+			: StringType(EPlaceHolder{})
 		{
-			if (lv > tilogspace::TiLog::GetLogLevel())
+			if (lv > TiLog::getRInstance().GetMoudleBaseRef(mod).GetLogLevel())
 			{
 				bindToNoUseStream();
 				return;
 			}
 			create(TILOG_SINGLE_LOG_RESERVE_LEN);
 			TiLogBean& bean = *ext();
+			bean.mod = mod;
 #if TILOG_IS_WITH_FILE_LINE_INFO
 			bean.file = file;
 			bean.fileLen = fileLen;
@@ -1622,7 +1724,6 @@ namespace internal
 			DEBUG_RUN(bean.tidlen = (uint8_t)(tidstr->size() - 1));
 			this->appends(*tidstr);
 		}
-
 
 		inline ~TiLogStream()
 		{
@@ -1639,7 +1740,7 @@ namespace internal
 			case ELogLevelFlag::D:
 			case ELogLevelFlag::V:
 				DEBUG_RUN(TiLogBean::check(this->ext()));
-				TiLog::PushLog(this->ext());
+				TiLog::getRInstance().GetMoudleBaseRef(ext()->mod).PushLog(this->ext());
 				// goto next case
 			case ELogLevelFlag::NO_USE:
 				// no need set pCore = nullptr,do nothing and shortly call do_overwrited_super_destructor
@@ -2022,9 +2123,12 @@ namespace internal
 
 namespace tilogspace
 {
-	template <uint32_t fileLen, uint32_t funcLen, uint32_t line, uint32_t level>
+	static constexpr ELevel GetLogLevel(ETiLogModule MOD) { return TILOG_ACTIVE_MODULE_SPECS[MOD].STATIC_LOG_LEVEL; }
+
+	template <
+		uint32_t fileLen, uint32_t funcLen, uint32_t line, uint32_t level, ETiLogModule MOD = tilogspace::ETiLogModule::TILOG_MODULE_START>
 	inline static auto CreateNewTiLogStream(const char* file, const char* func) ->
-		typename std::conditional<level <= STATIC_LOG_LEVEL, TiLogStream, TiLogNoneStream>::type
+		typename std::conditional<level <= GetLogLevel(MOD), TiLogStream, TiLogNoneStream>::type
 	{
 		static_assert(
 			std::is_array<typename std::remove_reference<decltype(__FILE__)>::type>::value,
@@ -2036,17 +2140,17 @@ namespace tilogspace
 		static_assert(level >= tilogspace::ELevel::MIN, "fatal error,level overflow");
 		static_assert(level <= tilogspace::ELevel::MAX, "fatal error,level overflow");
 		constexpr uint8_t funclen = funcLen > UINT8_MAX ? UINT8_MAX : funcLen;	  // truncate func if >256bytes
-		return { level, file, fileLen, func, funclen, line };
+		return { MOD, level, file, fileLen, func, funclen, line };
 	}
 
-	template <uint32_t fileLen, uint32_t funcLen, uint32_t line>
+	template <uint32_t fileLen, uint32_t funcLen, uint32_t line, ETiLogModule MOD = tilogspace::ETiLogModule::TILOG_MODULE_START>
 	inline static TiLogStream CreateNewTiLogStream(const char* file, const char* func, uint32_t level)
 	{
 		static_assert(fileLen <= UINT16_MAX, "fatal error,file path is too long");
 		DEBUG_ASSERT3(level >= tilogspace::ELevel::MIN, file, line, level);
 		DEBUG_ASSERT3(level <= tilogspace::ELevel::MAX, file, line, level);
 		constexpr uint8_t funclen = funcLen > UINT8_MAX ? UINT8_MAX : funcLen;	  // truncate func if >256bytes
-		return { level, file, (uint16_t)fileLen, func, funclen, line };
+		return { MOD, level, file, (uint16_t)fileLen, func, funclen, line };
 	}
 }	 // namespace tilogspace
 
@@ -2061,7 +2165,8 @@ namespace tilogspace
 	static_assert(
 		TILOG_POLL_THREAD_MAX_SLEEP_MS > TILOG_POLL_THREAD_MIN_SLEEP_MS
 			&& TILOG_POLL_THREAD_MIN_SLEEP_MS > TILOG_POLL_THREAD_SLEEP_MS_IF_EXIST_THREAD_DYING
-			&& TILOG_POLL_THREAD_SLEEP_MS_IF_EXIST_THREAD_DYING > 0,
+			&& TILOG_POLL_THREAD_SLEEP_MS_IF_EXIST_THREAD_DYING > TILOG_POLL_THREAD_SLEEP_MS_IF_TO_EXIT
+			&& TILOG_POLL_THREAD_SLEEP_MS_IF_TO_EXIT > 0,
 		"fatal err!");
 	static_assert(TILOG_POLL_MS_ADJUST_PERCENT_RATE > 0 && TILOG_POLL_MS_ADJUST_PERCENT_RATE < 100, "fatal err!");
 	static_assert(0 < TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MIN_CENTI, "fatal err!");
@@ -2082,6 +2187,8 @@ namespace tilogspace
 #define TILOG_INTERNAL_CREATE_TILOG_STREAM(lv)                                                                                             \
 	tilogspace::CreateNewTiLogStream<(sizeof(__FILE__) - 1), (sizeof(__func__) - 1), __LINE__, (lv)>(__FILE__, __func__)
 
+#define TILOG_INTERNAL_CREATE_TILOG_STREAM2(mod,lv)                                                                                             \
+	tilogspace::CreateNewTiLogStream<(sizeof(__FILE__) - 1), (sizeof(__func__) - 1), __LINE__, (lv),mod>(__FILE__, __func__)
 // clang-format on
 
 //------------------------------------------define micro for user------------------------------------------//
@@ -2100,6 +2207,7 @@ namespace tilogspace
 
 // constexpr level only (better performace)
 #define TILOG_FAST(constexpr_lv) TILOG_INTERNAL_CREATE_TILOG_STREAM(constexpr_lv)
+#define TILOG_MOD_FAST(mod,constexpr_lv) TILOG_INTERNAL_CREATE_TILOG_STREAM2(mod,constexpr_lv)
 // support dynamic log level
 #define TILOG(lv) TILOG_INTERNAL_CREATE_TILOG_STREAM_DYNAMIC_LV(lv)
 #define TILOG_IF(lv,cond) TILOG_INTERNAL_CREATE_TILOG_STREAM_DYNAMIC_LV((cond)?(lv):tilogspace::ELevel::MAX)
