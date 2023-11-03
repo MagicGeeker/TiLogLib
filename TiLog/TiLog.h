@@ -199,14 +199,13 @@ namespace tilogspace
 
 		MIN = ALWAYS,
 		MAX = VERBOSE + 1,
-#ifdef NDEBUG
-		ON_RELEASE = 0, ON_DEV = MAX
-#else
-		ON_RELEASE = MAX, ON_DEV = 0
-#endif
 	};
 
-	inline constexpr ELevel operator&(ELevel a, ELevel b) { return a > b ? a : b; };
+#ifdef NDEBUG
+		constexpr static bool ON_RELEASE = true, ON_DEV = false;
+#else
+		constexpr static bool ON_RELEASE = false, ON_DEV = true;
+#endif
 
 	// interval of user mode clock sync with kernel(microseconds),may affect the order of logs if multi-thread
 	constexpr static uint32_t TILOG_USER_MODE_CLOCK_UPDATE_US = TILOG_IS_WITH_MILLISECONDS ? 100 : 100000;
@@ -289,6 +288,7 @@ namespace tilogspace
 
 
 #define TILOG_GET_DEFAULT_MODULE_REF tilogspace::TiLog::getRInstance().GetMoudleRef<tilogspace::TILOG_MODULE_START>()
+#define TILOG_GET_DEFAULT_MODULE_ENUM tilogspace::TILOG_MODULE_START
 
 	struct TiLogModuleSpec
 	{
@@ -608,7 +608,7 @@ namespace tilogspace
 	};
 
 
-	constexpr char LOG_PREFIX[] = "FF  FEWIDVFFFF";	   // begin FF,and end FFFF is invalid
+	constexpr char LOG_PREFIX[] = "???AFEWIDV????";	   // begin ??? ,and end ???? is invalid
 
 	// reserve +1 for '\0'
 	constexpr size_t TILOG_UINT16_MAX_CHAR_LEN = (5 + 1);
@@ -2125,10 +2125,36 @@ namespace tilogspace
 {
 	static constexpr ELevel GetLogLevel(ETiLogModule MOD) { return TILOG_ACTIVE_MODULE_SPECS[MOD].STATIC_LOG_LEVEL; }
 
+	template <bool... b>
+	struct all_true;
+
+	template <bool b0, bool... b>
+	struct all_true<b0, b...>
+	{
+		constexpr static bool value = b0 && all_true<b...>::value;
+	};
+
+	template <>
+	struct all_true<>
+	{
+		constexpr static bool value = true;
+	};
+
+	inline bool all_true_dynamic(){
+		return true;
+	}
+	template<typename b0_t,typename...b_t>
+	inline bool all_true_dynamic(b0_t b0, b_t ...b){
+		static_assert(std::is_same<b0_t,bool>::value,"b0_t must be bool type");
+		return b0 && all_true_dynamic(b...);
+	}
+
+
 	template <
-		uint32_t fileLen, uint32_t funcLen, uint32_t line, uint32_t level, ETiLogModule MOD = tilogspace::ETiLogModule::TILOG_MODULE_START>
+		uint32_t fileLen, uint32_t funcLen, uint32_t line, uint32_t level, ETiLogModule MOD = tilogspace::ETiLogModule::TILOG_MODULE_START,
+		bool... b>
 	inline static auto CreateNewTiLogStream(const char* file, const char* func) ->
-		typename std::conditional<level <= GetLogLevel(MOD), TiLogStream, TiLogNoneStream>::type
+		typename std::conditional<all_true<b...>::value && level <= GetLogLevel(MOD), TiLogStream, TiLogNoneStream>::type
 	{
 		static_assert(
 			std::is_array<typename std::remove_reference<decltype(__FILE__)>::type>::value,
@@ -2143,14 +2169,17 @@ namespace tilogspace
 		return { MOD, level, file, fileLen, func, funclen, line };
 	}
 
-	template <uint32_t fileLen, uint32_t funcLen, uint32_t line, ETiLogModule MOD = tilogspace::ETiLogModule::TILOG_MODULE_START>
-	inline static TiLogStream CreateNewTiLogStream(const char* file, const char* func, uint32_t level)
+	template <uint32_t fileLen, uint32_t funcLen, uint32_t line, typename... b1>
+	inline static TiLogStream CreateNewTiLogStream(
+		const char* file, const char* func, uint32_t level, ETiLogModule MOD = tilogspace::ETiLogModule::TILOG_MODULE_START, b1... b)
 	{
 		static_assert(fileLen <= UINT16_MAX, "fatal error,file path is too long");
 		DEBUG_ASSERT3(level >= tilogspace::ELevel::MIN, file, line, level);
 		DEBUG_ASSERT3(level <= tilogspace::ELevel::MAX, file, line, level);
 		constexpr uint8_t funclen = funcLen > UINT8_MAX ? UINT8_MAX : funcLen;	  // truncate func if >256bytes
-		return { MOD, level, file, (uint16_t)fileLen, func, funclen, line };
+		bool iflog = all_true_dynamic(b...);
+		uint32_t lv = iflog ? level : tilogspace::ELevel::MAX;
+		return { MOD, lv, file, (uint16_t)fileLen, func, funclen, line };
 	}
 }	 // namespace tilogspace
 
@@ -2181,14 +2210,11 @@ namespace tilogspace
 
 // clang-format off
 
-#define TILOG_INTERNAL_CREATE_TILOG_STREAM_DYNAMIC_LV(lv)                                                                                  \
-	tilogspace::CreateNewTiLogStream<(sizeof(__FILE__) - 1), (sizeof(__func__) - 1), __LINE__>(__FILE__, __func__, (lv))
+#define TILOG_INTERNAL_CREATE_TILOG_STREAM_DYNAMIC_LV(mod, lv, ...)                                                                                  \
+	tilogspace::CreateNewTiLogStream<(sizeof(__FILE__) - 1), (sizeof(__func__) - 1), __LINE__>(__FILE__, __func__, (lv),mod,##__VA_ARGS__)
 
-#define TILOG_INTERNAL_CREATE_TILOG_STREAM(lv)                                                                                             \
-	tilogspace::CreateNewTiLogStream<(sizeof(__FILE__) - 1), (sizeof(__func__) - 1), __LINE__, (lv)>(__FILE__, __func__)
-
-#define TILOG_INTERNAL_CREATE_TILOG_STREAM2(mod,lv)                                                                                             \
-	tilogspace::CreateNewTiLogStream<(sizeof(__FILE__) - 1), (sizeof(__func__) - 1), __LINE__, (lv),mod>(__FILE__, __func__)
+#define TILOG_INTERNAL_CREATE_TILOG_STREAM(mod, lv, ...)                                                                                   \
+	tilogspace::CreateNewTiLogStream<(sizeof(__FILE__) - 1), (sizeof(__func__) - 1), __LINE__, (lv), mod, ##__VA_ARGS__>(__FILE__, __func__)
 // clang-format on
 
 //------------------------------------------define micro for user------------------------------------------//
@@ -2197,20 +2223,20 @@ namespace tilogspace
 #define TICERR (std::unique_lock<tilogspace::sync_ostream_mtx_t>(tilogspace::ticerr_mtx), std::cerr)
 #define TICLOG (std::unique_lock<tilogspace::sync_ostream_mtx_t>(tilogspace::ticlog_mtx), std::clog)
 
-#define TILOGA TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::ELevel::ALWAYS)
-#define TILOGF TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::ELevel::FATAL)
-#define TILOGE TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::ELevel::ERROR)
-#define TILOGW TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::ELevel::WARN)
-#define TILOGI TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::ELevel::INFO)
-#define TILOGD TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::ELevel::DEBUG)
-#define TILOGV TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::ELevel::VERBOSE)
+#define TILOGA TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::TILOG_MODULE_START, tilogspace::ELevel::ALWAYS)
+#define TILOGF TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::TILOG_MODULE_START, tilogspace::ELevel::FATAL)
+#define TILOGE TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::TILOG_MODULE_START, tilogspace::ELevel::ERROR)
+#define TILOGW TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::TILOG_MODULE_START, tilogspace::ELevel::WARN)
+#define TILOGI TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::TILOG_MODULE_START, tilogspace::ELevel::INFO)
+#define TILOGD TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::TILOG_MODULE_START, tilogspace::ELevel::DEBUG)
+#define TILOGV TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::TILOG_MODULE_START, tilogspace::ELevel::VERBOSE)
 
-// constexpr level only (better performace)
-#define TILOG_FAST(constexpr_lv) TILOG_INTERNAL_CREATE_TILOG_STREAM(constexpr_lv)
-#define TILOG_MOD_FAST(mod,constexpr_lv) TILOG_INTERNAL_CREATE_TILOG_STREAM2(mod,constexpr_lv)
-// support dynamic log level
-#define TILOG(lv) TILOG_INTERNAL_CREATE_TILOG_STREAM_DYNAMIC_LV(lv)
-#define TILOG_IF(lv,cond) TILOG_INTERNAL_CREATE_TILOG_STREAM_DYNAMIC_LV((cond)?(lv):tilogspace::ELevel::MAX)
+// constexpr mod and level only (better performace)
+//(constexpr mod enum,constexpr log level,constexpr bool...) if any of ... is false ,will NOT log
+#define TILOG_FAST(constexpr_mod, constexpr_lv, ...) TILOG_INTERNAL_CREATE_TILOG_STREAM(constexpr_mod, constexpr_lv, ##__VA_ARGS__)
+// support dynamic mod and log level
+//(mod enum,log level,bool...) if any of ... is false ,will NOT log
+#define TILOG(mod, lv, ...) TILOG_INTERNAL_CREATE_TILOG_STREAM_DYNAMIC_LV(mod, lv, ##__VA_ARGS__)
 //------------------------------------------end define micro for user------------------------------------------//
 
 

@@ -617,7 +617,7 @@ TEST_CASE("file_multi_thread_print_level_test_____________________")
 			index = index + (int32_t)ELevel::ALWAYS - 1;
 			for (uint64_t j = 1; j <= loops; j++)
 			{
-				TILOG(index) << "index= " << index << " j= " << j;
+				TILOG(TILOG_GET_DEFAULT_MODULE_ENUM,index) << "index= " << index << " j= " << j;
 				if (index == ELevel::ALWAYS && (j * 8) % loops == 0)
 				{
 					uint64_t v = j * 8 / loops;	   // 1-8
@@ -706,12 +706,20 @@ TEST_CASE("terminal_multi_way_log_test_____________________")
 
 	{
 		using namespace tilogspace;
-		TILOG_FAST(ON_DEV & ALWAYS) << "e25 fast only print on debug exe";
-		TILOG_FAST(ON_RELEASE & ALWAYS) << "e26 fast only print on release exe";
-		TILOG(ON_DEV & WARN) << "e27 only print on debug exe";
-		TILOG(ON_RELEASE & WARN) << "e28 only print on release exe";
-		TILOG_IF(INFO, 10 > 8) << "e29 10>8";
-		TILOG_IF(ERROR, 10 < 8) << "e30 10<8";
+		TILOG_FAST(TILOG_GET_DEFAULT_MODULE_ENUM, ALWAYS) << "e24.0 fast";
+		TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, ALWAYS) << "e24.1 nofast";
+
+		TILOG_FAST(TILOG_GET_DEFAULT_MODULE_ENUM, ALWAYS, ON_DEV) << "e25 fast only print on debug exe";
+		TILOG_FAST(TILOG_GET_DEFAULT_MODULE_ENUM, ALWAYS, ON_RELEASE) << "e26 fast only print on release exe";
+		TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, WARN, ON_DEV) << "e27 only print on debug exe";
+		TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, WARN, ON_RELEASE) << "e28 only print on release exe";
+		TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, INFO, 10 > 8) << "e29 10>8";
+		TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, ERROR, 10 < 8) << "e30 10<8";
+		TILOG_FAST(TILOG_GET_DEFAULT_MODULE_ENUM, INFO, true, 1 + 1 == 2, 2 * 3 == 6) << "e30.0 1 + 1 == 2, 2 * 3 == 6";
+		TILOG_FAST(TILOG_GET_DEFAULT_MODULE_ENUM, ERROR, true, 1 + 1 == 2, 2 * 3 == 7) << "e30.1 1 + 1 == 2, 2 * 3 == 7";
+		int x = 1, y = 2;
+		TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, INFO, true, x == 1, y == 2) << "e30.2 x==1,y==2";
+		TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, ERROR, true, x == 10, y == 2) << "e30.3 x==10,y==2";
 	}
 	{
 		TILOGI.print("\n\n");
@@ -773,13 +781,13 @@ TEST_CASE("user_module_test_____________________")
 			switch (j % 3)
 			{
 			case 0:
-				TILOG_MOD_FAST(tilogspace::TILOG_MODULE_0, tilogspace::ELevel::ERROR) << "mod0 index= " << index << " j= " << j;
+				TILOG_FAST(tilogspace::TILOG_MODULE_0, tilogspace::ELevel::ERROR) << "mod0 index= " << index << " j= " << j;
 				break;
 			case 1:
-				TILOG_MOD_FAST(tilogspace::TILOG_MODULE_1, tilogspace::ELevel::ERROR) << "mod1 index= " << index << " j= " << j;
+				TILOG_FAST(tilogspace::TILOG_MODULE_1, tilogspace::ELevel::ERROR) << "mod1 index= " << index << " j= " << j;
 				break;
 			case 2:
-				TILOG_MOD_FAST(tilogspace::TILOG_MODULE_2, tilogspace::ELevel::ERROR) << "mod2 index= " << index << " j= " << j;
+				TILOG_FAST(tilogspace::TILOG_MODULE_2, tilogspace::ELevel::ERROR) << "mod2 index= " << index << " j= " << j;
 				break;
 			}
 		}
@@ -877,7 +885,7 @@ TEST_CASE("dynamic_log_level_multi_thread_benchmark_test_____________________")
 		"dynamic_log_level_multi_thread_benchmark_test_____________________", tilogspace::EPrinterID::PRINTER_TILOG_FILE, [](int index) {
 			for (uint64_t j = 0; j < testLoop_t::GET_SINGLE_THREAD_LOOPS(); j++)
 			{
-				TILOG(ELevel::WARN) << "index= " << index << " j= " << j;
+				TILOG(TILOG_GET_DEFAULT_MODULE_ENUM,ELevel::WARN) << "index= " << index << " j= " << j;
 			}
 		});
 }

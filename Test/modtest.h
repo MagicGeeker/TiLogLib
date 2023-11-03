@@ -19,6 +19,7 @@ namespace tilogspace
 
 
 #define TILOG_GET_DEFAULT_MODULE_REF tilogspace::TiLog::getRInstance().GetMoudleRef<tilogspace::TILOG_MODULE_START>()
+#define TILOG_GET_DEFAULT_MODULE_ENUM tilogspace::TILOG_MODULE_START
 
 	struct TiLogModuleSpec
 	{
