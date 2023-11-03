@@ -2050,17 +2050,23 @@ namespace internal
 					{
 						char* numEnd = nullptr;
 						unsigned long idx = strtoul(&fmt[pos + 1], &numEnd, 0);
-						if (idx == LONG_MAX)
+						if (idx == ULONG_MAX)
 						{
 							break;
 						} else if (idx == 0)
 						{
-							if (pos2 != pos + 2) { break; }
-							// idx==0;
+							if (!(pos2 == pos + 2 && fmt[pos + 1] == '0')) { break; }
+							// "{0}"
 						}
 						if (i >= sz)
 						{
 							outs.append(TILOG_ERROR_FORMAT_STRING"Too much {}\n");
+							outs.resetLogLevel(ELevel::ERROR);
+							return;
+						}
+						if (idx >= sz)
+						{
+							outs.append(TILOG_ERROR_FORMAT_STRING "{} index overflow\n");
 							outs.resetLogLevel(ELevel::ERROR);
 							return;
 						}

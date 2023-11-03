@@ -1401,7 +1401,7 @@ namespace tilogspace
 				char mlinemp[TILOG_CODE_CACHED_LINE_DEC_MAX][8];
 #endif
 
-				IOBean mIoBean;
+				IOBean mIoBean;	   // output
 				SyncedIOBeanPool mIOBeanPool;
 
 				static_assert(sizeof(mlogprefix) == TILOG_PREFIX_LOG_SIZE, "fatal");
