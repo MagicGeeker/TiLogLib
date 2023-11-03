@@ -1,4 +1,3 @@
-#include "inc.h"
 #include "func.h"
 
 #if USE_MAIN_TEST == TEST_WAY
@@ -17,8 +16,8 @@
 #include <thread>
 #include <future>
 #include <vector>
-#include "inc.h"
-#include "SimpleTimer.h"
+
+
 using namespace std;
 using namespace tilogspace;
 
@@ -33,15 +32,15 @@ int main()
 		("abc 0100000000010000000000101000000000002300000000000023002301000000000002300023 %d %lld",123,456LL);
 #elif FUN_MAIN==0
 	TiLog::SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
-	TICOUT << "file_time_multi_thread_simulation__log_test_____________________";
+	TICOUT << "file_multi_thread_log_lat_test_____________________";
 
-	double ns0 = SingleLoopTimeTestFunc<false>();
-	double ns1 = SingleLoopTimeTestFunc<true>();
+	double rdstc0 = SingleLoopTimeTestFunc<false>();
+	double rdstc1 = SingleLoopTimeTestFunc<true>();
 
-	TICOUT << "ns0 " << ns0 << " loop per ns\n";
-	TICOUT << "ns1 " << ns1 << " loop per ns\n";
-	TICOUT << "ns1/ns0= " << 100.0 * ns1 / ns0 << "%\n";
-	TICOUT << "single log cost ns= " << (ns1 - ns0) << "\n";
+	TICOUT << "rdstc0 " << rdstc0 << " loop per ns\n";
+	TICOUT << "rdstc1 " << rdstc1 << " loop per ns\n";
+	TICOUT << "rdstc1/rdstc0= " << 100.0 * rdstc1 / rdstc0 << "%\n";
+	TICOUT << "single log cost rdstc= " << (rdstc1 - rdstc0) << "\n";
 #elif FUN_MAIN== 1
 
 #else

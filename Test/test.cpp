@@ -1,8 +1,5 @@
 #include <math.h>
-#include "inc.h"
-#include "SimpleTimer.h"
 #include "func.h"
-#include "mthread.h"
 #if USE_CATCH_TEST == TEST_WAY
 #include "../depend_libs/catch/catch.hpp"
 #endif
@@ -26,6 +23,7 @@ using namespace tilogspace;
 #define none_single_thread_multi_size_log_test_____________________
 #define file_many_thread_log_test_____________________
 #define file_time_many_thread_log_test_with_sleep_____________________
+#define file_multi_thread_log_lat_test_____________________
 #define file_single_thread_benchmark_test_____________________
 #define file_multi_thread_benchmark_test_____________________
 #define file_multi_thread_benchmark_test_with_format_____________________
@@ -94,9 +92,10 @@ TEST_CASE("do_nothing_test_____________________")
 #ifdef single_thread_cout_test_____________________
 TEST_CASE("single_thread_cout_test_____________________")
 {
-	TICOUT << "single_thread_cout_test_____________________ cout\n";
-	TICERR << "single_thread_cout_test_____________________ cerr\n";
-	TICLOG << "single_thread_cout_test_____________________ clog\n";
+	TEST_CASE_COUT << "single_thread_cout_test_____________________\n";
+	TICOUT << "cout\n";
+	TICERR << "cerr\n";
+	TICLOG << "clog\n";
 }
 #endif
 
@@ -104,7 +103,7 @@ TEST_CASE("single_thread_cout_test_____________________")
 
 TEST_CASE("single_thread_log_test_____________________")
 {
-	TICOUT << "single_thread_log_test_____________________\n";
+	TEST_CASE_COUT << "single_thread_log_test_____________________\n";
 	TILOGD << "abcde";
 }
 
@@ -115,7 +114,7 @@ TEST_CASE("single_thread_log_test_____________________")
 
 TEST_CASE("multi_thread_log_test_____________________")
 {
-	TICOUT << "multi_thread_log_test_____________________\n";
+	TEST_CASE_COUT << "multi_thread_log_test_____________________\n";
 
 	TestThread([]() -> void {
 		this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -131,7 +130,7 @@ TEST_CASE("multi_thread_log_test_____________________")
 TEST_CASE("file_multi_thread_log_test_____________________")
 {
 	TILOG_GET_DEFAULT_MODULE_REF.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
-	TICOUT << "file_multi_thread_log_test_____________________\n";
+	TEST_CASE_COUT << "file_multi_thread_log_test_____________________\n";
 	TILOGI << "file_multi_thread_log_test_____________________\n";
 	TILOGI << "adcc";
 
@@ -152,6 +151,7 @@ TEST_CASE("terminal_many_thread_cout_test_____________________")
 	{
 		constexpr static int32_t THREADS() { return 100; }
 		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return 1; }
+		constexpr static bool PRINT_TOTAL_TIME() { return false; }
 	};
 
 	MultiThreadTest<testLoop_t>("terminal_many_thread_cout_test_____________________", [&](int index) -> void {
@@ -173,6 +173,7 @@ TEST_CASE("terminal_many_thread_log_test_____________________")
 	{
 		constexpr static int32_t THREADS() { return 100; }
 		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return 1; }
+		constexpr static bool PRINT_TOTAL_TIME() { return false; }
 	};
 
 	MultiThreadTest<testLoop_t>(
@@ -191,7 +192,7 @@ TEST_CASE("terminal_many_thread_log_test_____________________")
 
 TEST_CASE("none_single_thread_multi_size_log_test_____________________")
 {
-	TICOUT << "none_single_thread_multi_size_log_test_____________________\n";
+	TEST_CASE_COUT << "none_single_thread_multi_size_log_test_____________________\n";
 	TILOG_GET_DEFAULT_MODULE_REF.SetPrinters(tilogspace::EPrinterID::PRINTER_ID_NONE);
 	std::string str;
 	for (int i = 0; i < 10240; i++)
@@ -251,20 +252,47 @@ TEST_CASE("file_time_many_thread_log_test_with_sleep_____________________")
 #endif
 
 
-#ifdef file_time_multi_thread_simulation__log_test_____________________
+#ifdef file_multi_thread_log_lat_test_____________________
 
-TEST_CASE("file_time_multi_thread_simulation__log_test_____________________")
+TEST_CASE("file_multi_thread_log_lat_test_____________________")
 {
 	TILOG_GET_DEFAULT_MODULE_REF.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
-	TICOUT << "file_time_multi_thread_simulation__log_test_____________________\n";
+	{
+		TEST_CASE_COUT << "file_multi_thread_log_lat_test_____________________10\n";
 
-	double ns0 = SingleLoopTimeTestFunc<false>("when without log");
-	double ns1 = SingleLoopTimeTestFunc<true>("when with log");
+		double rdstc0 = SingleLoopTimeTestFunc<false, 10>("when without log");
+		double rdstc1 = SingleLoopTimeTestFunc<true, 10>("when with log");
 
-	TICOUT << "ns0 " << ns0 << " loop per ns\n";
-	TICOUT << "ns1 " << ns1 << " loop per ns\n";
-	TICOUT << "ns1/ns0= " << 100.0 * ns1 / ns0 << "%\n";
-	TICOUT << "single log cost ns= " << (ns1 - ns0) << "\n";
+		TICOUT << "rdtsc0 " << rdstc0 << " rdtsc1 " << rdstc1 << " rdstc1/rdstc0= " << 100.0 * rdstc1 / rdstc0 << "%\n";
+		TICOUT << "single log cost rdtsc= " << (rdstc1 - rdstc0) << "\n";
+	}
+	{
+		TEST_CASE_COUT << "file_multi_thread_log_lat_test_____________________20\n";
+
+		double rdstc0 = SingleLoopTimeTestFunc<false, 20>("when without log");
+		double rdstc1 = SingleLoopTimeTestFunc<true, 20>("when with log");
+
+		TICOUT << "rdtsc0 " << rdstc0 << " rdtsc1 " << rdstc1 << " rdstc1/rdstc0= " << 100.0 * rdstc1 / rdstc0 << "%\n";
+		TICOUT << "single log cost rdtsc= " << (rdstc1 - rdstc0) << "\n";
+	}
+	{
+		TEST_CASE_COUT << "file_multi_thread_log_lat_test_____________________50\n";
+
+		double rdstc0 = SingleLoopTimeTestFunc<false, 50>("when without log");
+		double rdstc1 = SingleLoopTimeTestFunc<true, 50>("when with log");
+
+		TICOUT << "rdtsc0 " << rdstc0 << " rdtsc1 " << rdstc1 << " rdstc1/rdstc0= " << 100.0 * rdstc1 / rdstc0 << "%\n";
+		TICOUT << "single log cost rdtsc= " << (rdstc1 - rdstc0) << "\n";
+	}
+	{
+		TEST_CASE_COUT << "file_multi_thread_log_lat_test_____________________100\n";
+
+		double rdstc0 = SingleLoopTimeTestFunc<false, 100>("when without log");
+		double rdstc1 = SingleLoopTimeTestFunc<true, 100>("when with log");
+
+		TICOUT << "rdtsc0 " << rdstc0 << " rdtsc1 " << rdstc1 << " rdstc1/rdstc0= " << 100.0 * rdstc1 / rdstc0 << "%\n";
+		TICOUT << "single log cost rdtsc= " << (rdstc1 - rdstc0) << "\n";
+	}
 }
 
 #endif
@@ -280,11 +308,11 @@ TEST_CASE("file_single_thread_benchmark_test_____________________")
 		constexpr static bool PRINT_LOOP_TIME() { return true; }
 	};
 
-	SingleThreadTest<testLoop_t>(
+	MultiThreadTest<testLoop_t>(
 		"file_single_thread_benchmark_test_____________________", tilogspace::EPrinterID::PRINTER_TILOG_FILE, [&](int index) -> void {
-			for (uint64_t i = 0; i < testLoop_t::GET_SINGLE_THREAD_LOOPS(); i++)
+			for (uint64_t j = 0; j < testLoop_t::GET_SINGLE_THREAD_LOOPS(); j++)
 			{
-				TILOGE << " i= " << i;
+				TILOGE << "index= " << index << " j= " << j;
 			}
 		});
 }
@@ -298,7 +326,7 @@ TEST_CASE("file_multi_thread_benchmark_test_____________________")
 {
 	struct testLoop_t : multi_thread_test_loop_t
 	{
-		constexpr static int32_t THREADS() { return 10; }
+		constexpr static int32_t THREADS() { return 6; }
 		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return test_release ? 100 * 100000 : 100000; }
 		constexpr static bool PRINT_LOOP_TIME() { return true; }
 	};
@@ -320,7 +348,7 @@ TEST_CASE("file_multi_thread_benchmark_test_with_format_____________________")
 {
 	struct testLoop_t : multi_thread_test_loop_t
 	{
-		constexpr static int32_t THREADS() { return 10; }
+		constexpr static int32_t THREADS() { return 6; }
 		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return test_release ? 100 * 100000 : 100000; }
 		constexpr static bool PRINT_LOOP_TIME() { return true; }
 	};
@@ -376,7 +404,7 @@ TEST_CASE("file_single_thread_operator_test_____________________")
 		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return test_release ? testApow10N(5, 6) : testpow10(5); }
 		constexpr static bool PRINT_LOOP_TIME() { return true; }
 	};
-	SingleThreadTest<testLoop_t>(
+	MultiThreadTest<testLoop_t>(
 		"file_single_thread_operator_test_____________________", tilogspace::EPrinterID::PRINTER_TILOG_FILE, [](int index) {
 			constexpr uint64_t loops = testLoop_t::GET_SINGLE_THREAD_LOOPS();
 			for (uint64_t j = 0; j < loops; j++)
@@ -427,8 +455,10 @@ TEST_CASE("none_multi_thread_memory_leak_stress_test_____________________")
 
 	for (uint32_t i = 0; i < (test_release ? 20000 : 200); i++)
 	{
+		char testName[100]="";
+		sprintf(testName,"none_multi_thread_memory_leak_stress_test_____________________%u",(unsigned)i);
 		MultiThreadTest<testLoop_t>(
-			"none_multi_thread_memory_leak_stress_test_____________________", tilogspace::EPrinterID::PRINTER_ID_NONE, [](int index) {
+			testName, tilogspace::EPrinterID::PRINTER_ID_NONE, [](int index) {
 				constexpr uint64_t loops = testLoop_t::GET_SINGLE_THREAD_LOOPS();
 				for (uint64_t j = 0; j < loops; j++)
 				{
@@ -436,7 +466,6 @@ TEST_CASE("none_multi_thread_memory_leak_stress_test_____________________")
 				}
 
 			});
-		mycout << "test round " << i << " complete!\n";
 	}
 
 	mycout << "none_multi_thread_memory_leak_stress_test_____________________ end\n";
@@ -475,7 +504,7 @@ TEST_CASE("none_multi_thread_set_printer_test_____________________")
 TEST_CASE("tilog_string_test_____________________")
 {
 	TiLog::SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
-	TICOUT << "tilog_string_test_____________________";
+	TEST_CASE_COUT << "tilog_string_test_____________________";
 	using String = tilogspace::internal::TiLogString;
 	String str;
 	str.reserve(100);
@@ -519,7 +548,7 @@ TEST_CASE("tilog_string_test_____________________")
 TEST_CASE("tilog_string_extend_test_____________________")
 {
 	TiLog::SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
-	TICOUT << "tilog_string_extend_test_____________________";
+	TEST_CASE_COUT << "tilog_string_extend_test_____________________";
 	struct ext_t
 	{
 		char s[50];
@@ -582,9 +611,9 @@ TEST_CASE("terminal_single_thread_long_string_log_test_____________________")
 	struct testLoop_t : single_thread_test_loop_t
 	{
 		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return 1; }
-		constexpr static bool PRINT_LOOP_TIME() { return false; }
+		constexpr static bool PRINT_TOTAL_TIME() { return false; }
 	};
-	SingleThreadTest(
+	MultiThreadTest<testLoop_t>(
 		"terminal_single_thread_long_string_log_test_____________________", tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL,
 		[](int32_t index) {
 			auto x = std::move(TILOGE);
@@ -638,6 +667,7 @@ TEST_CASE("file_multi_thread_print_level_test_____________________")
 #ifdef file_static_log_test_____________________
 static bool b0_file_static_log_test = []() {
 	TILOG_GET_DEFAULT_MODULE_REF.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
+	TEST_CASE_COUT << "file_static_log_test_____________________\n";
 	TICOUT << "Prepare file_static_log_test_____________________\n";
 
 	auto s = std::move(TILOGE.printf("long string \n"));
@@ -661,7 +691,7 @@ TEST_CASE("file_static_log_test_____________________")
 #ifdef terminal_multi_way_log_test_____________________
 TEST_CASE("terminal_multi_way_log_test_____________________")
 {
-	TICOUT << "terminal_multi_way_log_test_____________________\n";
+	TEST_CASE_COUT << "terminal_multi_way_log_test_____________________\n";
 	TILOG_GET_DEFAULT_MODULE_REF.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
 
 	TILOGE << true;
@@ -727,14 +757,24 @@ TEST_CASE("terminal_multi_way_log_test_____________________")
 		TILOGI.print("e32 str {} int {} double {} NP {} !", "abc", 0, 3.56, nullptr);
 		TILOGI.print("hello {\n");
 		TILOGI.print("hello }\n");
-		TILOGI.print("hello {}\n");
+
+		TILOGI.print("d hello {}\n");
+		TILOGI.print("e hello { }","w");
+		TILOGI.print("f hello {  }","w");
+		TILOGI.print("g hello {,}!", "world");
+
+
 		TILOGI.print("hello }{\n");
 		TILOGI.print("hello {{{{\n");
 		TILOGI.print("hello {{10{{\n");
 		TILOGI.print("hello }}}}\n");
 		TILOGI.print("e33 hello {1},format test {0} !", "world", 0);
+
 		TILOGI.print("e34 hello {},format test {} !", "world");
 		TILOGI.print("e35 hello {},format test {0} !", "world", 0);
+		TILOGI.print("e35_0 hello {0},format test {} !", "world", 0);
+		TILOGI.print("e35_1 hello {0},format test {100} !", "world",1);
+
 		TILOGI.print("e36 hello {},format test {} !", "world", 5292, "abc");
 		TILOGI.print("e37 format {} ", 0).print("format again {} ", 1);
 
@@ -747,7 +787,7 @@ TEST_CASE("terminal_multi_way_log_test_____________________")
 #ifdef terminal_log_show_test_____________________
 TEST_CASE("terminal_log_show_test_____________________")
 {
-	TICOUT << "terminal_log_show_test_____________________\n";
+	TEST_CASE_COUT << "terminal_log_show_test_____________________\n";
 	TILOG_GET_DEFAULT_MODULE_REF.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
 	TILOGI << "line ?";
 #line 66666

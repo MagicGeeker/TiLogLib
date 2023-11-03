@@ -2,8 +2,13 @@
 #define TILOG_FUNC_H
 
 #include "inc.h"
+#define mycout TICOUT
+#ifndef SimpleTimerCout
+#define SimpleTimerCout	mycout
+#endif
+#define TEST_STRING_PREFIX "\n\n========Test: "
+#define TEST_CASE_COUT	(TICOUT<<TEST_STRING_PREFIX)
 #include "SimpleTimer.h"
-#include "mthread.h"
 #include "../TiLog/TiLog.h"
 
 #ifdef NDEBUG
@@ -12,15 +17,9 @@ constexpr static bool test_release = true;
 constexpr static bool test_release = false;
 #endif
 
-bool InitFunc();
+using TestThread = std::thread;
 
-struct ThreadIniter
-{
-	void operator()() {}
-};
-using TestThread = MThread<ThreadIniter>;
 
-#define mycout TICOUT
 
 
 /**************************************************   **************************************************/
@@ -81,12 +80,13 @@ namespace funcspace
 		if_constexpr(TestLoopType::ASYNC_SET_PRINTERS()) { TILOG_GET_DEFAULT_MODULE_REF.AsyncSetPrinters(ids); }
 		else { TILOG_GET_DEFAULT_MODULE_REF.SetPrinters(ids); }
 		bool terminal_enabled = TILOG_GET_DEFAULT_MODULE_REF.IsPrinterInPrinters(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL, ids);
-		if (!terminal_enabled) { TICOUT << "\n\n========Test: " << testName << '\n'; }
+		if (!terminal_enabled) { TICOUT << TEST_STRING_PREFIX << testName << '\n'; }
 		TILOGA << "\n\n========Test: " << testName << '\n';
+		TILOG_GET_DEFAULT_MODULE_REF.Sync();
 		constexpr uint64_t loops = TestLoopType::GET_SINGLE_THREAD_LOOPS();
 		constexpr int32_t threads = TestLoopType::THREADS();
 
-		SimpleTimer s1m;
+		SimpleTimer s1m(TestLoopType::PRINT_TOTAL_TIME());
 
 		static bool begin = false;
 		static std::condition_variable_any cva;
@@ -117,13 +117,13 @@ namespace funcspace
 			if (!terminal_enabled)
 			{
 				TICOUT << (1e6 * threads * loops / ns) << " loops per millisecond\n";
-				TICOUT << 1.0 * ns / (loops * threads) << " ns per loop\n";
+				TICOUT << (1e6 * loops / ns) << " loops per thread per millisecond\n";
 			}
 
 			TILOGA << (1e6 * threads * loops / ns) << " loops per millisecond\n";
-			TILOGA << 1.0 * ns / (loops * threads) << " ns per loop\n";
+			TILOGA << (1e6 * loops / ns) << " loops per thread per millisecond\n";
 		}
-		if_constexpr(!TestLoopType::PRINT_TOTAL_TIME()) { s1m.close(); }
+		TILOG_GET_DEFAULT_MODULE_REF.Sync();
 		return ns;
 	}
 
@@ -133,7 +133,6 @@ namespace funcspace
 template <typename TestLoopType = multi_thread_test_loop_t, typename Runnable>
 static uint64_t MultiThreadTest(const char* testName, tilogspace::printer_ids_t ids, Runnable&& runnable)
 {
-	static_assert(TestLoopType::THREADS() != 1, "fatal error");
 	return funcspace::Test<TestLoopType>(testName, ids, std::forward<Runnable>(runnable));
 }
 
@@ -143,21 +142,30 @@ static uint64_t MultiThreadTest(const char* testName, Runnable&& runnable)
 	return MultiThreadTest<TestLoopType>(testName, tilogspace::EPrinterID::PRINTER_ID_NONE, std::forward<Runnable>(runnable));
 }
 
-template <typename TestLoopType = single_thread_test_loop_t, typename Runnable>
-static uint64_t SingleThreadTest(const char* testName, tilogspace::printer_ids_t ids, Runnable&& runnable)
-{
-	static_assert(TestLoopType::THREADS() == 1, "fatal error");
-	return funcspace::Test<TestLoopType>(testName, ids, std::forward<Runnable>(runnable));
-}
-
-template <typename TestLoopType = single_thread_test_loop_t, typename Runnable>
-static uint64_t SingleThreadTest(const char* testName, Runnable&& runnable)
-{
-	return SingleThreadTest<TestLoopType>(testName, tilogspace::EPrinterID::PRINTER_ID_NONE, std::forward<Runnable>(runnable));
-}
-
-
 /**************************************************   **************************************************/
+#include <stdint.h>
+
+//  rdtsc
+#if _WIN32
+
+#include <intrin.h>
+inline uint64_t rdtsc()  // win
+{
+    return __rdtsc();
+}
+
+#else
+
+inline uint64_t rdtsc() // linux
+{
+    unsigned int lo, hi;
+    __asm__ volatile ("rdtsc" : "=a" (lo), "=d" (hi));
+    return ((uint64_t)hi << 32) | lo;
+}
+
+#endif
+
+
 template <size_t N = 50>
 static uint64_t ComplexCalFunc(uint64_t x)
 {
@@ -184,23 +192,27 @@ static double SingleLoopTimeTestFunc(const char* testName="")
 		constexpr static int32_t THREADS() { return 10; }
 		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return test_release ? testpow10(6) : testpow10(5); }
 		constexpr static bool PRINT_LOOP_TIME() { return false; }
+		constexpr static bool PRINT_TOTAL_TIME() { return false; }
 	};
 
 	constexpr uint64_t threads = testLoop_t::THREADS();
 	constexpr uint64_t LOOPS = testLoop_t::GET_SINGLE_THREAD_LOOPS();
 
-	std::atomic<uint64_t> m {0};
-	uint64_t ns = MultiThreadTest<testLoop_t>(testName, tilogspace::EPrinterID::PRINTER_TILOG_FILE, [LOOPS, &m](int index) {
-		int a = 0;
+	std::atomic<uint64_t> m{ 0 };
+	std::atomic<uint64_t> cnts{ 0 };
+	MultiThreadTest<testLoop_t>(testName, tilogspace::EPrinterID::PRINTER_TILOG_FILE, [LOOPS, &m, &cnts](int index) {
 		for (uint64_t loops = LOOPS; loops; loops--)
 		{
+			uint64_t ts0 = rdtsc();
 			m += ComplexCalFunc<N>(loops);
-			if_constexpr(WITH_LOG) { TILOGD << "LOGD thr " << index << " loop " << loops << " " << &a; }
+			if_constexpr(WITH_LOG) { TILOGD << "LOGD thr " /*  << index << " loop " << loops << " " << &a */; }
+			uint64_t ts1 = rdtsc();
+			cnts += (uint64_t)(ts1 - ts0);
 		}
 	});
 
 	TICOUT << "m= " << m << "\n";
-	return ns / (threads * LOOPS);
+	return double(cnts) / (threads * LOOPS);
 }
 
 #endif	  // TILOG_FUNC_H
