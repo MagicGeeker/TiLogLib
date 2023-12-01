@@ -641,7 +641,7 @@ namespace tilogspace
 
 		enum class ELogLevelFlag : char
 		{
-			BLANK = ' ',
+			A = 'A',
 			F = 'F',
 			E = 'E',
 			W = 'W',
@@ -1732,7 +1732,7 @@ namespace internal
 			{
 			default:
 				DEBUG_ASSERT(false);	// do assert on debug mode.no break.
-			case ELogLevelFlag::BLANK:
+			case ELogLevelFlag::A:
 			case ELogLevelFlag::F:
 			case ELogLevelFlag::E:
 			case ELogLevelFlag::W:
