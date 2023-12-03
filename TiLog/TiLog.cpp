@@ -1075,16 +1075,18 @@ namespace tilogspace
 				{
 					auto& v = *it;
 					sz += (unsigned)v.size();
-					for (TiLogBean* pBean : v)
-					{
-						TiLogStreamHelper::DestroyPushedTiLogBean(pBean);
-					}
+//					for (TiLogBean* pBean : v)
+//					{
+//						TiLogStreamHelper::DestroyPushedTiLogBean(pBean);
+//					}
+					TiLogStreamHelper::DestroyPushedTiLogBean(v,cache);
 				}
 				clear();
 				DEBUG_PRINTI("gc: %u logs\n", sz);
 				gcsize += sz;
 			}
 			uint64_t gcsize{ 0 };
+			TiLogStreamHelper::TiLogStreamMemoryManagerCache cache;
 		};
 
 		struct ThreadStruQueue : public TiLogObject, public std::mutex
@@ -1552,6 +1554,7 @@ namespace tilogspace
 			ETiLogModule mod;
 			TiLogPrinterManager tiLogPrinterManager;
 			TiLogCore tiLogCore;
+			mempool mpool;
 			inline TiLogEngine() : tiLogModBase(), mod(), tiLogPrinterManager(this), tiLogCore(this) {}
 			inline TiLogEngine(TiLogModBase* b) : tiLogModBase(b), mod(b->mod), tiLogPrinterManager(this), tiLogCore(this) {}
 		};
@@ -1658,6 +1661,7 @@ namespace tilogspace
 
 		TiLogFilePrinter::TiLogFilePrinter(TiLogEngine* e, String folderPath0) : TiLogPrinter(e), folderPath(std::move(folderPath0))
 		{
+			DEBUG_PRINTA("file printer %p path %s\n", this, folderPath.c_str());
 			DEBUG_ASSERT(!folderPath.empty());
 			DEBUG_ASSERT(folderPath.back() == '/');
 		}
@@ -2873,6 +2877,7 @@ namespace tilogspace
 				void* pe{};
 				engine_t engines;
 			};
+			mempool mpool;
 
 			static_assert(GetArgsNum<TILOG_REGISTER_MODULES>() == TILOG_MODULE_SPECS_SIZE, "fatal error,must be equal");
 
@@ -2936,6 +2941,24 @@ namespace tilogspace
 	}
 }	 // namespace tilogspace
 
+
+namespace tilogspace
+{
+	constexpr size_t local_mempool_spec::objcnt[];
+
+	namespace internal
+	{
+		void* TiLogStreamMemoryManager::timalloc(size_t sz) { return TiLogEngines::getRInstance().mpool.xmalloc(sz); }
+		// void* TiLogStreamMemoryManager::ticalloc(size_t num_ele, size_t sz_ele) { return nullptr; }
+		void* TiLogStreamMemoryManager::tirealloc(void* p, size_t sz) { return TiLogEngines::getRInstance().mpool.xrealloc(p, sz); }
+		void TiLogStreamMemoryManager::tifree(void* p) { TiLogEngines::getRInstance().mpool.xfree(p); }
+		void TiLogStreamMemoryManager::tifree(
+			void* ptrs[], size_t sz, UnorderedMap<objpool*, Vector<void*>>& frees, Vector<local_mempool_edge_t>& pool_edges)
+		{
+			TiLogEngines::getRInstance().mpool.xfree(ptrs, ptrs + sz, frees, pool_edges);
+		}
+	}	 // namespace internal
+}	 // namespace tilogspace
 namespace tilogspace
 {
 	namespace internal

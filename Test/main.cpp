@@ -21,17 +21,18 @@
 using namespace std;
 using namespace tilogspace;
 
-#define FUN_MAIN  2
+#define FUN_MAIN  5
 int main()
 {
 #if FUN_MAIN == -1
-	tilogspace::TiLog::EnablePrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
-	(TILOGV<<"main.cpp")("abc %d %lld",123,456LL);
-	(TILOGV<<"666")("abc %0999999999999999d %",123,456LL);
-	(TILOGV<<"6601000010000000000100000000100000000000230100000000000230002300000000236")
+	TILOG_GET_DEFAULT_MODULE_REF.EnablePrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
+	(TILOGV<<"main.cpp").printf("abc %d %lld",123,456LL);
+	(TILOGV << "666").printf("abc %0999999999999999d %", 123, 456LL);
+	(TILOGV << "6601000010000000000100000000100000000000230100000000000230002300000000236")
+		.printf
 		("abc 0100000000010000000000101000000000002300000000000023002301000000000002300023 %d %lld",123,456LL);
 #elif FUN_MAIN==0
-	TiLog::SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
+	TILOG_GET_DEFAULT_MODULE_REF.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
 	TICOUT << "file_multi_thread_log_lat_test_____________________";
 
 	double rdstc0 = SingleLoopTimeTestFunc<false>();

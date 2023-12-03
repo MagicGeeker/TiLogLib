@@ -13,6 +13,7 @@
 #include <condition_variable>
 #include <type_traits>
 #include <iostream>
+#include <algorithm>
 
 #include <string>
 #if __cplusplus >= 201703L
@@ -26,6 +27,7 @@
 #include <deque>
 #include <map>
 #include <set>
+#include <stack>
 #include <unordered_set>
 #include <unordered_map>
 
@@ -164,6 +166,8 @@ namespace tilogspace
 	template<typename T, typename Seq = Vector<T>,
 		typename Comp  = std::less<typename Seq::value_type> >
 	using PriorQueue = std::priority_queue<T,Seq,Comp>;
+	template <typename T,typename Container=Deque<T>>
+	using Stack = std::stack<T,Container>;
 	template <typename K>
 	using Set = std::set<K, std::less<K>, Allocator<K>>;
 	template <typename K, typename Comp = std::less<K>>
@@ -307,10 +311,613 @@ namespace tilogspace
 	constexpr static size_t TILOG_MODULE_SPECS_SIZE= sizeof(TILOG_ACTIVE_MODULE_SPECS)/sizeof(TILOG_ACTIVE_MODULE_SPECS[0]);
 }	 // namespace tilogspace
 #endif
-
-
-
 // clang-format on
+
+
+
+namespace tilogspace
+{
+	static const int index64[64] = { 0,	 1,	 48, 2,	 57, 49, 28, 3,	 61, 58, 50, 42, 38, 29, 17, 4,	 62, 55, 59, 36, 53, 51,
+									 43, 22, 45, 39, 33, 30, 24, 18, 12, 5,	 63, 47, 56, 27, 60, 41, 37, 16, 54, 35, 52, 21,
+									 44, 32, 23, 11, 46, 26, 40, 15, 34, 20, 31, 10, 25, 14, 19, 9,	 13, 8,	 7,	 6 };
+
+	/**
+	 * bitScanForward
+	 * @author Martin Läuter (1997)
+	 *         Charles E. Leiserson
+	 *         Harald Prokop
+	 *         Keith H. Randall
+	 * "Using de Bruijn Sequences to Index a 1 in a Computer Word"
+	 * @param bb bitboard to scan
+	 * @precondition bb != 0
+	 * @return index (0..63) of least significant one bit
+	 */
+	inline int bitScanForward(uint64_t bb)
+	{
+		const uint64_t debruijn64 = UINT64_C(0x03f79d71b4cb0a89);
+		// assert (bb != 0);
+		return index64[((bb & (uint64_t)(-(int64_t)bb)) * debruijn64) >> 58];
+	}
+
+	using spin_mutex_t = std::mutex;
+	struct fake_mutex_t
+	{
+		void lock(){};
+		void unlock(){};
+		bool try_lock() { return true; };
+	};
+
+	namespace bitspace
+	{
+		inline bool u64bitget(uint64_t val, int index) { return (uint64_t(1) << index) & val; }
+
+		inline void u64bitset1(uint64_t& val, int index) { val = ((uint64_t(1) << index) | val); }
+
+		inline void u64bitset0(uint64_t& val, int index)
+		{
+			uint64_t t = ((uint64_t(1) << index));
+			t = ~t;
+			val = val & t;
+		}
+	}	 // namespace bitspace
+
+	struct uint64_bitfield_t
+	{
+		uint64_t v00 : 1;
+		uint64_t v01 : 1;
+		uint64_t v02 : 1;
+		uint64_t v03 : 1;
+		uint64_t v04 : 1;
+		uint64_t v05 : 1;
+		uint64_t v06 : 1;
+		uint64_t v07 : 1;
+		uint64_t v08 : 1;
+		uint64_t v09 : 1;
+
+		uint64_t v10 : 1;
+		uint64_t v11 : 1;
+		uint64_t v12 : 1;
+		uint64_t v13 : 1;
+		uint64_t v14 : 1;
+		uint64_t v15 : 1;
+		uint64_t v16 : 1;
+		uint64_t v17 : 1;
+		uint64_t v18 : 1;
+		uint64_t v19 : 1;
+
+		uint64_t v20 : 1;
+		uint64_t v21 : 1;
+		uint64_t v22 : 1;
+		uint64_t v23 : 1;
+		uint64_t v24 : 1;
+		uint64_t v25 : 1;
+		uint64_t v26 : 1;
+		uint64_t v27 : 1;
+		uint64_t v28 : 1;
+		uint64_t v29 : 1;
+
+		uint64_t v30 : 1;
+		uint64_t v31 : 1;
+		uint64_t v32 : 1;
+		uint64_t v33 : 1;
+		uint64_t v34 : 1;
+		uint64_t v35 : 1;
+		uint64_t v36 : 1;
+		uint64_t v37 : 1;
+		uint64_t v38 : 1;
+		uint64_t v39 : 1;
+
+		uint64_t v40 : 1;
+		uint64_t v41 : 1;
+		uint64_t v42 : 1;
+		uint64_t v43 : 1;
+		uint64_t v44 : 1;
+		uint64_t v45 : 1;
+		uint64_t v46 : 1;
+		uint64_t v47 : 1;
+		uint64_t v48 : 1;
+		uint64_t v49 : 1;
+
+		uint64_t v50 : 1;
+		uint64_t v51 : 1;
+		uint64_t v52 : 1;
+		uint64_t v53 : 1;
+		uint64_t v54 : 1;
+		uint64_t v55 : 1;
+		uint64_t v56 : 1;
+		uint64_t v57 : 1;
+		uint64_t v58 : 1;
+		uint64_t v59 : 1;
+
+		uint64_t v60 : 1;
+		uint64_t v61 : 1;
+		uint64_t v62 : 1;
+		uint64_t v63 : 1;
+	};
+
+	struct bit_unit_t
+	{
+		union
+		{
+			uint64_t val;
+			uint64_bitfield_t bf;
+		};
+
+		bit_unit_t() {}
+		bit_unit_t(uint64_t v) { this->val = v; }
+		bit_unit_t(const bit_unit_t& rhs) { this->val = rhs.val; }
+
+		void init() { val = UINT64_MAX; }
+
+		bool bitget(int index) { return (bool)((uint64_t(1) << index) & val); }
+		void bitset1(int index) { val = ((uint64_t(1) << index) | val); }
+		void bitset0(int index)
+		{
+			uint64_t t = ((uint64_t(1) << index));
+			t = ~t;
+			val = val & t;
+		}
+	};
+
+	struct bit_search_map2d_t
+	{
+		bit_unit_t searchL2[64];
+		bit_unit_t searchL1;
+		int bit1_init_cnt;
+		int bit1_cnt;
+
+		bit_search_map2d_t()
+		{
+			memset(searchL2, 0x0, sizeof(searchL2));
+			searchL1.val = 0;
+		}
+		void fill_first_n_1(int n)
+		{
+			assert(n <= 4096);
+			int searchL2cnt = n / 64;
+			memset(searchL2, 0xFF, searchL2cnt * sizeof(bit_unit_t));
+			int r = n % 64;
+			for (int i = 0; i < r; ++i)
+			{
+				searchL2[searchL2cnt].bitset1(i);
+			}
+
+			for (int i = 0; i < searchL2cnt + (!!r); ++i)
+			{
+				searchL1.bitset1(i);
+			}
+
+			bit1_init_cnt = bit1_cnt = n;
+		}
+		int bitsearch1set0()
+		{
+			if (searchL1.val == 0) { return -1; }
+			int idx_L2 = bitScanForward(searchL1.val);
+			bit_unit_t& unitL2 = searchL2[idx_L2];
+			assert(unitL2.val != 0);
+			int idx_raw = bitScanForward(unitL2.val);
+			unitL2.bitset0(idx_raw);
+			if (unitL2.val == 0) { searchL1.bitset0(idx_L2); }
+			bit1_cnt--;
+			return 64 * idx_L2 + idx_raw;
+		}
+		void bitset1(int index)
+		{
+			int idx_L2 = index / 64;
+			int idx_raw = index % 64;
+
+			bit_unit_t& unitL2 = searchL2[idx_L2];
+			assert(!unitL2.bitget(idx_raw));
+			if (unitL2.val == 0) { searchL1.bitset1(idx_L2); }
+			unitL2.bitset1(idx_raw);
+			bit1_cnt++;
+		}
+	};
+
+	struct bit_write_cache_map1d_t
+	{
+		bit_unit_t units[64];
+		int bit1_cnt;
+
+		bit_write_cache_map1d_t() { clear(); }
+		void clear()
+		{
+			memset(units, 0x0, sizeof(units));
+			bit1_cnt = 0;
+		}
+		void bitset1(int index)
+		{
+			int idx_L2 = index / 64;
+			int idx_raw = index % 64;
+
+			bit_unit_t& unitL2 = units[idx_L2];
+
+			unitL2.bitset1(idx_raw);
+			bit1_cnt++;
+		}
+	};
+
+	struct objpool_spec
+	{
+		constexpr static bool is_for_multithread = true;
+	};
+
+	using pool_id_t = int;
+	struct objpool;
+	struct local_mempool;
+
+	struct local_mempool_spec
+	{
+		struct obj_t
+		{
+			char data[32];
+		};
+
+		constexpr static size_t objtypecnt = 9;
+		// 0 32 64 96 128 160 192 224 256
+		constexpr static size_t objcnt[8 + 1] = { 0, 0, 0, 4096, 4096, 4096, 2048, 1024, 512 };
+		constexpr static size_t total_cnt_obj_t = 0 * objcnt[0] + 1 * objcnt[1] + 2 * objcnt[2] + 3 * objcnt[3] + 4 * objcnt[4]
+			+ 5 * objcnt[5] + 6 * objcnt[6] + 7 * objcnt[7] + 8 * objcnt[8];
+	};
+
+
+
+	struct objpool : objpool_spec
+	{
+		friend struct local_mempool;
+
+		using wmap1dmtx_t = typename std::conditional<is_for_multithread, spin_mutex_t, fake_mutex_t>::type;
+
+		bit_search_map2d_t smap2d;
+		bit_write_cache_map1d_t wmap1d;
+		wmap1dmtx_t wmap1dmtx;
+
+		local_mempool* local_mempool_ptr{ nullptr };
+		pool_id_t id{ -1 };
+		void* blk_start{ nullptr };
+		void* blk_end{ nullptr };	 // exclude
+		int32_t blk_sizeof{ 0 };
+
+		int32_t blk_init_cnt{ 0 };
+
+		objpool() {}
+
+		//  blk_t bs[blk_cnt] = blkstart;
+		void init(local_mempool* local_mempool_p, pool_id_t id_, void* blkstart, int32_t blksizeof, int32_t blkcnt)
+		{
+			this->local_mempool_ptr = local_mempool_p;
+			this->id = id_;
+			if (blkstart == nullptr)
+			{
+				this->blk_start = malloc(blk_init_cnt * blksizeof);
+				this->blk_sizeof = 64;
+				this->blk_init_cnt = blkcnt;
+			} else
+			{
+				this->blk_start = blkstart;
+				this->blk_sizeof = blksizeof;
+				this->blk_init_cnt = blkcnt;
+				smap2d.fill_first_n_1(blkcnt);
+			}
+
+			this->blk_end = (uint8_t*)this->blk_start + this->blk_sizeof * this->blk_init_cnt;
+		}
+
+
+	private:
+		//only call by local_mempool,because of local_mempool::put_by_mempool_cnt etc... needed
+
+		void* get()
+		{
+			while (1)
+			{
+				int n = smap2d.bitsearch1set0();
+				if (n != -1) { return (uint8_t*)blk_start + n * blk_sizeof; }
+				if (wmap1d.bit1_cnt == 0)
+				{	 // read wmap1d.bit1_cnt dirty
+					return nullptr;
+				}
+				std::unique_lock<wmap1dmtx_t> lk(wmap1dmtx, std::try_to_lock);
+				if (!lk.owns_lock()) { return nullptr; }
+				if (wmap1d.bit1_cnt == 0)
+				{	 // read wmap1d.bit1_cnt again
+					return nullptr;
+				}
+				for (int i = 0; i < 64; i++)
+				{
+					smap2d.searchL2[i].val |= wmap1d.units[i].val;
+					if (smap2d.searchL2[i].val != 0) { smap2d.searchL1.bitset1(i); }
+				}
+				smap2d.bit1_cnt += wmap1d.bit1_cnt;
+				wmap1d.clear();
+				continue;
+			}
+		}
+
+		void put(void* ptr)
+		{
+			int n = ((uint8_t*)ptr - (uint8_t*)blk_start) / blk_sizeof;
+			assert(((uint8_t*)ptr - (uint8_t*)blk_start) % blk_sizeof == 0);
+			std::unique_lock<wmap1dmtx_t> lk(wmap1dmtx);
+			wmap1d.bitset1(n);
+		}
+		void put_nolock(void* ptr)
+		{
+			int n = ((uint8_t*)ptr - (uint8_t*)blk_start) / blk_sizeof;
+			assert(((uint8_t*)ptr - (uint8_t*)blk_start) % blk_sizeof == 0);
+			wmap1d.bitset1(n);
+		}
+
+		bool is_pool_full()
+		{
+			std::unique_lock<wmap1dmtx_t> lk(wmap1dmtx);
+			return smap2d.bit1_cnt + wmap1d.bit1_cnt == blk_init_cnt;
+		}
+
+		void lock() { wmap1dmtx.lock(); }
+		void unlock() { wmap1dmtx.unlock(); }
+	};
+
+
+	struct objpool_edge_t
+	{
+		void* ptr;
+		objpool* pool;
+		inline bool operator<(const objpool_edge_t& r) const { return ptr < r.ptr; }
+	};
+
+	struct local_mempool_edge_t
+	{
+		void* ptr;
+		local_mempool* pool;
+		inline bool operator<(const local_mempool_edge_t& r) const { return ptr < r.ptr; }
+	};
+
+	// local thread mempool,a set of objpool
+	struct local_mempool : local_mempool_spec
+	{
+		void* blk_start{ nullptr };
+		void* blk_end{ nullptr };	 // exclude
+		objpool obj_pools[objtypecnt];
+		obj_t objs[total_cnt_obj_t];
+		std::vector<objpool_edge_t> pool_edges;
+
+		pool_id_t id;
+		uint64_t get_by_mempool_cnt = 0;
+		uint64_t get_by_malloc_cnt = 0;
+		std::atomic<uint64_t> put_by_mempool_cnt{ 0 };
+
+		local_mempool(pool_id_t id_) : id(id_)
+		{
+			blk_start = objs;
+			blk_end = &objs + 1;
+			pool_edges.emplace_back(objpool_edge_t{ 0x0, nullptr });
+
+			uint8_t* p = (uint8_t*)objs;
+			for (int i = 0; i < objtypecnt; i++)
+			{
+				obj_pools[i].init(this, id + i, p, (sizeof(obj_t) * i), objcnt[i]);
+				if (obj_pools[i].blk_init_cnt != 0) { pool_edges.emplace_back(objpool_edge_t{ obj_pools[i].blk_start, &obj_pools[i] }); }
+				p += objcnt[i] * (sizeof(obj_t) * i);
+			}
+			assert(p <= (uint8_t*)(&objs + 1));
+		}
+
+		static constexpr size_t obj_pools_cnt() { return objtypecnt; }
+
+		void* xmalloc(size_t sz)
+		{
+			size_t c = ((int)(sz == 0) + sz + sizeof(obj_t) - 1) / sizeof(obj_t);	 // if sz==0 -> 1
+			for (; c < objtypecnt; c++)
+			{
+				void* ptr = obj_pools[c].get();
+				if (ptr != nullptr)
+				{
+					get_by_mempool_cnt++;
+					return ptr;
+				}
+			}
+			get_by_malloc_cnt++;
+			return malloc(sz);
+		}
+
+		void xfree(void* p)
+		{
+			xfree_get_objpool(p)->put(p);
+			put_by_mempool_cnt++;
+		}
+
+		objpool* xfree_get_objpool(void* p)
+		{
+			objpool_edge_t e{ p, nullptr };
+			auto it = std::upper_bound(pool_edges.begin(), pool_edges.end(), e);
+			assert(it != pool_edges.begin());
+			objpool_edge_t edge = *std::prev(it);
+			return edge.pool;
+		}
+
+		static void xfree(UnorderedMap<objpool*, std::vector<void*>>& frees)
+		{
+			for (auto& pr : frees)
+			{
+				objpool* opool = pr.first;
+				std::vector<void*>& v = pr.second;
+				opool->lock();
+				for (auto p : v)
+				{
+					opool->put_nolock(p);
+				}
+				opool->unlock();
+				opool->local_mempool_ptr->put_by_mempool_cnt += v.size();
+			}
+		}
+
+		bool is_pool_full()
+		{
+			for (size_t c = 0; c < objtypecnt; c++)
+			{
+				if (!obj_pools[c].is_pool_full()) { return false; }
+			}
+			return true;
+		}
+	};
+
+
+	struct mempool
+	{
+		pool_id_t next_id = { 0 };
+		std::stack<local_mempool*> free_local_pool;
+		std::vector<local_mempool*> vec_local_pool;
+		std::set<local_mempool_edge_t> pool_edges{ { 0x0, nullptr } };
+
+		std::mutex mtx;
+
+		local_mempool* get_local_mempool()
+		{
+			static thread_local local_mempool* ptr = [this] {
+				std::unique_lock<std::mutex> lk(mtx);
+
+				local_mempool* p;
+				if (!free_local_pool.empty())
+				{
+					p = free_local_pool.top();
+					free_local_pool.pop();
+					return p;
+				}
+				p = new local_mempool(next_id);
+				next_id += local_mempool::obj_pools_cnt();
+				vec_local_pool.push_back(p);
+				{
+					local_mempool_edge_t e{ p->blk_start, p };
+
+					auto it = pool_edges.lower_bound(e);
+					if (it != pool_edges.end())
+					{
+						assert(it->ptr != e.ptr);
+						assert(std::prev(it)->pool == nullptr);
+						assert(it->pool != nullptr);
+					}
+					local_mempool_edge_t e2{ p->blk_end, nullptr };
+					pool_edges.insert(e);
+					pool_edges.insert(e2);
+				}
+
+				return p;
+			}();
+			return ptr;
+		}
+
+		void put_local_mempool(local_mempool* ptr)
+		{
+			std::unique_lock<std::mutex> lk(mtx);
+			free_local_pool.push(ptr);
+		}
+
+		void* xmalloc(size_t sz, void** p_objpool = nullptr) { return get_local_mempool()->xmalloc(sz); }
+
+		void xfree(void* p)
+		{
+			assert(p != nullptr);
+			local_mempool_edge_t edge;
+			{
+				std::unique_lock<std::mutex> lk(mtx);
+				local_mempool_edge_t e{ p, nullptr };
+				auto it = pool_edges.upper_bound(e);
+				assert(it != pool_edges.begin());
+				edge = *std::prev(it);
+			}
+			if (edge.pool == nullptr)
+			{
+				free(p);
+			} else
+			{
+				edge.pool->xfree(p);
+			}
+		}
+
+		void* xrealloc(void* p, size_t sz)
+		{
+			assert(p != nullptr);
+			local_mempool_edge_t edge;
+			{
+				std::unique_lock<std::mutex> lk(mtx);
+				local_mempool_edge_t e{ p, nullptr };
+				auto it = pool_edges.upper_bound(e);
+				assert(it != pool_edges.begin());
+				edge = *std::prev(it);
+			}
+			if (edge.pool == nullptr)
+			{
+				return realloc(p, sz);
+			} else
+			{
+				objpool* opool = edge.pool->xfree_get_objpool(p);
+				if (sz <= opool->blk_sizeof)
+				{
+					return p;
+				} else
+				{
+					void* p2 = xmalloc(sz);
+					memcpy(p2, p, opool->blk_sizeof);
+					xfree(p);
+					return p2;
+				}
+			}
+		}
+
+		template <typename it_t>
+		void xfree(it_t bg, it_t ed, UnorderedMap<objpool*, Vector<void*>>& frees, Vector<local_mempool_edge_t>& pool_edges)
+		{
+			// frees.clear();
+			for (auto& v : frees)
+			{
+				v.second.clear();
+			}
+			pool_edges.clear();
+			{
+				std::unique_lock<std::mutex> lk(mtx);
+				for (auto e : this->pool_edges)
+				{
+					pool_edges.emplace_back(e);
+				}
+			}
+			for (auto it = bg; it != ed; ++it)
+			{
+				void* p = *it;
+				local_mempool_edge_t e{ p, nullptr };
+				auto it2 = std::upper_bound(pool_edges.begin(), pool_edges.end(), e);
+				assert(it2 != pool_edges.begin());
+				local_mempool_edge_t edge = *std::prev(it2);
+				if (edge.pool == nullptr)
+				{
+					free(p);
+				} else
+				{
+					objpool* opool = edge.pool->xfree_get_objpool(p);
+					frees[opool].emplace_back(p);
+				}
+			}
+
+			local_mempool::xfree(frees);
+		}
+
+
+		bool is_pool_full()
+		{
+			std::unique_lock<std::mutex> lk(mtx);
+			for (size_t c = 0; c < vec_local_pool.size(); c++)
+			{
+				if (!vec_local_pool[c]->is_pool_full()) { return false; }
+			}
+			return true;
+		}
+	};
+}	 // namespace tilogspace
+
+
+
+
+
 /**************************************************tilogspace codes**************************************************/
 
 #define TILOG_COMPLEXITY_FOR_THIS_FUNCTION(N1, N2)
@@ -1646,17 +2253,35 @@ namespace tilogspace
 
 namespace internal
 {
-		struct TiLogStreamHelper : public TiLogObject
+	struct TiLogStreamMemoryManager
+	{
+		static void* timalloc(size_t sz);
+		static void* ticalloc(size_t num_ele, size_t sz_ele);
+		static void* tirealloc(void* p, size_t sz);
+		static void tifree(void* p);
+		static void tifree(void* ptrs[], size_t sz, UnorderedMap<objpool*, Vector<void*>>& frees, Vector<local_mempool_edge_t>& pool_edges);
+	};
+
+	struct TiLogStreamHelper : public TiLogObject
 			{
 			using ExtType = TiLogBean;
 			using ObjectType = TiLogStream;
-			using memmgr_type = TiLogMemoryManager;
+			//using memmgr_type = TiLogMemoryManager;
+			using memmgr_type = TiLogStreamMemoryManager;
+			struct TiLogStreamMemoryManagerCache
+			{
+				Vector<void*> cache0;
+				UnorderedMap<objpool*, Vector<void*>> cache1;
+				Vector<local_mempool_edge_t> cache2;
+			};
+
 
 			inline static void do_destructor(ObjectType* p) ;
 			inline static void request_new_size(ObjectType* p,const size_type new_size) ;
 
 			inline static TiLogStringView str_view(const TiLogBean* p);
 			inline static void DestroyPushedTiLogBean(TiLogBean* p);
+			inline static void DestroyPushedTiLogBean(Vector<TiLogBean*> to_free,TiLogStreamMemoryManagerCache&cache);
 			inline static TiLogStream* get_no_used_stream() ;
 			inline static void free_no_used_stream(TiLogStream* p);
 			template <typename... Args>
@@ -1958,7 +2583,22 @@ namespace internal
 		{
 			TiLogBean::check(p);
 			auto ptr = TiLogStream::get_core_from_ext(p);
-			tifree(ptr);
+			TiLogStreamHelper::memmgr_type::tifree(ptr);
+			//tifree(ptr);
+		}
+		void TiLogStreamHelper::DestroyPushedTiLogBean(Vector<TiLogBean*> to_free, TiLogStreamMemoryManagerCache& cache)
+		{
+			cache.cache0.clear();
+			for (auto p : to_free)
+			{
+				TiLogBean::check(p);
+				auto ptr = TiLogStream::get_core_from_ext(p);
+				cache.cache0.emplace_back(ptr);
+			}
+			if (!cache.cache0.empty())
+			{
+				TiLogStreamHelper::memmgr_type::tifree(&cache.cache0.front(), cache.cache0.size(), cache.cache1, cache.cache2);
+			}
 		}
 		inline TiLogStream* TiLogStreamHelper::get_no_used_stream() { return TiLogStream::get_no_used_stream(); }
 		inline void TiLogStreamHelper::free_no_used_stream(TiLogStream* p)
