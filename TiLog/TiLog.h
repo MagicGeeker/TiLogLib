@@ -315,6 +315,100 @@ namespace tilogspace
 
 
 
+/**************************************************tilogspace codes**************************************************/
+
+#define TILOG_COMPLEXITY_FOR_THIS_FUNCTION(N1, N2)
+#define TILOG_COMPLEXITY_FOR_THESE_FUNCTIONS(N1, N2)
+#define TILOG_TIME_COMPLEXITY_O(n)
+#define TILOG_SPACE_COMPLEXITY_O(n)
+
+#define H__________________________________________________TiLog__________________________________________________
+#define H__________________________________________________TiLogBean__________________________________________________
+#define H__________________________________________________TiLogStream__________________________________________________
+
+namespace tilogspace
+{
+	using IOSBase = std::ios_base;
+	using StdIOS = std::ios;
+	using String = std::string;
+	TILOG_CPP17_FEATURE(using StringView = std::string_view;)
+	using OStringStream = std::ostringstream;
+	using StringStream = std::stringstream;
+}	 // namespace tilogspace
+
+namespace tilogspace
+{
+
+
+#define TILOG_ABSTRACT
+#define TILOG_INTERFACE
+
+
+	typedef enum TiLogAlignVal : size_t
+	{
+	} tilog_align_val_t;
+
+	struct TiLogMemoryManager
+	{
+		// placement new delete
+		inline static void* operator new(size_t, void* p) noexcept { return p; }
+		inline static void operator delete(void* ptr, void* place) noexcept {};
+
+		inline static void* operator new(size_t sz) { return TILOG_MALLOC_FUNCTION(sz); }
+		inline static void operator delete(void* p) { TILOG_FREE_FUNCTION(p); }
+
+#ifdef TILOG_ALIGNED_OPERATOR_NEW
+		inline static void* operator new(size_t sz, tilog_align_val_t alignv) { return TILOG_ALIGNED_OPERATOR_NEW(sz, alignv); }
+		inline static void operator delete(void* p, tilog_align_val_t alignv) { TILOG_ALIGNED_OPERATOR_DELETE(p, alignv); }
+#else
+		inline static void* operator new(size_t sz, tilog_align_val_t alignv)
+		{
+			// We want it to be a power of two since
+			DEBUG_ASSERT((alignv & (alignv - 1)) == 0);
+			size_t av = alignv < 16 ? 16 : alignv;
+			char* ptr = (char*)TILOG_MALLOC_FUNCTION(sz + av);	  // alloc enough space
+
+			char* p = (char*)((uintptr_t(ptr) & ~(av - 1)) + av);	 // find the next aligned address after ptr
+			// char* p = (char*)( (uintptr_t)ptr / av * av + av );   //it is equal
+
+			static_assert(alignof(std::max_align_t) >= sizeof(void*), "fatal err,(void**)p - 1 < (void*)ptr");
+			DEBUG_ASSERT((uintptr_t)p % (av) == 0);
+			DEBUG_ASSERT((void**)p - 1 >= (void*)ptr);
+			*((void**)p - 1) = ptr;
+			return p;
+		}
+		inline static void operator delete(void* p, tilog_align_val_t alignv)
+		{
+			DEBUG_ASSERT((uintptr_t)p % (alignv) == 0);
+			void* ptr = *((void**)p - 1);
+			TILOG_FREE_FUNCTION(ptr);
+		}
+#endif
+
+		inline static void* timalloc(size_t sz) { return TILOG_MALLOC_FUNCTION(sz); }
+		inline static void* ticalloc(size_t num_ele, size_t sz_ele) { return TILOG_CALLOC_FUNCTION(num_ele, sz_ele); }
+		inline static void* tirealloc(void* p, size_t sz) { return TILOG_REALLOC_FUNCTION(p, sz); }
+		inline static void tifree(void* p) { TILOG_FREE_FUNCTION(p); }
+	};
+
+
+	template <typename T>
+	struct TiLogAlignedMemMgr : TiLogMemoryManager
+	{
+		inline static void* operator new(size_t sz) { return TiLogMemoryManager::operator new(sz, (tilog_align_val_t)alignof(T)); }
+		inline static void operator delete(void* p) { TiLogMemoryManager::operator delete(p, (tilog_align_val_t)alignof(T)); }
+	};
+
+	class TiLogObject : public TiLogMemoryManager
+	{
+	};
+	template <typename T>
+	class TiLogAlignedObject : public TiLogAlignedMemMgr<T>
+	{
+	};
+}
+
+
 namespace tilogspace
 {
 	static const int index64[64] = { 0,	 1,	 48, 2,	 57, 49, 28, 3,	 61, 58, 50, 42, 38, 29, 17, 4,	 62, 55, 59, 36, 53, 51,
@@ -914,102 +1008,8 @@ namespace tilogspace
 	};
 }	 // namespace tilogspace
 
-
-
-
-
-/**************************************************tilogspace codes**************************************************/
-
-#define TILOG_COMPLEXITY_FOR_THIS_FUNCTION(N1, N2)
-#define TILOG_COMPLEXITY_FOR_THESE_FUNCTIONS(N1, N2)
-#define TILOG_TIME_COMPLEXITY_O(n)
-#define TILOG_SPACE_COMPLEXITY_O(n)
-
-#define H__________________________________________________TiLog__________________________________________________
-#define H__________________________________________________TiLogBean__________________________________________________
-#define H__________________________________________________TiLogStream__________________________________________________
-
 namespace tilogspace
 {
-	using IOSBase = std::ios_base;
-	using StdIOS = std::ios;
-	using String = std::string;
-	TILOG_CPP17_FEATURE(using StringView = std::string_view;)
-	using OStringStream = std::ostringstream;
-	using StringStream = std::stringstream;
-}	 // namespace tilogspace
-
-namespace tilogspace
-{
-
-
-#define TILOG_ABSTRACT
-#define TILOG_INTERFACE
-
-
-	typedef enum TiLogAlignVal : size_t
-	{
-	} tilog_align_val_t;
-
-	struct TiLogMemoryManager
-	{
-		// placement new delete
-		inline static void* operator new(size_t, void* p) noexcept { return p; }
-		inline static void operator delete(void* ptr, void* place) noexcept {};
-
-		inline static void* operator new(size_t sz) { return TILOG_MALLOC_FUNCTION(sz); }
-		inline static void operator delete(void* p) { TILOG_FREE_FUNCTION(p); }
-
-#ifdef TILOG_ALIGNED_OPERATOR_NEW
-		inline static void* operator new(size_t sz, tilog_align_val_t alignv) { return TILOG_ALIGNED_OPERATOR_NEW(sz, alignv); }
-		inline static void operator delete(void* p, tilog_align_val_t alignv) { TILOG_ALIGNED_OPERATOR_DELETE(p, alignv); }
-#else
-		inline static void* operator new(size_t sz, tilog_align_val_t alignv)
-		{
-			// We want it to be a power of two since
-			DEBUG_ASSERT((alignv & (alignv - 1)) == 0);
-			size_t av = alignv < 16 ? 16 : alignv;
-			char* ptr = (char*)TILOG_MALLOC_FUNCTION(sz + av);	  // alloc enough space
-
-			char* p = (char*)((uintptr_t(ptr) & ~(av - 1)) + av);	 // find the next aligned address after ptr
-			// char* p = (char*)( (uintptr_t)ptr / av * av + av );   //it is equal
-
-			static_assert(alignof(std::max_align_t) >= sizeof(void*), "fatal err,(void**)p - 1 < (void*)ptr");
-			DEBUG_ASSERT((uintptr_t)p % (av) == 0);
-			DEBUG_ASSERT((void**)p - 1 >= (void*)ptr);
-			*((void**)p - 1) = ptr;
-			return p;
-		}
-		inline static void operator delete(void* p, tilog_align_val_t alignv)
-		{
-			DEBUG_ASSERT((uintptr_t)p % (alignv) == 0);
-			void* ptr = *((void**)p - 1);
-			TILOG_FREE_FUNCTION(ptr);
-		}
-#endif
-
-		inline static void* timalloc(size_t sz) { return TILOG_MALLOC_FUNCTION(sz); }
-		inline static void* ticalloc(size_t num_ele, size_t sz_ele) { return TILOG_CALLOC_FUNCTION(num_ele, sz_ele); }
-		inline static void* tirealloc(void* p, size_t sz) { return TILOG_REALLOC_FUNCTION(p, sz); }
-		inline static void tifree(void* p) { TILOG_FREE_FUNCTION(p); }
-	};
-
-
-	template <typename T>
-	struct TiLogAlignedMemMgr : TiLogMemoryManager
-	{
-		inline static void* operator new(size_t sz) { return TiLogMemoryManager::operator new(sz, (tilog_align_val_t)alignof(T)); }
-		inline static void operator delete(void* p) { TiLogMemoryManager::operator delete(p, (tilog_align_val_t)alignof(T)); }
-	};
-
-	class TiLogObject : public TiLogMemoryManager
-	{
-	};
-	template <typename T>
-	class TiLogAlignedObject : public TiLogAlignedMemMgr<T>
-	{
-	};
-
 	using sync_ostream_mtx_t=std::mutex;
 	extern sync_ostream_mtx_t ticout_mtx;
 	extern sync_ostream_mtx_t ticerr_mtx;
