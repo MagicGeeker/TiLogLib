@@ -348,7 +348,7 @@ namespace tilogspace
 	{
 	} tilog_align_val_t;
 
-	struct TiLogMemoryManager
+	struct TiLogCppMemoryManager
 	{
 		// placement new delete
 		inline static void* operator new(size_t, void* p) noexcept { return p; }
@@ -384,19 +384,34 @@ namespace tilogspace
 			TILOG_FREE_FUNCTION(ptr);
 		}
 #endif
+	};
 
+	struct TiLogCMemoryManager
+	{
 		inline static void* timalloc(size_t sz) { return TILOG_MALLOC_FUNCTION(sz); }
 		inline static void* ticalloc(size_t num_ele, size_t sz_ele) { return TILOG_CALLOC_FUNCTION(num_ele, sz_ele); }
 		inline static void* tirealloc(void* p, size_t sz) { return TILOG_REALLOC_FUNCTION(p, sz); }
 		inline static void tifree(void* p) { TILOG_FREE_FUNCTION(p); }
 	};
 
+	struct TiLogMemoryManager : TiLogCppMemoryManager, TiLogCMemoryManager
+	{
+	};
 
-	template <typename T>
+	template <typename T, size_t N = 0>
 	struct TiLogAlignedMemMgr : TiLogMemoryManager
 	{
+		constexpr static size_t ALIGN = alignof(T);
 		inline static void* operator new(size_t sz) { return TiLogMemoryManager::operator new(sz, (tilog_align_val_t)alignof(T)); }
 		inline static void operator delete(void* p) { TiLogMemoryManager::operator delete(p, (tilog_align_val_t)alignof(T)); }
+	};
+
+	template <size_t N>
+	struct TiLogAlignedMemMgr<void, N>
+	{
+		constexpr static size_t ALIGN = N;
+		inline static void* operator new(size_t sz) { return TiLogMemoryManager::operator new(sz, (tilog_align_val_t)ALIGN); }
+		inline static void operator delete(void* p) { TiLogMemoryManager::operator delete(p, (tilog_align_val_t)ALIGN); }
 	};
 
 	class TiLogObject : public TiLogMemoryManager
