@@ -187,8 +187,12 @@ namespace tiloghelperspace
 			if (i >= size) { break; }
 			if (*timeStr == ':')
 			{
-				*filename = ',';
-			} else
+				*filename = '-';
+			} else if (*timeStr == ' ')
+			{
+				*filename = '_';
+			}
+			else
 			{
 				*filename = *timeStr;
 			}
@@ -1694,7 +1698,7 @@ namespace tilogspace
 			size_t size = TimePointToTimeCStr(timeStr, metaData->logTime.get_origin_time());
 			String s;
 			char indexs[9];
-			snprintf(indexs, 9, "%07d ", index);
+			snprintf(indexs, 9, "%07d_", index);
 			if (size != 0)
 			{
 				char* fileName = timeStr;
@@ -2067,6 +2071,19 @@ namespace tilogspace
 			}
 		}
 
+		void static CheckVecLogCacheOrdered(VecLogCache& v)
+		{
+			if (!std::is_sorted(v.begin(), v.end(), TiLogBeanPtrComp()))
+			{
+				std::ostringstream os;
+				for (uint32_t index = 0; index != v.size(); index++)
+				{
+					os << v[index]->time().toSteadyFlag() << " ";
+					if (index % 6 == 0) { os << "\n"; }
+				}
+				DEBUG_ASSERT1(false, os.str());
+			}
+		}
 
 		void TiLogCore::MergeThreadStruQueueToSet(List<ThreadStru*>& thread_queue, TiLogBean& bean)
 		{
@@ -2123,19 +2140,7 @@ namespace tilogspace
 				}
 
 			loopend:
-				auto sorted_judge_func = [&v]() {
-					if (!std::is_sorted(v.begin(), v.end(), TiLogBeanPtrComp()))
-					{
-						std::ostringstream os;
-						for (uint32_t index = 0; index != v.size(); index++)
-						{
-							os << v[index]->time().toSteadyFlag() << " ";
-							if (index % 6 == 0) { os << "\n"; }
-						}
-						DEBUG_ASSERT1(false, os.str());
-					}
-				};
-				DEBUG_RUN(sorted_judge_func());
+				DEBUG_RUN(CheckVecLogCacheOrdered(v));
 
 				DEBUG_PRINTD("v %p size after: %u diff %u\n", &v, (unsigned)v.size(), (unsigned)(v.size() - vsizepre));
 				mMerge.mMergeLogVecVec[mMerge.mMergeLogVecVec.mIndex++].swap(v);
@@ -2198,6 +2203,7 @@ namespace tilogspace
 				} else
 				{
 					VecLogCachePtr p = s.top();
+					DEBUG_RUN(CheckVecLogCacheOrdered(*p));
 					mMerge.mMergeCaches.swap(*p);
 				}
 			}
