@@ -444,8 +444,22 @@ TEST_CASE("terminal_multi_thread_poll__log_test_____________________")
 
 TEST_CASE("none_multi_thread_memory_leak_stress_test_____________________")
 {
+	struct testLoopBeg_t : multi_thread_test_loop_t
+	{
+		constexpr static uint32_t SLEEP_MS_DEFORE_TEST() { return 2000; }
+		constexpr static bool ASYNC_SET_PRINTERS() { return true; }
+		constexpr static int32_t THREADS() { return 0; }
+		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return 0; }
+		constexpr static bool PRINT_TOTAL_TIME() { return false; }
+	};
+	MultiThreadTest<testLoopBeg_t>("none_multi_thread_memory_leak_stress_test_____________________ start\n", [](int index) {});
+
 	struct testLoop_t : multi_thread_test_loop_t
 	{
+		constexpr static bool SYNC_DEFORE_TEST() { return false; }
+		constexpr static bool SYNC_AFTER_TEST() { return false; }
+		constexpr static bool FSYNC_DEFORE_TEST() { return false; }
+		constexpr static bool FSYNC_AFTER_TEST() { return false; }
 		constexpr static bool ASYNC_SET_PRINTERS() { return true; }
 		constexpr static int32_t THREADS() { return 10; }
 		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return 50; }
@@ -453,7 +467,7 @@ TEST_CASE("none_multi_thread_memory_leak_stress_test_____________________")
 	};
 
 
-	for (uint32_t i = 0; i < (test_release ? 20000 : 200); i++)
+	for (uint32_t i = 0; i < (test_release ? 20000 : 1000); i++)
 	{
 		char testName[100]="";
 		sprintf(testName,"none_multi_thread_memory_leak_stress_test_____________________%u",(unsigned)i);
@@ -468,7 +482,14 @@ TEST_CASE("none_multi_thread_memory_leak_stress_test_____________________")
 			});
 	}
 
-	mycout << "none_multi_thread_memory_leak_stress_test_____________________ end\n";
+	struct testLoopEnd_t : multi_thread_test_loop_t
+	{
+		constexpr static bool ASYNC_SET_PRINTERS() { return true; }
+		constexpr static int32_t THREADS() { return 0; }
+		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return 0; }
+		constexpr static bool PRINT_TOTAL_TIME() { return false; }
+	};
+	MultiThreadTest<testLoopEnd_t>("none_multi_thread_memory_leak_stress_test_____________________ end\n", [](int index) {});
 }
 
 #endif

@@ -59,6 +59,12 @@ static constexpr inline uint64_t testApow10N(uint64_t A, uint64_t N)
 
 struct multi_thread_test_loop_t
 {
+	constexpr static bool SYNC_DEFORE_TEST() { return true; }
+	constexpr static bool SYNC_AFTER_TEST() { return true; }
+	constexpr static bool FSYNC_DEFORE_TEST() { return false; }
+	constexpr static bool FSYNC_AFTER_TEST() { return true; }
+	constexpr static uint32_t SLEEP_MS_DEFORE_TEST() { return 0; }
+	constexpr static uint32_t SLEEP_MS_AFTER_TEST() { return 0; }
 	constexpr static bool ASYNC_SET_PRINTERS() { return false; }
 	constexpr static bool PRINT_TOTAL_TIME() { return true; }
 	constexpr static int32_t THREADS() { return 4; }
@@ -77,12 +83,20 @@ namespace funcspace
 	template <typename TestLoopType = multi_thread_test_loop_t, typename Runnable>
 	static uint64_t Test(const char* testName, tilogspace::printer_ids_t ids, Runnable&& runnable)
 	{
+		constexpr auto sleep_ms = TestLoopType::SLEEP_MS_DEFORE_TEST();
+		if (sleep_ms != 0) { std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms)); }
 		if_constexpr(TestLoopType::ASYNC_SET_PRINTERS()) { TILOG_GET_DEFAULT_MODULE_REF.AsyncSetPrinters(ids); }
 		else { TILOG_GET_DEFAULT_MODULE_REF.SetPrinters(ids); }
 		bool terminal_enabled = TILOG_GET_DEFAULT_MODULE_REF.IsPrinterInPrinters(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL, ids);
 		if (!terminal_enabled) { TICOUT << TEST_STRING_PREFIX << testName << '\n'; }
 		TILOGA << "\n\n========Test: " << testName << '\n';
-		TILOG_GET_DEFAULT_MODULE_REF.Sync();
+		if (TestLoopType::FSYNC_DEFORE_TEST())
+		{
+			TILOG_GET_DEFAULT_MODULE_REF.FSync();
+		} else if (TestLoopType::SYNC_DEFORE_TEST())
+		{
+			TILOG_GET_DEFAULT_MODULE_REF.Sync();
+		}
 		constexpr uint64_t loops = TestLoopType::GET_SINGLE_THREAD_LOOPS();
 		constexpr int32_t threads = TestLoopType::THREADS();
 
@@ -123,7 +137,15 @@ namespace funcspace
 			TILOGA << (1e6 * threads * loops / ns) << " loops per millisecond\n";
 			TILOGA << (1e6 * loops / ns) << " loops per thread per millisecond\n";
 		}
-		TILOG_GET_DEFAULT_MODULE_REF.Sync();
+		if (TestLoopType::FSYNC_AFTER_TEST())
+		{
+			TILOG_GET_DEFAULT_MODULE_REF.FSync();
+		} else if (TestLoopType::SYNC_AFTER_TEST())
+		{
+			TILOG_GET_DEFAULT_MODULE_REF.Sync();
+		}
+		constexpr auto sleep_ms2 = TestLoopType::SLEEP_MS_AFTER_TEST();
+		if (sleep_ms2 != 0) { std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms2)); }
 		return ns;
 	}
 
