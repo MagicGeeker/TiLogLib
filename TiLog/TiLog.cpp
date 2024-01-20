@@ -949,14 +949,15 @@ namespace tilogspace
 			CrcQueueLogCache qCache;
 			ThreadLocalSpinMutex spinMtx;	 // protect cache
 
+			mempoolspace::local_mempool* lpool;
 			TiLogStream* noUseStream;
 			const String* tid;
 			std::mutex thrdExistMtx;
 			std::condition_variable thrdExistCV;
 
 			explicit ThreadStru(TiLogCore* core, size_t cacheSize)
-				: pCore(core), qCache(), spinMtx(), noUseStream(TiLogStreamHelper::get_no_used_stream()), tid(GetThreadIDString()),
-				  thrdExistMtx(), thrdExistCV()
+				: pCore(core), qCache(), spinMtx(), lpool(get_local_mempool()), noUseStream(TiLogStreamHelper::get_no_used_stream()),
+				  tid(GetThreadIDString()), thrdExistMtx(), thrdExistCV()
 			{
 				DEBUG_PRINTI("ThreadStru ator pCore %p this %p tid [%p %s]\n", pCore, this, tid, tid->c_str());
 				IncTidStrRefCnt(tid);
@@ -968,11 +969,15 @@ namespace tilogspace
 				if (refcnt == 0)
 				{
 					TiLogStreamHelper::free_no_used_stream(noUseStream);
+					free_local_mempool(lpool);
 					DEBUG_PRINTI("ThreadStru dtor pCore %p this %p tid [%p %s]\n", pCore, this, tid, tid->c_str());
 					delete (tid);
 					// DEBUG_RUN(tid = NULL);
 				}
 			}
+
+			mempoolspace::local_mempool* get_local_mempool();
+			void free_local_mempool(mempoolspace::local_mempool* lpool);
 		};
 
 		template <typename Container, size_t CAPACITY = 4>
@@ -1019,7 +1024,7 @@ namespace tilogspace
 
 		struct MergeRawDatasHashMapFeat : TiLogCurrentHashMapDefaultFeat<const String*, VecLogCache>
 		{
-			constexpr static uint32_t CONCURRENT = TILOG_AVERAGE_CONCURRENT_THREAD_NUM;
+			constexpr static uint32_t CONCURRENT = TILOG_MAY_MAX_RUNNING_THREAD_NUM;
 		};
 		
 		struct MergeRawDatas : public TiLogObject, public TiLogCurrentHashMap<const String*, VecLogCache,MergeRawDatasHashMapFeat>
@@ -2877,7 +2882,7 @@ namespace tilogspace
 		{
 			struct ThreadIdStrRefCountFeat : TiLogCurrentHashMapDefaultFeat<const String*, uint32_t>
 			{
-				constexpr static uint32_t CONCURRENT = TILOG_AVERAGE_CONCURRENT_THREAD_NUM;
+				constexpr static uint32_t CONCURRENT = TILOG_MAY_MAX_RUNNING_THREAD_NUM;
 			};
 			TiLogCurrentHashMap<const String*, uint32_t, ThreadIdStrRefCountFeat> threadIdStrRefCount;
 			TiLogClockIniter tiLogClockIniter;
@@ -2936,6 +2941,12 @@ namespace tilogspace
 			return cnt;
 		}
 
+		mempoolspace::local_mempool* ThreadStru::get_local_mempool() { return TiLogEngines::getRInstance().mpool.get_local_mempool(); }
+		void ThreadStru::free_local_mempool(mempoolspace::local_mempool* lpool)
+		{
+			auto& pool = TiLogEngines::getRInstance().mpool;
+			pool.put_local_mempool(lpool);
+		}
 	}	 // namespace internal
 
 	TiLogModBase& TiLog::GetMoudleBaseRef(ETiLogModule mod) { return *TiLogEngines::getRInstance().engines[mod].tiLogModBase; }

@@ -237,7 +237,9 @@ namespace tilogspace
 	constexpr static size_t TILOG_THREAD_ID_MAX_LEN = SIZE_MAX;	// tid max len,SIZE_MAX means no limit,in popular system limit is TILOG_UINT64_MAX_CHAR_LEN
 
 	constexpr static uint32_t TILOG_MAY_MAX_RUNNING_THREAD_NUM = 1024;	// may max running threads
-	constexpr static uint32_t TILOG_AVERAGE_CONCURRENT_THREAD_NUM = 128;	// average concurrent threads
+	constexpr static uint32_t TILOG_AVERAGE_CONCURRENT_THREAD_NUM = 32;	// average concurrent threads
+	// thread local memory pool max num,can be bigger than TILOG_AVERAGE_CONCURRENT_THREAD_NUM for better formance
+	constexpr static uint32_t TILOG_LOCAL_MEMPOOL_MAX_NUM = 128;
 
 	constexpr static size_t TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE= (16U << 20U);	// log size per file,it is not accurate,especially TILOG_GLOBAL_BUF_SIZE is bigger
 }	 // namespace tilogspace
@@ -402,14 +404,18 @@ namespace tilogspace
 	struct TiLogAlignedMemMgr : TiLogMemoryManager
 	{
 		constexpr static size_t ALIGN = alignof(T);
+		using TiLogMemoryManager::operator new;
+		using TiLogMemoryManager::operator delete;
 		inline static void* operator new(size_t sz) { return TiLogMemoryManager::operator new(sz, (tilog_align_val_t)alignof(T)); }
 		inline static void operator delete(void* p) { TiLogMemoryManager::operator delete(p, (tilog_align_val_t)alignof(T)); }
 	};
 
 	template <size_t N>
-	struct TiLogAlignedMemMgr<void, N>
+	struct TiLogAlignedMemMgr<void, N> : TiLogMemoryManager
 	{
 		constexpr static size_t ALIGN = N;
+		using TiLogMemoryManager::operator new;
+		using TiLogMemoryManager::operator delete;
 		inline static void* operator new(size_t sz) { return TiLogMemoryManager::operator new(sz, (tilog_align_val_t)ALIGN); }
 		inline static void operator delete(void* p) { TiLogMemoryManager::operator delete(p, (tilog_align_val_t)ALIGN); }
 	};
@@ -585,8 +591,8 @@ namespace tilogspace
 	{
 		bit_unit_t searchL2[64];
 		bit_unit_t searchL1;
-		int bit1_init_cnt;
-		int bit1_cnt;
+		uint32_t bit1_init_cnt;
+		uint32_t bit1_cnt;
 
 		bit_search_map2d_t()
 		{
@@ -595,7 +601,7 @@ namespace tilogspace
 		}
 		void fill_first_n_1(int n)
 		{
-			assert(n <= 4096);
+			DEBUG_ASSERT(n <= 4096);
 			int searchL2cnt = n / 64;
 			memset(searchL2, 0xFF, searchL2cnt * sizeof(bit_unit_t));
 			int r = n % 64;
@@ -616,7 +622,7 @@ namespace tilogspace
 			if (searchL1.val == 0) { return -1; }
 			int idx_L2 = bitScanForward(searchL1.val);
 			bit_unit_t& unitL2 = searchL2[idx_L2];
-			assert(unitL2.val != 0);
+			DEBUG_ASSERT(unitL2.val != 0);
 			int idx_raw = bitScanForward(unitL2.val);
 			unitL2.bitset0(idx_raw);
 			if (unitL2.val == 0) { searchL1.bitset0(idx_L2); }
@@ -629,17 +635,29 @@ namespace tilogspace
 			int idx_raw = index % 64;
 
 			bit_unit_t& unitL2 = searchL2[idx_L2];
-			assert(!unitL2.bitget(idx_raw));
+			DEBUG_ASSERT(!unitL2.bitget(idx_raw));	  // double free check
 			if (unitL2.val == 0) { searchL1.bitset1(idx_L2); }
 			unitL2.bitset1(idx_raw);
 			bit1_cnt++;
+		}
+		bool try_bitset0(int index)
+		{
+			int idx_L2 = index / 64;
+			int idx_raw = index % 64;
+
+			bit_unit_t& unitL2 = searchL2[idx_L2];
+			if (!unitL2.bitget(idx_raw)) { return false; };
+			if (unitL2.val == 0) { searchL1.bitset0(idx_L2); }
+			unitL2.bitset0(idx_raw);
+			bit1_cnt--;
+			return true;
 		}
 	};
 
 	struct bit_write_cache_map1d_t
 	{
 		bit_unit_t units[64];
-		int bit1_cnt;
+		uint32_t bit1_cnt;
 
 		bit_write_cache_map1d_t() { clear(); }
 		void clear()
@@ -662,23 +680,65 @@ namespace tilogspace
 	struct objpool_spec
 	{
 		constexpr static bool is_for_multithread = true;
+		constexpr static char invalid_char = 0xcc;
 	};
 
 	using pool_id_t = int;
 	struct objpool;
 	struct local_mempool;
 
-	struct alignas(32) obj_t
+
+	union alignas(32) obj_t
 	{
+		constexpr static uint32_t MAGIC_NUMBER_OBJ_T = 0xc012d034;
+		struct
+		{
+			objpool* opool;
+			local_mempool* local_mempool_ptr;
+			uint32_t blk_sizeof;
+			uint32_t magic_number;
+		};
 		char data[32];
 	};
+	static_assert(sizeof(obj_t) == alignof(obj_t), "fatal");
 
-	constexpr static size_t objtypecnt = 9;
-	// num of memory block 0 32 64 96 128 160 192 224 256,each of objcnt[n]<=4096
-	constexpr static size_t objcnt[8 + 1] = { 0, 0, 256, 1024, 2048, 1536, 768, 512, 512 };
-	constexpr static size_t total_cnt_obj_t = 0 * objcnt[0] + 1 * objcnt[1] + 2 * objcnt[2] + 3 * objcnt[3] + 4 * objcnt[4] + 5 * objcnt[5]
-		+ 6 * objcnt[6] + 7 * objcnt[7] + 8 * objcnt[8];
-	static_assert(objcnt[0] == 0, "0 byte memory block must be 0");
+	constexpr static size_t ALIGN_OF_MINI_OBJPOOL = (32 * 1024);
+	constexpr static size_t blkmax = 512;
+	constexpr static size_t blkmin = 64;
+	constexpr static size_t objtypecnt = 11;
+	struct memblk_t
+	{
+		// DO NOT MODIFY
+		const uint32_t blk_sizeof;	//  {64  96  128 |  160 192 224 256 | 320 384 448 512}
+		const uint32_t d32;			// blk_sizeof/sizeof(obj_t)
+		const uint32_t blkcnt_base;
+		// user-defined
+		uint32_t blkcnt;	  // num of memory block,must be evenly divided by objcnt_base
+	};
+
+
+	constexpr static memblk_t memblks[objtypecnt] = {
+		{ 64, 2, 512, 512 },	   // blk 64
+		{ 96, 3, 1024, 2048 },	   // blk 96
+		{ 128, 4, 256, 3072 },	   // blk 128
+		{ 160, 5, 1024, 2048 },	   // blk 160
+		{ 192, 6, 512, 1536 },	   // blk 192
+		{ 224, 7, 1024, 1024 },	   // blk 224
+		{ 256, 8, 128, 768 },	   // blk 256
+		{ 320, 10, 512, 512 },	   // blk 320
+		{ 384, 12, 256, 256 },	   // blk 384
+		{ 448, 14, 512, 0 },	   // blk 448
+		{ 512, 16, 64, 64 },	   // blk 512
+	};
+	// if mem block is unavailable,try find bigger mem block times
+	constexpr static uint32_t local_mempool_find_blk_max_times = 2;
+	constexpr static size_t get_total_cnt_obj_t(uint32_t n = objtypecnt - 1)
+	{
+		return n == 0 ? (memblks[0].blkcnt * memblks[0].d32) : (get_total_cnt_obj_t(n - 1) + memblks[n].blkcnt * memblks[n].d32);
+	}
+	constexpr static size_t total_cnt_obj_t = get_total_cnt_obj_t();
+
+
 
 
 	struct objpool : objpool_spec
@@ -695,14 +755,14 @@ namespace tilogspace
 		pool_id_t id{ -1 };
 		void* blk_start{ nullptr };
 		void* blk_end{ nullptr };	 // exclude
-		int32_t blk_sizeof{ 0 };
+		uint32_t blk_sizeof{ 0 };
 
-		int32_t blk_init_cnt{ 0 };
+		uint32_t blk_init_cnt{ 0 };
 
 		objpool() {}
 
 		//  blk_t bs[blk_cnt] = blkstart;
-		void init(local_mempool* local_mempool_p, pool_id_t id_, void* blkstart, int32_t blksizeof, int32_t blkcnt)
+		void init(local_mempool* local_mempool_p, pool_id_t id_, void* blkstart, uint32_t blksizeof, uint32_t blkcnt)
 		{
 			this->local_mempool_ptr = local_mempool_p;
 			this->id = id_;
@@ -750,16 +810,26 @@ namespace tilogspace
 
 		void put(void* ptr)
 		{
-			int n = ((uint8_t*)ptr - (uint8_t*)blk_start) / blk_sizeof;
-			assert(((uint8_t*)ptr - (uint8_t*)blk_start) % blk_sizeof == 0);
+			uint32_t n = ((uint8_t*)ptr - (uint8_t*)blk_start) / blk_sizeof;
+			DEBUG_ASSERT(n < blk_init_cnt);
+			DEBUG_ASSERT3(((uint8_t*)ptr - (uint8_t*)blk_start) % blk_sizeof == 0, ptr, blk_sizeof, blk_sizeof);
+			DEBUG_RUN(memset(ptr, invalid_char, blk_sizeof));
 			std::unique_lock<wmap1dmtx_t> lk(wmap1dmtx);
 			wmap1d.bitset1(n);
 		}
 		void put_nolock(void* ptr)
 		{
-			int n = ((uint8_t*)ptr - (uint8_t*)blk_start) / blk_sizeof;
-			assert(((uint8_t*)ptr - (uint8_t*)blk_start) % blk_sizeof == 0);
+			uint32_t n = ((uint8_t*)ptr - (uint8_t*)blk_start) / blk_sizeof;
+			DEBUG_ASSERT(n < blk_init_cnt);
+			DEBUG_ASSERT3(((uint8_t*)ptr - (uint8_t*)blk_start) % blk_sizeof == 0, ptr, blk_sizeof, blk_sizeof);
+			DEBUG_RUN(memset(ptr, invalid_char, blk_sizeof));
 			wmap1d.bitset1(n);
+		}
+		void set_mini_meta_nolock(void* ptr)
+		{
+			uint32_t n = ((uint8_t*)ptr - (uint8_t*)blk_start) / blk_sizeof;
+			bool b = smap2d.try_bitset0(n);
+			DEBUG_ASSERT(b);
 		}
 
 		bool is_pool_full()
@@ -795,8 +865,11 @@ namespace tilogspace
 	constexpr static size_t SIZE_OF_LOCAL_MEMPOOL_DATA = sizeof(local_mempool_data_t);
 	struct local_mempool_meta_t
 	{
-		objpool obj_pools[objtypecnt];
-		std::vector<objpool_edge_t> pool_edges;
+		std::array<objpool, objtypecnt> obj_pools_raw{};
+		std::array<objpool*, 1 + blkmax / sizeof(obj_t)> obj_pools{};
+		std::array<objpool_edge_t, objtypecnt + 1> pool_edges{};
+		size_t pool_edges_sorted_size = 0;
+		std::array<obj_t*, 1 + SIZE_OF_LOCAL_MEMPOOL_DATA / ALIGN_OF_MINI_OBJPOOL> mini_metas{};
 
 		void* blk_start{ nullptr };
 		void* blk_end{ nullptr };	 // exclude
@@ -805,41 +878,78 @@ namespace tilogspace
 		uint64_t get_by_mempool_cnt = 0;
 		uint64_t get_by_malloc_cnt = 0;
 		std::atomic<uint64_t> put_by_mempool_cnt{ 0 };
-		constexpr static uint32_t MAGIC_NUMBER = 0xdea7105f;
-		uint32_t magic_number = MAGIC_NUMBER;
+		constexpr static uint32_t MAGIC_NUMBER_ACTIVE = 0xac00ac00;		 // can xmalloc and xfree
+		constexpr static uint32_t MAGIC_NUMBER_DEGRADED = 0x00de00de;	 // can only xfree
+		constexpr static uint32_t MAGIC_NUMBER_DEAD = 0xdeaddead;		 // can not xmalloc and xfree
+		DEBUG_DECLARE(std::atomic<uint32_t> magic_number{ MAGIC_NUMBER_ACTIVE };)
+		DEBUG_DECLARE(std::thread::id owner;)
 	};
 	constexpr static size_t SIZE_OF_LOCAL_MEMPOOL_META = sizeof(local_mempool_meta_t);
 
-	// example: 128K-238K(min sizeof local_mempool)-240K(sizeof(local_mempool))--256K(ALIGN_OF_LOCAL_MEMPOOL)
-	constexpr static size_t MIN_SIZE_OF_LOCAL_MEMPOOL = SIZE_OF_LOCAL_MEMPOOL_DATA + SIZE_OF_LOCAL_MEMPOOL_META;
-
-	// the min number of power 2 and >= MIN_SIZE_OF_LOCAL_MEMPOOL
-	constexpr static size_t ALIGN_OF_LOCAL_MEMPOOL = roundup(MIN_SIZE_OF_LOCAL_MEMPOOL);
+	constexpr static size_t ALIGN_OF_LOCAL_MEMPOOL = ALIGN_OF_MINI_OBJPOOL;
 
 	// local thread mempool,a set of objpool
-	struct local_mempool : local_mempool_data_t, local_mempool_meta_t, TiLogAlignedMemMgr<void, tilog_align_val_t(ALIGN_OF_LOCAL_MEMPOOL)>
+	struct local_mempool : local_mempool_data_t, local_mempool_meta_t, TiLogAlignedMemMgr<void, ALIGN_OF_LOCAL_MEMPOOL>
 	{
 		local_mempool(pool_id_t id_)
 		{
 			constexpr double data_rate = 1.0 * sizeof(local_mempool_data_t) / sizeof(local_mempool);
-			static_assert(data_rate >= 0.90, "it seems too much memory is wasted,please adjust objcnt[n](0<n<9)");
-			constexpr double align_rate = 1.0 * sizeof(local_mempool) / ALIGN_OF_LOCAL_MEMPOOL;
-			static_assert(align_rate >= 0.90, "it seems too much memory is wasted,please adjust objcnt[n](0<n<9)");
+			static_assert(data_rate >= 0.90, "it seems too much memory is wasted,please adjust memblks.objcnt[n]");
+			constexpr double align_wasted_rate = 1.0 * ALIGN_OF_LOCAL_MEMPOOL / sizeof(local_mempool);
+			static_assert(align_wasted_rate <= 0.10, "it seems too much memory is wasted,please adjust memblks.objcnt[n]");
 
 			id = id_;
 
+#ifndef IUILS_NDEBUG_WITHOUT_ASSERT
+			memset(objs, objpool_spec::invalid_char, sizeof(objs));
+#endif
 			blk_start = objs;
 			blk_end = &objs + 1;
-			pool_edges.emplace_back(objpool_edge_t{ 0x0, nullptr });
+			pool_edges[0] = objpool_edge_t{ 0x0, nullptr };
+			pool_edges_sorted_size = 1;
 
-			DEBUG_ASSERT2( (uintptr_t)blk_start%ALIGN_OF_LOCAL_MEMPOOL==0,blk_start,ALIGN_OF_LOCAL_MEMPOOL);
+			DEBUG_ASSERT2((uintptr_t)blk_start % ALIGN_OF_LOCAL_MEMPOOL == 0, blk_start, ALIGN_OF_LOCAL_MEMPOOL);
 
 			uint8_t* p = (uint8_t*)blk_start;
-			for (int i = 0; i < objtypecnt; i++)
+			for (size_t i = 0; i < objtypecnt; i++)
 			{
-				obj_pools[i].init(this, id + i, p, (sizeof(obj_t) * i), objcnt[i]);
-				if (obj_pools[i].blk_init_cnt != 0) { pool_edges.emplace_back(objpool_edge_t{ obj_pools[i].blk_start, &obj_pools[i] }); }
-				p += objcnt[i] * (sizeof(obj_t) * i);
+				uint32_t blksizeof = memblks[i].blk_sizeof;
+				uint32_t blkcnt = memblks[i].blkcnt;
+				DEBUG_ASSERT2(memblks[i].d32 * sizeof(obj_t) == memblks[i].blk_sizeof, memblks[i].d32, memblks[i].blk_sizeof);
+				DEBUG_ASSERT2(memblks[i].blkcnt % memblks[i].blkcnt_base == 0, memblks[i].blkcnt, memblks[i].blkcnt_base);
+				DEBUG_ASSERT2(blksizeof * blkcnt % ALIGN_OF_MINI_OBJPOOL == 0, blksizeof, blkcnt);
+				objpool& opool = obj_pools_raw[i];
+				opool.init(this, id + i, p, blksizeof, blkcnt);
+				if (opool.blk_init_cnt != 0)
+				{
+					pool_edges[pool_edges_sorted_size++] = objpool_edge_t{ opool.blk_start, &opool };
+					obj_pools[memblks[i].d32] = &opool;
+				}
+				p += blksizeof * blkcnt;
+			}
+			static_assert(memblks[objtypecnt - 1].blkcnt != 0, "max byte memory block must not be 0");
+			DEBUG_ASSERT(obj_pools[obj_pools.size() - 1] != nullptr);
+			for (int32_t i = (int32_t)obj_pools.size() - 2; i > 0; i--)
+			{
+				if (obj_pools[i] == nullptr && obj_pools[i + 1] != nullptr) { obj_pools[i] = obj_pools[i + 1]; }
+			}
+			p = (uint8_t*)blk_start;
+			for (uint32_t i = 0; p < blk_end; ++i)
+			{
+				objpool_edge_t e{ p, nullptr };
+				auto it = std::upper_bound(pool_edges.begin(), pool_edges.begin() + pool_edges_sorted_size, e);
+				objpool_edge_t edge = *std::prev(it);
+				objpool* opool = (objpool*)edge.pool;
+
+				obj_t* o = (obj_t*)p;
+				o->opool = opool;
+				o->local_mempool_ptr = this;
+				o->blk_sizeof = opool->blk_sizeof;
+				o->magic_number = obj_t::MAGIC_NUMBER_OBJ_T;
+				mini_metas[i] = o;
+
+				opool->set_mini_meta_nolock(p);
+				p += ALIGN_OF_MINI_OBJPOOL;
 			}
 		}
 
@@ -847,10 +957,13 @@ namespace tilogspace
 
 		void* xmalloc(size_t sz)
 		{
-			size_t c = ((int)(sz == 0) + sz + sizeof(obj_t) - 1) / sizeof(obj_t);	 // if sz==0 -> 1
-			for (; c < objtypecnt; c++)
+			DEBUG_ASSERT(magic_number == MAGIC_NUMBER_ACTIVE);
+			size_t c = (sz + sizeof(obj_t) - 1) / sizeof(obj_t);
+
+			size_t c_max = std::min(c + local_mempool_find_blk_max_times, obj_pools.size());
+			for (; c < c_max; c++)
 			{
-				void* ptr = obj_pools[c].get();
+				void* ptr = obj_pools[c]->get();
 				if (ptr != nullptr)
 				{
 					get_by_mempool_cnt++;
@@ -859,7 +972,10 @@ namespace tilogspace
 				}
 			}
 			get_by_malloc_cnt++;
-
+			return xmalloc_from_std(sz);
+		}
+		static void* xmalloc_from_std(size_t sz)
+		{
 			//                       |            alignof(obj_t)          |
 			//---------sz---------sz up to 32---------------------up_bound_size
 			size_t up_bound_size = (sz + alignof(obj_t) - 1) / alignof(obj_t) * alignof(obj_t) + alignof(obj_t);
@@ -877,7 +993,7 @@ namespace tilogspace
 
 		void xfree(void* p)
 		{
-			xfree_get_objpool(p)->put(p);
+			get_objpool(p)->put(p);
 			put_by_mempool_cnt++;
 		}
 
@@ -887,14 +1003,13 @@ namespace tilogspace
 			put_by_mempool_cnt++;
 		}
 
-		objpool* xfree_get_objpool(void* p)
+		inline static obj_t* get_minimeta(void* p)
 		{
-			objpool_edge_t e{ p, nullptr };
-			auto it = std::upper_bound(pool_edges.begin(), pool_edges.end(), e);
-			assert(it != pool_edges.begin());
-			objpool_edge_t edge = *std::prev(it);
-			return edge.pool;
+			obj_t* obj = (obj_t*)((uintptr_t)p / ALIGN_OF_MINI_OBJPOOL * ALIGN_OF_MINI_OBJPOOL);
+			DEBUG_ASSERT1(obj->magic_number == obj_t::MAGIC_NUMBER_OBJ_T, obj);
+			return obj;
 		}
+		inline static objpool* get_objpool(void* p) { return get_minimeta(p)->opool; }
 
 		static void xfree(UnorderedMap<objpool*, std::vector<void*>>& frees)
 		{
@@ -912,77 +1027,114 @@ namespace tilogspace
 			}
 		}
 
-		bool is_pool_full()
+		bool is_pool_full() { return put_by_mempool_cnt == get_by_mempool_cnt; }
+	};
+
+	constexpr static size_t SIZE_OF_LOCAL_MEMPOOL = sizeof(local_mempool);
+
+	struct local_mempool_obj_pool_t
+	{
+		~local_mempool_obj_pool_t()
 		{
-			for (size_t c = 0; c < objtypecnt; c++)
+			for (auto p : vec_local_pool)
 			{
-				if (!obj_pools[c].is_pool_full()) { return false; }
+				DEBUG_RUN(p->magic_number = local_mempool::MAGIC_NUMBER_DEAD);
 			}
-			return true;
 		}
+		local_mempool_obj_pool_t()
+		{
+		}
+		inline local_mempool* get()
+		{
+			std::unique_lock<std::mutex> lk(mtx);
+
+			while (1)
+			{
+				if (!free_local_pool.empty())
+				{
+					auto p = free_local_pool.top();
+					free_local_pool.pop();
+					DEBUG_RUN(p->magic_number = local_mempool::MAGIC_NUMBER_ACTIVE);
+					DEBUG_RUN(p->owner = std::this_thread::get_id());
+					return (local_mempool*)p;
+				} else if (vec_local_pool.size() <= TILOG_LOCAL_MEMPOOL_MAX_NUM)
+				{
+					local_mempool* p = new local_mempool(next_id);
+					next_id += local_mempool::obj_pools_cnt();
+					free_local_pool.push(p);
+					vec_local_pool.push_back(p);
+					{
+						local_mempool_edge_t e{ p->blk_start, p };
+
+						auto it = pool_edges.lower_bound(e);
+						if (it != pool_edges.end())
+						{
+							DEBUG_ASSERT(it->ptr != e.ptr);
+							DEBUG_ASSERT(std::prev(it)->pool == nullptr);
+							DEBUG_ASSERT(it->pool != nullptr);
+						}
+						local_mempool_edge_t e2{ p->blk_end, nullptr };
+						pool_edges.insert(e);
+						pool_edges.insert(e2);
+					}
+				} else
+				{
+					break;
+				}
+			}
+			return nullptr;
+		}
+		inline void put(local_mempool* p)
+		{
+			if (!p) { return; }
+			DEBUG_RUN(p->magic_number = local_mempool::MAGIC_NUMBER_DEGRADED);
+			DEBUG_RUN(p->owner = {});
+			std::unique_lock<std::mutex> lk(mtx);
+			free_local_pool.push(p);
+		}
+
+		Stack<local_mempool*, Vector<local_mempool*>> free_local_pool;
+		std::vector<local_mempool*> vec_local_pool;
+		std::set<local_mempool_edge_t> pool_edges{ { 0x0, nullptr } };
+		std::mutex mtx;
+		pool_id_t next_id = { 0 };
 	};
 
 
 	struct mempool
 	{
-		pool_id_t next_id = { 0 };
-		std::stack<local_mempool*> free_local_pool;
-		std::vector<local_mempool*> vec_local_pool;
-		std::set<local_mempool_edge_t> pool_edges{ { 0x0, nullptr } };
-
-		std::mutex mtx;
+		local_mempool_obj_pool_t local_mempool_obj_pool;
 
 		local_mempool* get_local_mempool()
 		{
-			static thread_local local_mempool* ptr = [this] {
-				std::unique_lock<std::mutex> lk(mtx);
-
-				local_mempool* p;
-				if (!free_local_pool.empty())
-				{
-					p = free_local_pool.top();
-					free_local_pool.pop();
-					return p;
-				}
-				p = new local_mempool(next_id);
-				next_id += local_mempool::obj_pools_cnt();
-				vec_local_pool.push_back(p);
-				{
-					local_mempool_edge_t e{ p->blk_start, p };
-
-					auto it = pool_edges.lower_bound(e);
-					if (it != pool_edges.end())
-					{
-						assert(it->ptr != e.ptr);
-						assert(std::prev(it)->pool == nullptr);
-						assert(it->pool != nullptr);
-					}
-					local_mempool_edge_t e2{ p->blk_end, nullptr };
-					pool_edges.insert(e);
-					pool_edges.insert(e2);
-				}
-
-				return p;
-			}();
+			static thread_local local_mempool* ptr = local_mempool_obj_pool.get();
 			return ptr;
 		}
 
-		void put_local_mempool(local_mempool* ptr)
-		{
-			std::unique_lock<std::mutex> lk(mtx);
-			free_local_pool.push(ptr);
-		}
+		void put_local_mempool(local_mempool* ptr) { local_mempool_obj_pool.put(ptr); }
 
-		void* xmalloc(size_t sz, void** p_objpool = nullptr) { return get_local_mempool()->xmalloc(sz); }
+		void* xmalloc(size_t sz, void** p_objpool = nullptr)
+		{
+			local_mempool* pool = get_local_mempool();
+			if (pool != nullptr)
+			{
+				return pool->xmalloc(sz);
+			} else
+			{
+				return local_mempool::xmalloc_from_std(sz);
+			}
+		}
 
 		void xfree(void* p)
 		{
-			assert(p != nullptr);
+			DEBUG_ASSERT(p != nullptr);
 			if (((uintptr_t)p) % alignof(obj_t) == 0)
 			{
-				local_mempool* pool = (local_mempool*)((uintptr_t)p / ALIGN_OF_LOCAL_MEMPOOL * ALIGN_OF_LOCAL_MEMPOOL);
-				DEBUG_ASSERT2(pool->magic_number == local_mempool::MAGIC_NUMBER, pool, p);
-				pool->xfree(p);
+				obj_t* o = local_mempool::get_minimeta(p);
+				objpool* opool = o->opool;
+				local_mempool* pool = o->local_mempool_ptr;
+				DEBUG_ASSERT2(pool->magic_number != local_mempool::MAGIC_NUMBER_DEAD, pool, p);
+				pool->xfree(p,opool);
 			} else
 			{
 				DEBUG_ASSERT1(((uintptr_t)p) % alignof(obj_t) == alignof(obj_t) / 2, p);
@@ -993,12 +1145,13 @@ namespace tilogspace
 
 		void* xrealloc(void* p, size_t sz)
 		{
-			assert(p != nullptr);
+			DEBUG_ASSERT(p != nullptr);
 			if (((uintptr_t)p) % alignof(obj_t) == 0)
 			{
-				local_mempool* pool = (local_mempool*)((uintptr_t)p / ALIGN_OF_LOCAL_MEMPOOL * ALIGN_OF_LOCAL_MEMPOOL);
-				DEBUG_ASSERT2(pool->magic_number == local_mempool::MAGIC_NUMBER, pool, p);
-				objpool* opool = pool->xfree_get_objpool(p);
+				obj_t* o = local_mempool::get_minimeta(p);
+				objpool* opool = o->opool;
+				local_mempool* pool = o->local_mempool_ptr;
+				DEBUG_ASSERT2(pool->magic_number != local_mempool::MAGIC_NUMBER_DEAD, pool, p);
 				if (opool->blk_sizeof < sz)
 				{
 					void* p2 = xmalloc(sz);
@@ -1040,9 +1193,10 @@ namespace tilogspace
 				void* p = *it;
 				if (((uintptr_t)p) % alignof(obj_t) == 0)
 				{
-					local_mempool* pool = (local_mempool*)((uintptr_t)p / ALIGN_OF_LOCAL_MEMPOOL * ALIGN_OF_LOCAL_MEMPOOL);
-					DEBUG_ASSERT2(pool->magic_number == local_mempool::MAGIC_NUMBER, pool, p);
-					objpool* opool = pool->xfree_get_objpool(p);
+					obj_t* o = local_mempool::get_minimeta(p);
+					objpool* opool = o->opool;
+					local_mempool* pool = o->local_mempool_ptr;
+					DEBUG_ASSERT2(pool->magic_number != local_mempool::MAGIC_NUMBER_DEAD, pool, p);
 					frees[opool].emplace_back(p);
 				} else
 				{
@@ -1053,17 +1207,6 @@ namespace tilogspace
 			}
 
 			local_mempool::xfree(frees);
-		}
-
-
-		bool is_pool_full()
-		{
-			std::unique_lock<std::mutex> lk(mtx);
-			for (size_t c = 0; c < vec_local_pool.size(); c++)
-			{
-				if (!vec_local_pool[c]->is_pool_full()) { return false; }
-			}
-			return true;
 		}
 	};
 }
