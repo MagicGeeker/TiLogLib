@@ -74,9 +74,34 @@ struct Student
 	std::string name{ "Jack" };
 };
 
+
+
 #if USE_COMPLEX_TEST == TEST_WAY
+
+#ifdef file_static_log_test_____________________
+static bool b0_file_static_log_test = []() {
+	TILOG_GET_DEFAULT_MODULE_REF.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
+	TEST_CASE_COUT << "file_static_log_test_____________________\n";
+	TICOUT << "Prepare file_static_log_test_____________________\n";
+
+	auto s = std::move(TILOGE.printf("long string \n"));
+	for (uint32_t i = 0; i < 10000; i++)
+	{
+		s << (char('a' + i % 26));
+		if (i % 26 != 25)
+			s << " ";
+		else
+			s << " " << i / 26 << '\n';
+	}
+	return true;
+}();
+
+#endif
+
+
 int main()
 {
+	TICOUT << "=================main func entry=================\n";
 #endif
 
 
@@ -684,30 +709,6 @@ TEST_CASE("file_multi_thread_print_level_test_____________________")
 
 #endif
 
-
-#ifdef file_static_log_test_____________________
-static bool b0_file_static_log_test = []() {
-	TILOG_GET_DEFAULT_MODULE_REF.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
-	TEST_CASE_COUT << "file_static_log_test_____________________\n";
-	TICOUT << "Prepare file_static_log_test_____________________\n";
-
-	auto s = std::move(TILOGE.printf("long string \n"));
-	for (uint32_t i = 0; i < 10000; i++)
-	{
-		s << (char('a' + i % 26));
-		if (i % 26 != 25)
-			s << " ";
-		else
-			s << " " << i / 26 << '\n';
-	}
-	return true;
-}();
-TEST_CASE("file_static_log_test_____________________")
-{
-	TICOUT << "Complete file_static_log_test_____________________\n";
-}
-
-#endif
 
 #ifdef terminal_multi_way_log_test_____________________
 TEST_CASE("terminal_multi_way_log_test_____________________")

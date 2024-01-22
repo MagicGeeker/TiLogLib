@@ -29,7 +29,7 @@
 #endif
 
 #define __________________________________________________TiLogCircularQueue__________________________________________________
-#define __________________________________________________TiLogCurrentHashMap__________________________________________________
+#define __________________________________________________TiLogConcurrentHashMap__________________________________________________
 #define __________________________________________________TiLogFile__________________________________________________
 #define __________________________________________________TiLogTerminalPrinter__________________________________________________
 #define __________________________________________________TiLogFilePrinter__________________________________________________
@@ -123,9 +123,9 @@ using namespace tilogspace;
 
 namespace tilogspace
 {
-	sync_ostream_mtx_t ticout_mtx;
-	sync_ostream_mtx_t ticerr_mtx;
-	sync_ostream_mtx_t ticlog_mtx;
+	sync_ostream_mtx_t* ticout_mtx;
+	sync_ostream_mtx_t* ticerr_mtx;
+	sync_ostream_mtx_t* ticlog_mtx;
 	namespace internal
 	{
 		namespace tilogtimespace
@@ -778,9 +778,9 @@ namespace tilogspace
 #endif
 
 
-#ifdef __________________________________________________TiLogCurrentHashMap__________________________________________________
+#ifdef __________________________________________________TiLogConcurrentHashMap__________________________________________________
 		template <typename K, typename V>
-		struct TiLogCurrentHashMapDefaultFeat
+		struct TiLogConcurrentHashMapDefaultFeat
 		{
 			using Hash = std::hash<K>;
 			using mutex_type = std::mutex;
@@ -791,8 +791,8 @@ namespace tilogspace
 			constexpr static clear_func_t CLEAR_FUNC = nullptr;
 		};
 
-		template <typename K, typename V, typename Feat = TiLogCurrentHashMapDefaultFeat<K, V>>
-		class TiLogCurrentHashMap
+		template <typename K, typename V, typename Feat = TiLogConcurrentHashMapDefaultFeat<K, V>>
+		class TiLogConcurrentHashMap
 		{
 		public:
 			using KImpl = typename std::remove_const<K>::type;
@@ -811,8 +811,8 @@ namespace tilogspace
 			};
 
 		public:
-			TiLogCurrentHashMap() {}
-			~TiLogCurrentHashMap() {}
+			TiLogConcurrentHashMap() {}
+			~TiLogConcurrentHashMap() {}
 
 			V& get(K k)
 			{
@@ -918,7 +918,7 @@ namespace tilogspace
 		protected:
 			const String folderPath;
 			TiLogFile mFile;
-			uint32_t index = 1;
+			uint64_t index = 1;
 		};
 
 
@@ -1022,14 +1022,14 @@ namespace tilogspace
 
 		class TiLogCore;
 
-		struct MergeRawDatasHashMapFeat : TiLogCurrentHashMapDefaultFeat<const String*, VecLogCache>
+		struct MergeRawDatasHashMapFeat : TiLogConcurrentHashMapDefaultFeat<const String*, VecLogCache>
 		{
 			constexpr static uint32_t CONCURRENT = TILOG_MAY_MAX_RUNNING_THREAD_NUM;
 		};
 		
-		struct MergeRawDatas : public TiLogObject, public TiLogCurrentHashMap<const String*, VecLogCache,MergeRawDatasHashMapFeat>
+		struct MergeRawDatas : public TiLogObject, public TiLogConcurrentHashMap<const String*, VecLogCache,MergeRawDatasHashMapFeat>
 		{
-			using super = TiLogCurrentHashMap<const String*, VecLogCache, MergeRawDatasHashMapFeat>;
+			using super = TiLogConcurrentHashMap<const String*, VecLogCache, MergeRawDatasHashMapFeat>;
 			inline size_t may_size() const { return mSize; }
 			inline bool may_full() const { return mSize >= TILOG_MERGE_QUEUE_RATE; }
 			inline void clear() { mSize = 0; }
@@ -1703,15 +1703,18 @@ namespace tilogspace
 			char timeStr[TILOG_CTIME_MAX_LEN];
 			size_t size = TimePointToTimeCStr(timeStr, metaData->logTime.get_origin_time());
 			String s;
-			char indexs[9];
-			snprintf(indexs, 9, "%07d_", index);
 			if (size != 0)
 			{
 				char* fileName = timeStr;
 				transformTimeStrToFileName(fileName, timeStr, size);
-				s.append(folderPath).append(indexs, 8).append(fileName, size).append(".log", 4);
+				s.append(folderPath).append(fileName, size).append(".log", 4);
 			}
-			if (s.empty()) { s = folderPath + indexs; }
+			else
+			{
+				char indexs[9];
+				snprintf(indexs, 9, "%07llu_", (unsigned long long)index);
+				s = folderPath + indexs;
+			}
 
 			index++;
 			mFile.open({ s.data(), s.size() }, "a");
@@ -2880,11 +2883,11 @@ namespace tilogspace
 
 		struct TiLogEngines
 		{
-			struct ThreadIdStrRefCountFeat : TiLogCurrentHashMapDefaultFeat<const String*, uint32_t>
+			struct ThreadIdStrRefCountFeat : TiLogConcurrentHashMapDefaultFeat<const String*, uint32_t>
 			{
 				constexpr static uint32_t CONCURRENT = TILOG_MAY_MAX_RUNNING_THREAD_NUM;
 			};
-			TiLogCurrentHashMap<const String*, uint32_t, ThreadIdStrRefCountFeat> threadIdStrRefCount;
+			TiLogConcurrentHashMap<const String*, uint32_t, ThreadIdStrRefCountFeat> threadIdStrRefCount;
 			TiLogClockIniter tiLogClockIniter;
 			TiLogMods mods;
 			using engine_t = std::array<TiLogEngine, TILOG_MODULE_SPECS_SIZE>;
@@ -2949,9 +2952,24 @@ namespace tilogspace
 		}
 	}	 // namespace internal
 
+
+	static void ctor_cout_mtx()
+	{
+		ticout_mtx = new sync_ostream_mtx_t();
+		ticerr_mtx = new sync_ostream_mtx_t();
+		ticlog_mtx = new sync_ostream_mtx_t();
+	}
+	static void dtor_cout_mtx()
+	{
+		delete ticlog_mtx;
+		delete ticerr_mtx;
+		delete ticout_mtx;
+	}
+
 	TiLogModBase& TiLog::GetMoudleBaseRef(ETiLogModule mod) { return *TiLogEngines::getRInstance().engines[mod].tiLogModBase; }
 	TiLog::TiLog()
 	{
+		ctor_cout_mtx();
 		TiLogEngines::init();
 		this->mods = &TiLogEngines::getRInstance().mods;
 	}
@@ -2960,6 +2978,7 @@ namespace tilogspace
 	{
 		TiLogEngines::uninit();
 		this->mods = nullptr;
+		dtor_cout_mtx();
 	}
 }	 // namespace tilogspace
 

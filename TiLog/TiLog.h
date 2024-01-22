@@ -341,6 +341,57 @@ namespace tilogspace
 namespace tilogspace
 {
 
+	#define TILOG_MUTEXABLE_CLASS_MACRO(mtx_type, mtx_name)                                                                                    \
+	mtx_type mtx_name;                                                                                                                     \
+	inline void lock() { mtx_name.lock(); };                                                                                               \
+	inline void unlock() { mtx_name.unlock(); };                                                                                           \
+	inline bool try_lock() { return mtx_name.try_lock(); };
+
+#define TILOG_MUTEXABLE_CLASS_MACRO_WITH_CV(mtx_type, mtx_name, cv_type_alias, cv_name)                                                    \
+	using cv_type_alias =                                                                                                                  \
+		typename std::conditional<std::is_same<mtx_type, std::mutex>::value, std::condition_variable, std::condition_variable_any>::type;  \
+	cv_type_alias cv_name;                                                                                                                 \
+	TILOG_MUTEXABLE_CLASS_MACRO(mtx_type, mtx_name)
+
+	template <uint32_t NRetry, size_t Nanosec>
+	class SpinMutex
+	{
+		static_assert(NRetry >= 1, "must retry at least once");
+		std::atomic_flag mLockedFlag{};
+
+	public:
+		inline void lock()
+		{
+			for (uint32_t n = 0; mLockedFlag.test_and_set();)
+			{
+				if (++n < NRetry) { continue; }
+				if_constexpr(Nanosec == size_t(-1)) { std::this_thread::yield(); }
+				else if_constexpr(Nanosec != 0) { std::this_thread::sleep_for(std::chrono::nanoseconds(Nanosec)); }
+			}
+		}
+
+		inline bool try_lock()
+		{
+			for (uint32_t n = 0; mLockedFlag.test_and_set();)
+			{
+				if (++n < NRetry) { continue; }
+				return false;
+			}
+			return true;
+		}
+
+		inline void unlock() { mLockedFlag.clear(); }
+	};
+
+	using sync_ostream_mtx_t = OptimisticMutex;
+	extern sync_ostream_mtx_t* ticout_mtx;
+	extern sync_ostream_mtx_t* ticerr_mtx;
+	extern sync_ostream_mtx_t* ticlog_mtx;
+}	 // namespace tilogspace
+
+namespace tilogspace
+{
+
 
 #define TILOG_ABSTRACT
 #define TILOG_INTERFACE
@@ -1212,55 +1263,9 @@ namespace tilogspace
 }
 }	 // namespace tilogspace
 
+
 namespace tilogspace
 {
-	using sync_ostream_mtx_t=std::mutex;
-	extern sync_ostream_mtx_t ticout_mtx;
-	extern sync_ostream_mtx_t ticerr_mtx;
-	extern sync_ostream_mtx_t ticlog_mtx;
-
-#define TILOG_MUTEXABLE_CLASS_MACRO(mtx_type, mtx_name)                                                                                    \
-	mtx_type mtx_name;                                                                                                                     \
-	inline void lock() { mtx_name.lock(); };                                                                                               \
-	inline void unlock() { mtx_name.unlock(); };                                                                                           \
-	inline bool try_lock() { return mtx_name.try_lock(); };
-
-#define TILOG_MUTEXABLE_CLASS_MACRO_WITH_CV(mtx_type, mtx_name, cv_type_alias, cv_name)                                                    \
-	using cv_type_alias =                                                                                                                  \
-		typename std::conditional<std::is_same<mtx_type, std::mutex>::value, std::condition_variable, std::condition_variable_any>::type;  \
-	cv_type_alias cv_name;                                                                                                                 \
-	TILOG_MUTEXABLE_CLASS_MACRO(mtx_type, mtx_name)
-
-	template <uint32_t NRetry, size_t Nanosec>
-	class SpinMutex
-	{
-		static_assert(NRetry >= 1, "must retry at least once");
-		std::atomic_flag mLockedFlag{};
-
-	public:
-		inline void lock()
-		{
-			for (uint32_t n = 0; mLockedFlag.test_and_set();)
-			{
-				if (++n < NRetry) { continue; }
-				if_constexpr(Nanosec == size_t(-1)) { std::this_thread::yield(); }
-				else if_constexpr(Nanosec != 0) { std::this_thread::sleep_for(std::chrono::nanoseconds(Nanosec)); }
-			}
-		}
-
-		inline bool try_lock()
-		{
-			for (uint32_t n = 0; mLockedFlag.test_and_set();)
-			{
-				if (++n < NRetry) { continue; }
-				return false;
-			}
-			return true;
-		}
-
-		inline void unlock() { mLockedFlag.clear(); }
-	};
-
 // clang-format off
 #define TILOG_AUTO_SINGLE_INSTANCE_DECLARE(CLASS_NAME, ...)                                                                                \
 	inline static CLASS_NAME* getInstance()                                                                                                \
@@ -3068,9 +3073,9 @@ namespace tilogspace
 
 //------------------------------------------define micro for user------------------------------------------//
 
-#define TICOUT (std::unique_lock<tilogspace::sync_ostream_mtx_t>(tilogspace::ticout_mtx), std::cout)
-#define TICERR (std::unique_lock<tilogspace::sync_ostream_mtx_t>(tilogspace::ticerr_mtx), std::cerr)
-#define TICLOG (std::unique_lock<tilogspace::sync_ostream_mtx_t>(tilogspace::ticlog_mtx), std::clog)
+#define TICOUT (std::unique_lock<tilogspace::sync_ostream_mtx_t>(*tilogspace::ticout_mtx), std::cout)
+#define TICERR (std::unique_lock<tilogspace::sync_ostream_mtx_t>(*tilogspace::ticerr_mtx), std::cerr)
+#define TICLOG (std::unique_lock<tilogspace::sync_ostream_mtx_t>(*tilogspace::ticlog_mtx), std::clog)
 
 #define TILOGA TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::TILOG_MODULE_START, tilogspace::ELevel::ALWAYS)
 #define TILOGF TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::TILOG_MODULE_START, tilogspace::ELevel::FATAL)
