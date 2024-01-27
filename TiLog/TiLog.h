@@ -391,6 +391,14 @@ namespace tilogspace
 
 namespace tilogspace
 {
+	enum thrd_t : unsigned long long
+	{
+	};
+	void SetThreadName(thrd_t thread, const char* name);
+}	 // namespace tilogspace
+
+namespace tilogspace
+{
 
 
 #define TILOG_ABSTRACT
@@ -1925,6 +1933,7 @@ namespace tilogspace
 				UserModeClockT()
 				{
 					th = std::thread([this] {
+					SetThreadName((thrd_t)(-1), "UserModeClockT");
 						while (!toExit)
 						{
 							TimePoint tp = Clock::now();
@@ -2096,11 +2105,6 @@ namespace tilogspace
 				inline ITiLogTime(EPlaceHolder)
 				{
 					impl = TimeImplType::now();
-#ifdef TILOG_IS_WITH_MILLISECONDS
-					cast_to_ms();
-#else
-					cast_to_sec();
-#endif
 				}
 				inline ITiLogTime(const TimeImplType& t) { impl = t; }
 
@@ -2280,7 +2284,12 @@ namespace tilogspace
 
 		virtual EPrinterID getUniqueID() const = 0;
 
+		virtual bool isSingleInstance() const = 0;
+
+		virtual bool Prepared();
+
 		TiLogPrinter(void* engine);
+		TiLogPrinter();
 		virtual ~TiLogPrinter();
 
 	private:

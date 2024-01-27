@@ -24,13 +24,16 @@
 #endif
 #include <windows.h>
 #elif defined(TILOG_OS_POSIX)
+#include <sys/prctl.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <unistd.h>
 #endif
 
 #define __________________________________________________TiLogCircularQueue__________________________________________________
 #define __________________________________________________TiLogConcurrentHashMap__________________________________________________
 #define __________________________________________________TiLogFile__________________________________________________
+#define __________________________________________________TiLogNonePrinter__________________________________________________
 #define __________________________________________________TiLogTerminalPrinter__________________________________________________
 #define __________________________________________________TiLogFilePrinter__________________________________________________
 #define __________________________________________________TiLogPrinterManager__________________________________________________
@@ -137,6 +140,54 @@ namespace tilogspace
 	}		 // namespace internal
 
 };	  // namespace tilogspace
+
+namespace tilogspace
+{
+#if defined(TILOG_OS_WIN) && defined(_MSC_VER)
+	const DWORD MS_VC_EXCEPTION = 0x406D1388;
+#pragma pack(push, 8)
+	typedef struct tagTHREADNAME_INFO
+	{
+		DWORD dwType;		 // Must be 0x1000.
+		LPCSTR szName;		 // Pointer to name (in user addr space).
+		DWORD dwThreadID;	 // Thread ID (-1=caller thread).
+		DWORD dwFlags;		 // Reserved for future use, must be zero.
+	} THREADNAME_INFO;
+#pragma pack(pop)
+	void SetThreadName(DWORD dwThreadID, const char* threadName)
+	{
+		THREADNAME_INFO info;
+		info.dwType = 0x1000;
+		info.szName = threadName;
+		info.dwThreadID = dwThreadID;
+		info.dwFlags = 0;
+#pragma warning(push)
+#pragma warning(disable : 6320 6322)
+		__try
+		{
+			RaiseException(MS_VC_EXCEPTION, 0, sizeof(info) / sizeof(ULONG_PTR), (ULONG_PTR*)&info);
+		} __except (EXCEPTION_EXECUTE_HANDLER)
+		{
+		}
+#pragma warning(pop)
+	}
+	void SetThreadName(thrd_t thread, const char* name) { SetThreadName((DWORD)thread, name); }
+#elif defined(TILOG_OS_POSIX)
+	void SetThreadName(pthread_t thread, const char* name)
+	{
+		if (thread == -1)
+		{
+			prctl(PR_SET_NAME, name);
+		} else
+		{
+			pthread_setname_np(thread, name);
+		}
+	}
+	void SetThreadName(thrd_t thread, const char* name) { SetThreadName((pthread_t)thread, name); }
+#else
+	void SetThreadName(thrd_t thread, const char* name) {}
+#endif
+}	 // namespace tilogspace
 
 namespace tiloghelperspace
 {
@@ -873,11 +924,12 @@ namespace tilogspace
 		public:
 			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE(TiLogNonePrinter)
 			EPrinterID getUniqueID() const override { return PRINTER_ID_NONE; };
+			bool isSingleInstance() const override { return true; }
 			void onAcceptLogs(MetaData metaData) override {}
 			void sync() override{};
 
 		protected:
-			TiLogNonePrinter(TiLogEngine* e) : TiLogPrinter(e){};
+			TiLogNonePrinter() = default;
 			~TiLogNonePrinter() = default;
 		};
 
@@ -891,9 +943,10 @@ namespace tilogspace
 			void onAcceptLogs(MetaData metaData) override;
 			void sync() override;
 			EPrinterID getUniqueID() const override;
+			bool isSingleInstance() const override { return true; }
 
 		protected:
-			TiLogTerminalPrinter(TiLogEngine* e);
+			TiLogTerminalPrinter();
 		};
 
 		class TiLogFilePrinter : public TiLogPrinter
@@ -901,11 +954,11 @@ namespace tilogspace
 			friend class TiLogPrinterManager;
 
 		public:
-			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE(TiLogFilePrinter)
 
 			void onAcceptLogs(MetaData metaData) override;
 			void sync() override;
 			EPrinterID getUniqueID() const override;
+			bool isSingleInstance() const override{ return false; }
 
 		protected:
 			TiLogFilePrinter(TiLogEngine* e, String folderPath);
@@ -1105,7 +1158,6 @@ namespace tilogspace
 			List<ThreadStru*> waitMergeQueue;		 // thread is dead, but some logs have not merge to global print string
 			List<ThreadStru*> toDelQueue;			 // thread is dead and no logs exist,need to delete by gc thread
 
-			List<ThreadStru*> printerQueue;	   // queue for printer threads
 			List<ThreadStru*> priThrdQueue;	   // queue for internal threads
 			atomic<uint64_t> handledUserThreadCnt;
 			atomic<uint64_t> diedUserThreadCnt;
@@ -1276,8 +1328,6 @@ namespace tilogspace
 
 			inline void ClearPrintedLogsNumber();
 
-			inline void InitPrinterThreadBeforeRun();
-
 			using callback_t = TiLogModBase::callback_t;
 			inline void Sync();
 			inline void AfterDeliver(callback_t func);
@@ -1358,7 +1408,6 @@ namespace tilogspace
 			TiLogEngine* mTiLogEngine;
 			TiLogPrinterManager* mTiLogPrinterManager;
 
-			atomic_int32_t mExistPrinters{ 0 };
 			atomic_int32_t mExistThreads{ 0 };
 			atomic_bool mToExit{};
 			atomic_bool mInited{};
@@ -1479,10 +1528,16 @@ namespace tilogspace
 		class TiLogPrinterData
 		{
 			friend class TiLogPrinterManager;
+			friend class tilogspace::TiLogPrinter;
 			using task_t = std::function<void()>;
 
 		public:
-			explicit TiLogPrinterData(TiLogPrinter* p, task_t init_task) : mTaskQueue({}, std::move(init_task)), mpPrinter(p) {}
+			explicit TiLogPrinterData(TiLogEngine* e, TiLogPrinter* p) : mpEngine(e), mpPrinter(p), mTaskQueue({}, [this] { this->init(); })
+			{
+			}
+
+			// call after mPrinterInited==true
+			void init();
 
 			inline void pushTask(task_t&& task)
 			{
@@ -1502,8 +1557,11 @@ namespace tilogspace
 			using buf_t = TiLogPrinter::buf_t;
 			using TiLogPrinterTask = TiLogTaskQueueBasic<std::mutex>;
 
-			TiLogPrinterTask mTaskQueue;
+			atomic_bool mPrinterCtorCompleted{ false };
+			atomic_bool mTaskQThrdCreated{ false };
+			TiLogEngine* mpEngine;
 			TiLogPrinter* mpPrinter;
+			TiLogPrinterTask mTaskQueue;
 		};
 
 		class TiLogPrinterManager : public TiLogObject
@@ -1518,6 +1576,7 @@ namespace tilogspace
 			printer_ids_t GetPrinters();
 			bool IsPrinterActive(EPrinterID printer);
 
+			static void MarkPrinterCtorComplete(TiLogPrinter* p);
 			static TiLogPrinter* CreatePrinter(TiLogEngine* e,EPrinterID id);
 			static bool IsPrinterInPrinters(EPrinterID printer, printer_ids_t printers);
 			static void EnablePrinterForPrinters(EPrinterID printer, printer_ids_t& printers);
@@ -1531,6 +1590,7 @@ namespace tilogspace
 			~TiLogPrinterManager();
 
 		public:	   // internal public
+			bool Prepared();
 			void DestroyPrinters();
 			void addPrinter(TiLogPrinter* printer);
 			void pushLogsToPrinters(IOBeanSharedPtr spLogs);
@@ -1542,7 +1602,6 @@ namespace tilogspace
 			ELevel GetLogLevel();
 
 			Vector<TiLogPrinter*> getAllValidPrinters();
-			Vector<TiLogPrinter*> getCurrentPrinters();
 			Vector<TiLogPrinter*> getPrinters(printer_ids_t dest);
 
 		protected:
@@ -1567,6 +1626,24 @@ namespace tilogspace
 			inline TiLogEngine() : tiLogModBase(), mod(), tiLogPrinterManager(this), tiLogCore(this) {}
 			inline TiLogEngine(TiLogModBase* b) : tiLogModBase(b), mod(b->mod), tiLogPrinterManager(this), tiLogCore(this) {}
 		};
+
+		void TiLogPrinterData::init()
+		{
+			while (!mPrinterCtorCompleted)
+			{
+				std::this_thread::yield();
+			}
+			char tname[16];
+			if (mpEngine != nullptr)
+			{
+				snprintf(tname, 16, "printer@%d#%d", (int)mpEngine->mod, (int)mpPrinter->getUniqueID());
+			} else
+			{
+				snprintf(tname, 16, "printer#%d", (int)mpPrinter->getUniqueID());
+			}
+			SetThreadName((thrd_t)-1, tname);
+			mTaskQThrdCreated = true;
+		}
 
 	}	 // namespace internal
 }	 // namespace tilogspace
@@ -1655,9 +1732,13 @@ namespace tilogspace
 #endif
 
 
+#ifdef __________________________________________________TiLogNonePrinter__________________________________________________
+		TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_OUTER(TiLogNonePrinter)
+#endif
 
 #ifdef __________________________________________________TiLogTerminalPrinter__________________________________________________
-		TiLogTerminalPrinter::TiLogTerminalPrinter(TiLogEngine* e) : TiLogPrinter(e){};
+		TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_OUTER(TiLogTerminalPrinter)
+		TiLogTerminalPrinter::TiLogTerminalPrinter() : TiLogPrinter(nullptr){};
 		void TiLogTerminalPrinter::onAcceptLogs(MetaData metaData) { fwrite(metaData->logs, metaData->logs_size, 1, stdout); }
 
 		void TiLogTerminalPrinter::sync() { fflush(stdout); }
@@ -1726,24 +1807,35 @@ namespace tilogspace
 
 
 #ifdef __________________________________________________TiLogPrinterManager__________________________________________________
+		void TiLogPrinterManager::MarkPrinterCtorComplete(TiLogPrinter* p)
+		{
+			if (p->mData) { p->mData->mPrinterCtorCompleted = true; }
+		}
 		TiLogPrinter* TiLogPrinterManager::CreatePrinter(TiLogEngine* e, EPrinterID id)
 		{
+			TiLogPrinter* p;
 			switch (id)
 			{
 			case PRINTER_ID_NONE:
-				return new TiLogNonePrinter(e);
+				p = TiLogNonePrinter::getInstance();
+				break;
 			case PRINTER_TILOG_FILE:
-				return new TiLogFilePrinter(e, TILOG_ACTIVE_MODULE_SPECS[e->mod].data);
+				p = new TiLogFilePrinter(e, TILOG_ACTIVE_MODULE_SPECS[e->mod].data);
+				break;
 			case PRINTER_TILOG_TERMINAL:
-				return new TiLogTerminalPrinter(e);
+				p = TiLogTerminalPrinter::getInstance();
+				break;
 			default:
 				DEBUG_ASSERT(false);
-				return nullptr;
+				p = TiLogNonePrinter::getInstance();
 			}
+			MarkPrinterCtorComplete(p);
+			return p;
 		}
 
 		TiLogPrinterManager::TiLogPrinterManager(TiLogEngine* e)
-			: m_engine(e), m_printers(GetPrinterNum()), m_dest(TILOG_ACTIVE_MODULE_SPECS[e->mod].defaultEnabledPrinters), m_level(TILOG_ACTIVE_MODULE_SPECS[e->mod].STATIC_LOG_LEVEL)
+			: m_engine(e), m_printers(GetPrinterNum()), m_dest(TILOG_ACTIVE_MODULE_SPECS[e->mod].defaultEnabledPrinters),
+			  m_level(TILOG_ACTIVE_MODULE_SPECS[e->mod].STATIC_LOG_LEVEL)
 		{
 			addPrinter(CreatePrinter(e, EPrinterID::PRINTER_ID_NONE));
 			for (EPrinterID x = PRINTER_ID_BEGIN; x < PRINTER_ID_MAX; x = (EPrinterID)(x << 1U))
@@ -1752,12 +1844,26 @@ namespace tilogspace
 				addPrinter(p);
 			}
 		}
+		bool TiLogPrinterManager::Prepared()
+		{
+			for (EPrinterID x = PRINTER_ID_BEGIN; x < PRINTER_ID_MAX; x = (EPrinterID)(x << 1U))
+			{
+				if (!m_printers[x]->Prepared())
+				{
+					return false;
+				}
+			}
+			return true;
+		}
 
 		void TiLogPrinterManager::DestroyPrinters()
 		{
 			for (TiLogPrinter* x : m_printers)
 			{
-				delete x;	 // wait for printers
+				if (!x->isSingleInstance())
+				{
+					delete x;	 // wait for printers
+				}
 			}
 		}
 		TiLogPrinterManager::~TiLogPrinterManager() {}
@@ -1795,7 +1901,7 @@ namespace tilogspace
 
 		void TiLogPrinterManager::waitForIO()
 		{
-			Vector<TiLogPrinter*> printers = TiLogPrinterManager::getCurrentPrinters();
+			Vector<TiLogPrinter*> printers = TiLogPrinterManager::getAllValidPrinters();
 			if (printers.empty()) { return; }
 			DEBUG_PRINTI("prepare to wait for io");
 
@@ -1827,13 +1933,7 @@ namespace tilogspace
 
 		ELevel TiLogPrinterManager::GetLogLevel() { return m_level; }
 
-		Vector<TiLogPrinter*> TiLogPrinterManager::getAllValidPrinters()
-		{
-			Vector<TiLogPrinter*>& v = m_printers;
-			return Vector<TiLogPrinter*>(v.begin() + 1, v.end());
-		}
-
-		Vector<TiLogPrinter*> TiLogPrinterManager::getCurrentPrinters() { return getPrinters(m_dest); }
+		Vector<TiLogPrinter*> TiLogPrinterManager::getAllValidPrinters() { return getPrinters(m_dest); }
 
 		Vector<TiLogPrinter*> TiLogPrinterManager::getPrinters(printer_ids_t dest)
 		{
@@ -1895,8 +1995,14 @@ namespace tilogspace
 
 		inline void TiLogCore::CreateCoreThread(CoreThrdStru& thrd)
 		{
-			thrd.mStatus=RUN;
-			mCoreThreads.push_back(std::thread(thrd.GetThrdEntryFunc(), this));
+			thrd.mStatus = RUN;
+			mCoreThreads.push_back(std::thread([this, &thrd] {
+				char tname[16];
+				snprintf(tname, 16, "%s@%d", thrd.GetName(), (int)this->mTiLogEngine->mod);
+				SetThreadName((thrd_t)-1, tname);
+				auto f = thrd.GetThrdEntryFunc();
+				(this->*f)();
+			}));
 		}
 
 		inline bool TiLogCore::LocalCircularQueuePushBack(ThreadStru& stru, TiLogBean* obj)
@@ -1986,7 +2092,6 @@ namespace tilogspace
 		{
 			DEBUG_PRINTA("FreeMemory begin\n");
 			DestroyThreadStrus(mThreadStruQueue.priThrdQueue);
-			DestroyThreadStrus(mThreadStruQueue.printerQueue);
 			DEBUG_PRINTA("FreeMemory exit\n");
 		}
 
@@ -2009,7 +2114,7 @@ namespace tilogspace
 			}
 		}
 
-		bool TiLogCore::Prepared() { return mExistPrinters == mTiLogPrinterManager->GetPrinterNum() && mExistThreads == 4; }
+		bool TiLogCore::Prepared() { return mTiLogPrinterManager->Prepared() && mExistThreads == 4; }
 
 		void TiLogCore::WaitPrepared(TiLogStringView msg)
 		{
@@ -2741,8 +2846,6 @@ namespace tilogspace
 			return;
 		}
 
-		void TiLogCore::InitPrinterThreadBeforeRun() { InitThreadStruBeforeRun(mThreadStruQueue.printerQueue, mExistPrinters, "printer"); }
-
 		inline void TiLogCore::InitCoreThreadBeforeRun(const char* tag)
 		{
 			InitThreadStruBeforeRun(mThreadStruQueue.priThrdQueue, mExistThreads, tag);
@@ -2824,10 +2927,9 @@ namespace tilogspace
 
 namespace tilogspace
 {
-	TiLogPrinter::TiLogPrinter(void* engine)
-	{
-		mData = new TiLogPrinterData(this, [engine] { ((TiLogEngine*)engine)->tiLogCore.InitPrinterThreadBeforeRun(); });
-	}
+	bool TiLogPrinter::Prepared() { return mData == nullptr || mData->mTaskQThrdCreated; }
+	TiLogPrinter::TiLogPrinter() : mData() {}
+	TiLogPrinter::TiLogPrinter(void* engine) { mData = new TiLogPrinterData((TiLogEngine*)engine, this); }
 	TiLogPrinter::~TiLogPrinter() { delete mData; }
 #ifdef __________________________________________________TiLog__________________________________________________
 
@@ -2966,10 +3068,22 @@ namespace tilogspace
 		delete ticout_mtx;
 	}
 
+	static void ctor_single_instance_printers()
+	{
+		TiLogNonePrinter::init();
+		TiLogTerminalPrinter::init();
+	}
+	static void dtor_single_instance_printers()
+	{
+		TiLogTerminalPrinter::uninit();
+		TiLogNonePrinter::uninit();
+	}
+
 	TiLogModBase& TiLog::GetMoudleBaseRef(ETiLogModule mod) { return *TiLogEngines::getRInstance().engines[mod].tiLogModBase; }
 	TiLog::TiLog()
 	{
 		ctor_cout_mtx();
+		ctor_single_instance_printers();
 		TiLogEngines::init();
 		this->mods = &TiLogEngines::getRInstance().mods;
 	}
@@ -2978,6 +3092,7 @@ namespace tilogspace
 	{
 		TiLogEngines::uninit();
 		this->mods = nullptr;
+		dtor_single_instance_printers();
 		dtor_cout_mtx();
 	}
 }	 // namespace tilogspace
