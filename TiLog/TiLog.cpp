@@ -3104,7 +3104,7 @@ namespace tilogspace
 	{
 		void* TiLogStreamMemoryManager::timalloc(size_t sz) { return TiLogEngines::getRInstance().mpool.xmalloc(sz); }
 		// void* TiLogStreamMemoryManager::ticalloc(size_t num_ele, size_t sz_ele) { return nullptr; }
-		void* TiLogStreamMemoryManager::tirealloc(void* p, size_t sz) { return TiLogEngines::getRInstance().mpool.xrealloc(p, sz); }
+		void* TiLogStreamMemoryManager::tireallocal(void* p, size_t sz) { return TiLogEngines::getRInstance().mpool.xreallocal(p, sz); }
 		void TiLogStreamMemoryManager::tifree(void* p) { TiLogEngines::getRInstance().mpool.xfree(p); }
 		void TiLogStreamMemoryManager::tifree(void* ptrs[], size_t sz, UnorderedMap<mempoolspace::objpool*, Vector<void*>>& frees)
 		{

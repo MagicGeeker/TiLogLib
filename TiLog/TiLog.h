@@ -807,6 +807,7 @@ namespace tilogspace
 		using wmap1dmtx_t = typename std::conditional<is_for_multithread, spin_mutex_t, fake_mutex_t>::type;
 
 		bit_search_map2d_t smap2d;
+		bit_write_cache_map1d_t wmap1dlocal;
 		bit_write_cache_map1d_t wmap1d;
 		wmap1dmtx_t wmap1dmtx;
 
@@ -842,10 +843,29 @@ namespace tilogspace
 
 		void* get()
 		{
-			while (1)
+		try_get_from_local_r_cache:;
 			{
 				int n = smap2d.bitsearch1set0();
 				if (n != -1) { return (uint8_t*)blk_start + n * blk_sizeof; }
+			}
+
+		try_get_from_local_w_cache:;
+			{
+				if (wmap1dlocal.bit1_cnt == 0)
+				{	 // read wmap1dlocal.bit1_cnt
+					goto try_get_from_global_w_cache;
+				}
+				for (int i = 0; i < 64; i++)
+				{
+					smap2d.searchL2[i].val |= wmap1dlocal.units[i].val;
+					if (smap2d.searchL2[i].val != 0) { smap2d.searchL1.bitset1(i); }
+				}
+				smap2d.bit1_cnt += wmap1dlocal.bit1_cnt;
+				wmap1dlocal.clear();
+				goto try_get_from_local_r_cache;
+			}
+		try_get_from_global_w_cache:;
+			{
 				if (wmap1d.bit1_cnt == 0)
 				{	 // read wmap1d.bit1_cnt dirty
 					return nullptr;
@@ -863,8 +883,10 @@ namespace tilogspace
 				}
 				smap2d.bit1_cnt += wmap1d.bit1_cnt;
 				wmap1d.clear();
-				continue;
+				goto try_get_from_local_r_cache;
 			}
+			DEBUG_ASSERT(false);
+			return nullptr;
 		}
 
 		void put(void* ptr)
@@ -883,6 +905,14 @@ namespace tilogspace
 			DEBUG_ASSERT3(((uint8_t*)ptr - (uint8_t*)blk_start) % blk_sizeof == 0, ptr, blk_sizeof, blk_sizeof);
 			DEBUG_RUN(memset(ptr, invalid_char, blk_sizeof));
 			wmap1d.bitset1(n);
+		}
+		void put_local_nolock(void* ptr)
+		{
+			uint32_t n = ((uint8_t*)ptr - (uint8_t*)blk_start) / blk_sizeof;
+			DEBUG_ASSERT(n < blk_init_cnt);
+			DEBUG_ASSERT3(((uint8_t*)ptr - (uint8_t*)blk_start) % blk_sizeof == 0, ptr, blk_sizeof, blk_sizeof);
+			DEBUG_RUN(memset(ptr, invalid_char, blk_sizeof));
+			wmap1dlocal.bitset1(n);
 		}
 		void set_mini_meta_nolock(void* ptr)
 		{
@@ -1061,6 +1091,11 @@ namespace tilogspace
 			opool->put(p);
 			put_by_mempool_cnt++;
 		}
+		void xfree_local(void* p,objpool* opool)
+		{
+			opool->put_local_nolock(p);
+			put_by_mempool_cnt++;
+		}
 
 		inline static obj_t* get_minimeta(void* p)
 		{
@@ -1204,6 +1239,14 @@ namespace tilogspace
 
 		void* xrealloc(void* p, size_t sz)
 		{
+			return xrealloc_impl(p,sz,false);
+		}
+		void* xreallocal(void* p, size_t sz)
+		{
+			return xrealloc_impl(p,sz,true);
+		}
+		inline void* xrealloc_impl(void* p, size_t sz, bool call_from_local)
+		{
 			DEBUG_ASSERT(p != nullptr);
 			if (((uintptr_t)p) % alignof(obj_t) == 0)
 			{
@@ -1215,7 +1258,13 @@ namespace tilogspace
 				{
 					void* p2 = xmalloc(sz);
 					memcpy(p2, p, opool->blk_sizeof);
-					pool->xfree(p, opool);
+					if (call_from_local)
+					{
+						pool->xfree_local(p, opool);
+					} else
+					{
+						pool->xfree(p, opool);
+					}
 					return p2;
 				} else
 				{
@@ -1605,10 +1654,6 @@ namespace tilogspace
 		{
 			using ExtType = char;
 			using ObjectType = TiLogStringExtend<TiLogStrExDefTrait>;
-			using memmgr_type = TiLogMemoryManager;
-
-			inline static void do_destructor(ObjectType* p);
-			inline static void request_new_size(ObjectType* p, const size_type new_size);
 		};
 
 #define thiz reinterpret_cast<this_type>(this)
@@ -1658,12 +1703,16 @@ namespace tilogspace
 
 				DEBUG_ASSERT((uintptr_t)pCore != (uintptr_t)UINTPTR_MAX);
 				check();
-				do_free();
+				free();
 				DEBUG_RUN(pCore = (Core*)UINTPTR_MAX);
+			}
+			inline void do_destructor()
+			{
+				default_destructor();
 			}
 
 		public:
-			inline ~TiLogStringExtend() { FeatureHelperType::do_destructor(thiz); }
+			inline ~TiLogStringExtend() { ((this_type)this)->do_destructor(); }
 
 			explicit inline TiLogStringExtend() { create(); }
 
@@ -1756,7 +1805,7 @@ namespace tilogspace
 				return this->writend(std::forward<Args>(args)...);
 			}
 
-			inline void request_new_size(const size_type new_size) { FeatureHelperType::request_new_size(thiz, new_size); }
+			inline void request_new_size(const size_type new_size) { ((this_type)this)->do_request_new_size(new_size); }
 
 			inline void do_request_new_size(const size_type new_size) { ensureCap(new_size + size()); }
 
@@ -1772,10 +1821,10 @@ namespace tilogspace
 				size_type new_cap = ensure_cap * 3 / 2;
 				// you must ensure (ensure_cap * RESERVE_RATE_DEFAULT) will not over-flow size_type max
 				DEBUG_ASSERT2(new_cap > ensure_cap, new_cap, ensure_cap);
-				do_realloc(new_cap);
+				realloc(new_cap);
 			}
 
-			inline void create_sz(size_type size, size_type capacity = DEFAULT_CAPACITY) { do_malloc(size, capacity), ensureZero(); }
+			inline void create_sz(size_type size, size_type capacity = DEFAULT_CAPACITY) { malloc(size, capacity), ensureZero(); }
 			inline void create_better(size_type size, size_type cap = DEFAULT_CAPACITY) { create_sz(size, betterCap(cap)); }
 			inline void create(size_type capacity = DEFAULT_CAPACITY) { create_sz(0, capacity); }
 
@@ -1792,11 +1841,12 @@ namespace tilogspace
 
 			inline size_type betterCap(size_type cap) { return DEFAULT_CAPACITY > cap ? DEFAULT_CAPACITY : cap; }
 
+			inline void malloc(const size_type size, const size_type cap) { ((this_type)this)->do_malloc(size, cap); }
 			inline void do_malloc(const size_type size, const size_type cap)
 			{
 				DEBUG_ASSERT(size <= cap);
 				size_type mem_size = cap + (size_type)sizeof('\0') + size_head();	 // request extra 1 byte for '\0'
-				Core* p = (Core*)FeatureHelperType::memmgr_type::timalloc(mem_size);
+				Core* p = (Core*)TiLogMemoryManager::timalloc(mem_size);
 				DEBUG_ASSERT(p != nullptr);
 				pCore = p;
 				this->pCore->size = size;
@@ -1804,18 +1854,20 @@ namespace tilogspace
 				check();
 			}
 
+			inline void realloc(const size_type new_cap) { ((this_type)this)->do_realloc(new_cap); }
 			inline void do_realloc(const size_type new_cap)
 			{
 				check();
 				size_type cap = this->capacity();
 				size_type mem_size = new_cap + (size_type)sizeof('\0') + size_head();	 // request extra 1 byte for '\0'
-				Core* p = (Core*)FeatureHelperType::memmgr_type::tirealloc(this->pCore, mem_size);
+				Core* p = (Core*)TiLogMemoryManager::tirealloc(this->pCore, mem_size);
 				DEBUG_ASSERT2(p != nullptr,cap,mem_size);
 				pCore = p;
 				this->pCore->capacity = new_cap;	// capacity without '\0'
 				check();
 			}
-			inline void do_free() { FeatureHelperType::memmgr_type::tifree(this->pCore); }
+			inline void free() { ((this_type)this)->do_free(); }
+			inline void do_free() { TiLogMemoryManager::tifree(this->pCore); }
 			inline char* pFront() { return pCore->buf; }
 			inline const char* pFront() const { return pCore->buf; }
 			inline const char* pEnd() const { return pCore->buf + pCore->size; }
@@ -1829,15 +1881,6 @@ namespace tilogspace
 
 	}	 // namespace internal
 
-	namespace internal
-	{
-		void TiLogStrExDefTrait::do_destructor(TiLogStrExDefTrait::ObjectType* p) {
-			p->default_destructor();
-		}
-		void TiLogStrExDefTrait::request_new_size(TiLogStrExDefTrait::ObjectType* p, const size_type new_size) {
-			p->do_request_new_size(new_size);
-		}
-	}
 
 	namespace internal
 	{
@@ -2475,37 +2518,31 @@ namespace internal
 	{
 		static void* timalloc(size_t sz);
 		static void* ticalloc(size_t num_ele, size_t sz_ele);
-		static void* tirealloc(void* p, size_t sz);
+		static void* tireallocal(void* p, size_t sz);
 		static void tifree(void* p);
 		static void tifree(void* ptrs[], size_t sz, UnorderedMap<mempoolspace::objpool*, Vector<void*>>& frees);
 	};
 
 	struct TiLogStreamHelper : public TiLogObject
-			{
-			using ExtType = TiLogBean;
-			using ObjectType = TiLogStream;
-			//using memmgr_type = TiLogMemoryManager;
-			using memmgr_type = TiLogStreamMemoryManager;
-			struct TiLogStreamMemoryManagerCache
-			{
-				Vector<void*> cache0;
-				UnorderedMap<mempoolspace::objpool*, Vector<void*>> cache1;
-			};
+	{
+		using ExtType = TiLogBean;
+		using ObjectType = TiLogStream;
+		using memmgr_type = TiLogStreamMemoryManager;
+		struct TiLogStreamMemoryManagerCache
+		{
+			Vector<void*> cache0;
+			UnorderedMap<mempoolspace::objpool*, Vector<void*>> cache1;
+		};
 
-
-			inline static void do_destructor(ObjectType* p) ;
-			inline static void request_new_size(ObjectType* p,const size_type new_size) ;
-
-			inline static TiLogStringView str_view(const TiLogBean* p);
-			inline static void DestroyPushedTiLogBean(TiLogBean* p);
-			inline static void DestroyPushedTiLogBean(const Vector<TiLogBean*>& to_free,TiLogStreamMemoryManagerCache&cache);
-			inline static TiLogStream* get_no_used_stream() ;
-			inline static void free_no_used_stream(TiLogStream* p);
-			template <typename... Args>
-			static void mini_format_impl(TiLogStream& outs, TiLogStringView fmt, std::tuple<Args...>&& args);
-			template <typename... Args>
-			static void mini_format_append(TiLogStream& outs, TiLogStringView fmt, Args&&... args);
-			};
+		inline static TiLogStringView str_view(const TiLogBean* p);
+		inline static void DestroyPushedTiLogBean(const Vector<TiLogBean*>& to_free, TiLogStreamMemoryManagerCache& cache);
+		inline static TiLogStream* get_no_used_stream();
+		inline static void free_no_used_stream(TiLogStream* p);
+		template <typename... Args>
+		static void mini_format_impl(TiLogStream& outs, TiLogStringView fmt, std::tuple<Args...>&& args);
+		template <typename... Args>
+		static void mini_format_append(TiLogStream& outs, TiLogStringView fmt, Args&&... args);
+	};
 }	 // namespace internal
 
 #define TILOG_INTERNAL_STRING_TYPE                                                                                                         \
@@ -2752,10 +2789,10 @@ namespace internal
 
 	private:
 		// force overwrite super destructor,do nothing
-		inline void do_overwrited_super_destructor() {}
+		inline void do_destructor() {}
 
 		// force overwrite super class request_new_size
-		inline void request_new_size(size_type new_size)
+		inline void do_request_new_size(size_type new_size)
 		{
 			size_type pre_cap = capacity();
 			size_type pre_size = size();
@@ -2778,6 +2815,30 @@ namespace internal
 				}
 			}
 		}
+		inline void do_malloc(const size_type size, const size_type cap)
+		{
+			DEBUG_ASSERT(size <= cap);
+			size_type mem_size = cap + (size_type)sizeof('\0') + size_head();	 // request extra 1 byte for '\0'
+			Core* p = (Core*)internal::TiLogStreamMemoryManager::timalloc(mem_size);
+			DEBUG_ASSERT(p != nullptr);
+			pCore = p;
+			this->pCore->size = size;
+			this->pCore->capacity = cap;	// capacity without '\0'
+			check();
+		}
+
+		inline void do_realloc(const size_type new_cap)
+		{
+			check();
+			size_type cap = this->capacity();
+			size_type mem_size = new_cap + (size_type)sizeof('\0') + size_head();	 // request extra 1 byte for '\0'
+			Core* p = (Core*)internal::TiLogStreamMemoryManager::tireallocal(this->pCore, mem_size);
+			DEBUG_ASSERT2(p != nullptr, cap, mem_size);
+			pCore = p;
+			this->pCore->capacity = new_cap;	// capacity without '\0'
+			check();
+		}
+		inline void do_free() { internal::TiLogStreamMemoryManager::tifree(this->pCore); }
 
 
 		inline static TiLogStream* get_no_used_stream()
@@ -2792,17 +2853,8 @@ namespace internal
 
 	namespace internal
 	{
-		void TiLogStreamHelper::do_destructor(TiLogStream* p) { p->do_overwrited_super_destructor(); }
-		void TiLogStreamHelper::request_new_size(TiLogStream* p, const size_type new_size) { p->request_new_size(new_size); }
 
 		TiLogStringView TiLogStreamHelper::str_view(const TiLogBean* p) { return TiLogStream::get_str_view_from_ext(p); }
-		void TiLogStreamHelper::DestroyPushedTiLogBean(TiLogBean* p)
-		{
-			TiLogBean::check(p);
-			auto ptr = TiLogStream::get_core_from_ext(p);
-			TiLogStreamHelper::memmgr_type::tifree(ptr);
-			//tifree(ptr);
-		}
 		void TiLogStreamHelper::DestroyPushedTiLogBean(const Vector<TiLogBean*>& to_free, TiLogStreamMemoryManagerCache& cache)
 		{
 			cache.cache0.clear();
