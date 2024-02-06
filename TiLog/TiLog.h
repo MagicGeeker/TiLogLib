@@ -229,7 +229,7 @@ namespace tilogspace
 
 	constexpr static size_t TILOG_GLOBAL_BUF_SIZE = ((size_t)1 << 20U);						 // global cache string reserve length
 	constexpr static size_t TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE = ((size_t)1 << 8U);			 // single thread cache queue max length
-	constexpr static size_t TILOG_MERGE_QUEUE_RATE = ((size_t)24);	// (global cache queue max length)/(single thread cache queue max length)
+	
 	constexpr static size_t TILOG_DELIVER_QUEUE_SIZE = ((size_t)4);	// deliver queue max length
 	constexpr static size_t TILOG_IO_STRING_DATA_POOL_SIZE = ((size_t)4);	// io string data max szie
 	constexpr static size_t TILOG_GARBAGE_COLLECTION_QUEUE_RATE = ((size_t)4);	// (garbage collection queue length)/(global cache queue max length)
@@ -237,9 +237,16 @@ namespace tilogspace
 	constexpr static size_t TILOG_THREAD_ID_MAX_LEN = SIZE_MAX;	// tid max len,SIZE_MAX means no limit,in popular system limit is TILOG_UINT64_MAX_CHAR_LEN
 
 	constexpr static uint32_t TILOG_MAY_MAX_RUNNING_THREAD_NUM = 1024;	// may max running threads
-	constexpr static uint32_t TILOG_AVERAGE_CONCURRENT_THREAD_NUM = 32;	// average concurrent threads
+	constexpr static uint32_t TILOG_AVERAGE_CONCURRENT_THREAD_NUM = 8;	// average concurrent threads
 	// thread local memory pool max num,can be bigger than TILOG_AVERAGE_CONCURRENT_THREAD_NUM for better formance
 	constexpr static uint32_t TILOG_LOCAL_MEMPOOL_MAX_NUM = 128;
+
+	// user thread suspend and notify merge thread if merge rawdata size >= it.
+	// Set it smaller may make log latency lower but too small may make bandwidth even worse
+	constexpr static size_t TILOG_MERGE_RAWDATA_QUEUE_FULL_SIZE = (size_t)(TILOG_AVERAGE_CONCURRENT_THREAD_NUM * 2);
+	// user thread notify merge thread if merge rawdata size >= it.
+	// Set it smaller may make log latency lower but too small may make bandwidth even worse
+	constexpr static size_t TILOG_MERGE_RAWDATA_QUEUE_NEARLY_FULL_SIZE = (size_t)(TILOG_MERGE_RAWDATA_QUEUE_FULL_SIZE * 0.75);
 
 	constexpr static size_t TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE= (16U << 20U);	// log size per file,it is not accurate,especially TILOG_GLOBAL_BUF_SIZE is bigger
 }	 // namespace tilogspace
@@ -293,7 +300,7 @@ namespace tilogspace
         tilogspace::TiLogModFile                                )
 
 
-#define TILOG_GET_DEFAULT_MODULE_REF tilogspace::TiLog::getRInstance().GetMoudleRef<tilogspace::TILOG_MODULE_START>()
+#define TILOG_GET_DEFAULT_MODULE_REF tilogspace::TiLog::GetMoudleRef<tilogspace::TILOG_MODULE_START>()
 #define TILOG_GET_DEFAULT_MODULE_ENUM tilogspace::TILOG_MODULE_START
 
 	struct TiLogModuleSpec
@@ -384,9 +391,13 @@ namespace tilogspace
 	};
 
 	using sync_ostream_mtx_t = OptimisticMutex;
-	extern sync_ostream_mtx_t* ticout_mtx;
-	extern sync_ostream_mtx_t* ticerr_mtx;
-	extern sync_ostream_mtx_t* ticlog_mtx;
+	struct ti_iostream_mtx_t
+	{
+		sync_ostream_mtx_t ticout_mtx;
+		sync_ostream_mtx_t ticerr_mtx;
+		sync_ostream_mtx_t ticlog_mtx;
+	};
+	extern ti_iostream_mtx_t* ti_iostream_mtx;
 }	 // namespace tilogspace
 
 namespace tilogspace
@@ -2434,13 +2445,13 @@ namespace tilogspace
 
 	public:
 		template <ETiLogModule mod>
-		inline typename std::tuple_element<mod, TiLogMods>::type GetMoudleRef()
+		inline static typename std::tuple_element<mod, TiLogMods>::type GetMoudleRef()
 		{
-			return std::get<mod>(*mods);
+			return std::get<mod>(*getRInstance().mods);
 		}
-		TiLogModBase& GetMoudleBaseRef(ETiLogModule mod);
+		static TiLogModBase& GetMoudleBaseRef(ETiLogModule mod);
 
-		static TiLog& getRInstance();
+		inline static TiLog& getRInstance();
 
 
 	private:
@@ -2452,6 +2463,7 @@ namespace tilogspace
 
 	namespace internal
 	{
+		extern uint8_t tilogbuf[];
 		// nifty counter for TiLog
 		static struct TiLogNiftyCounterIniter
 		{
@@ -2459,6 +2471,7 @@ namespace tilogspace
 			~TiLogNiftyCounterIniter();
 		} tiLogNiftyCounterIniter;
 	}	 // namespace internal
+	TiLog& TiLog::getRInstance() { return *((TiLog*)&internal::tilogbuf); }
 
 	class TiLogNoneStream;
 	namespace internal
@@ -2581,7 +2594,7 @@ namespace internal
 			ETiLogModule mod, uint32_t lv, const char* file, uint16_t fileLen, const char* func, uint8_t funcLen, uint32_t line)
 			: StringType(EPlaceHolder{})
 		{
-			if (lv > TiLog::getRInstance().GetMoudleBaseRef(mod).GetLogLevel())
+			if (lv > TiLog::GetMoudleBaseRef(mod).GetLogLevel())
 			{
 				bindToNoUseStream();
 				return;
@@ -2619,7 +2632,7 @@ namespace internal
 			case ELogLevelFlag::D:
 			case ELogLevelFlag::V:
 				DEBUG_RUN(TiLogBean::check(this->ext()));
-				TiLog::getRInstance().GetMoudleBaseRef(ext()->mod).PushLog(this->ext());
+				TiLog::GetMoudleBaseRef(ext()->mod).PushLog(this->ext());
 				// goto next case
 			case ELogLevelFlag::NO_USE:
 				// no need set pCore = nullptr,do nothing and shortly call do_overwrited_super_destructor
@@ -3118,6 +3131,8 @@ namespace tilogspace
 	static_assert(TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MAX_CENTI <= 200, "fatal err!");
 	static_assert(TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE > 0, "fatal err!");
 	static_assert(TILOG_SINGLE_LOG_RESERVE_LEN > 0, "fatal err!");
+	static_assert(TILOG_MERGE_RAWDATA_QUEUE_NEARLY_FULL_SIZE >= 1, "fatal error!too small");
+	static_assert(TILOG_MERGE_RAWDATA_QUEUE_FULL_SIZE >= TILOG_MERGE_RAWDATA_QUEUE_NEARLY_FULL_SIZE, "fatal error!too small");
 
 	static_assert(TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE > 0, "fatal err!");
 }	 // namespace tilogspace
@@ -3134,9 +3149,9 @@ namespace tilogspace
 
 //------------------------------------------define micro for user------------------------------------------//
 
-#define TICOUT (std::unique_lock<tilogspace::sync_ostream_mtx_t>(*tilogspace::ticout_mtx), std::cout)
-#define TICERR (std::unique_lock<tilogspace::sync_ostream_mtx_t>(*tilogspace::ticerr_mtx), std::cerr)
-#define TICLOG (std::unique_lock<tilogspace::sync_ostream_mtx_t>(*tilogspace::ticlog_mtx), std::clog)
+#define TICOUT (std::unique_lock<tilogspace::sync_ostream_mtx_t>(tilogspace::ti_iostream_mtx->ticout_mtx), std::cout)
+#define TICERR (std::unique_lock<tilogspace::sync_ostream_mtx_t>(tilogspace::ti_iostream_mtx->ticerr_mtx), std::cerr)
+#define TICLOG (std::unique_lock<tilogspace::sync_ostream_mtx_t>(tilogspace::ti_iostream_mtx->ticlog_mtx), std::clog)
 
 #define TILOGA TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::TILOG_MODULE_START, tilogspace::ELevel::ALWAYS)
 #define TILOGF TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::TILOG_MODULE_START, tilogspace::ELevel::FATAL)

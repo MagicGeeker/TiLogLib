@@ -18,7 +18,7 @@ namespace tilogspace
 #define TILOG_REGISTER_MODULES TILOG_INTERNAL_REGISTER_MODULES_MACRO(tilogspace::TiLogMod0, tilogspace::TiLogMod1, tilogspace::TiLogMod2)
 
 
-#define TILOG_GET_DEFAULT_MODULE_REF tilogspace::TiLog::getRInstance().GetMoudleRef<tilogspace::TILOG_MODULE_START>()
+#define TILOG_GET_DEFAULT_MODULE_REF tilogspace::TiLog::GetMoudleRef<tilogspace::TILOG_MODULE_START>()
 #define TILOG_GET_DEFAULT_MODULE_ENUM tilogspace::TILOG_MODULE_START
 
 	struct TiLogModuleSpec

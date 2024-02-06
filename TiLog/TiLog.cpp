@@ -126,9 +126,8 @@ using namespace tilogspace;
 
 namespace tilogspace
 {
-	sync_ostream_mtx_t* ticout_mtx;
-	sync_ostream_mtx_t* ticerr_mtx;
-	sync_ostream_mtx_t* ticlog_mtx;
+	ti_iostream_mtx_t* ti_iostream_mtx;
+
 	namespace internal
 	{
 		namespace tilogtimespace
@@ -1084,17 +1083,17 @@ namespace tilogspace
 		{
 			using super = TiLogConcurrentHashMap<const String*, VecLogCache, MergeRawDatasHashMapFeat>;
 			inline size_t may_size() const { return mSize; }
-			inline bool may_full() const { return mSize >= TILOG_MERGE_QUEUE_RATE; }
+			inline bool may_full() const { return mSize >= TILOG_MERGE_RAWDATA_QUEUE_FULL_SIZE; }
+			inline bool may_nearlly_full() const { return mSize >= TILOG_MERGE_RAWDATA_QUEUE_NEARLY_FULL_SIZE; }
 			inline void clear() { mSize = 0; }
-			template <bool INC_M_SIZE>
-			inline VecLogCache& get(const String* key)
+			inline VecLogCache& get_for_append(const String* key)
 			{
-				if_constexpr(INC_M_SIZE) { ++mSize; }
+				++mSize;
 				return super::get(key);
 			}
 
 		protected:
-			std::atomic<size_t> mSize{ 0 };
+			uint32_t mSize{ 0 };
 		};
 
 		using VecVecLogCache = Vector<VecLogCache>;
@@ -1305,7 +1304,8 @@ namespace tilogspace
 			// bool mDoing = false;
 
 			std::condition_variable_any mCvWait;
-			MiniSpinMutex mMtxWait;	   // wait thread complete mutex
+			MiniSpinMutex mMtxWait;			   // wait thread complete mutex
+			uint32_t mMayWaitingThrds{ 0 };	   // dirty thread num waiting thrd
 
 			std::atomic<bool> mDoing{ false };
 		};
@@ -1396,10 +1396,9 @@ namespace tilogspace
 
 			inline bool LocalCircularQueuePushBack(ThreadStru& stru, TiLogBean* obj);
 
-			inline bool MoveLocalCacheToGlobal(ThreadStru& bean);
+			inline void MoveLocalCacheToGlobal(ThreadStru& bean);
 
 		private:
-			static constexpr size_t GLOBAL_SIZE = TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE * TILOG_MERGE_QUEUE_RATE;
 			static constexpr uint64_t MAGIC_NUMBER = 0x1234abcd1234abcd;
 			static constexpr uint64_t MAGIC_NUMBER_DEAD = 0x1234dead1234dead;
 
@@ -1435,9 +1434,9 @@ namespace tilogspace
 
 			struct MergeStru : public CoreThrdStru
 			{
-				MergeRawDatas mRawDatas;							// input
-				VecLogCache mMergeCaches{ GLOBAL_SIZE };	// output
-				
+				MergeRawDatas mRawDatas;	 // input
+				VecLogCache mMergeCaches;	 // output
+
 				MergeVecVecLogcahes mMergeLogVecVec;
 				VecLogCache mMergeSortVec{};					   // temp vector
 				VecLogCachePtrPriorQueue mThreadStruPriorQueue;	   // prior queue of ThreadStru cache
@@ -1989,7 +1988,6 @@ namespace tilogspace
 			CreateCoreThread(mGC);
 
 			mInited = true;
-			atexit([] { printf("\n###atexit\n"); });
 			WaitPrepared("TiLogCore::TiLogCore waiting\n");
 		}
 
@@ -2011,14 +2009,13 @@ namespace tilogspace
 			return stru.qCache.full();
 		}
 
-		inline bool TiLogCore::MoveLocalCacheToGlobal(ThreadStru& bean)
+		inline void TiLogCore::MoveLocalCacheToGlobal(ThreadStru& bean)
 		{
-			static_assert(TILOG_MERGE_QUEUE_RATE >= 1, "fatal error!too small");
+			
 			// bean's spinMtx protect both qCache and vec
-			VecLogCache& vec = mMerge.mRawDatas.get<true>(bean.tid);
+			VecLogCache& vec = mMerge.mRawDatas.get_for_append(bean.tid);
 			CrcQueueLogCache::append_to_vector(vec, bean.qCache);
 			bean.qCache.clear();
-			return mMerge.mRawDatas.may_full();
 		}
 
 		//get unique ThreadStru* by TiLogCore* and thread id
@@ -2135,7 +2132,9 @@ namespace tilogspace
 			{
 				mMerge.mCV.notify_one();	// notify merge thread
 				// wait for deliver thread, maybe thrd complete at once after notify,so wait_for nanos and wake up to check again.
+				++mMerge.mMayWaitingThrds;
 				synchronized_u(lk_wait, mDeliver.mMtxWait) { mDeliver.mCvWait.wait_for(lk_wait, std::chrono::nanoseconds(500)); }
+				--mMerge.mMayWaitingThrds;
 			}
 		}
 
@@ -2178,9 +2177,12 @@ namespace tilogspace
 
 			if (isLocalFull)
 			{
-				bool isGlobalFull = MoveLocalCacheToGlobal(stru);
+				MoveLocalCacheToGlobal(stru);
 				lk_local.unlock();
-				if (isGlobalFull)
+				if (mMerge.mRawDatas.may_nearlly_full() && !mMerge.mDoing)
+				{
+					mMerge.mCV.notify_one();
+				} else if (mMerge.mRawDatas.may_full())
 				{
 					mMerge.mCV.notify_one();
 					GetMergeLock();	   // wait for merge thread
@@ -2226,7 +2228,7 @@ namespace tilogspace
 					"MergeThreadStruQueueToSet ptid %p , tid %s , qCachePreSize= %u\n", threadStru.tid,
 					(threadStru.tid == nullptr ? "" : threadStru.tid->c_str()), (unsigned)qCachePreSize);
 
-				VecLogCache& v = mMerge.mRawDatas.get<false>(threadStru.tid);
+				VecLogCache& v = mMerge.mRawDatas.get(threadStru.tid);
 				size_t vsizepre = v.size();
 				DEBUG_PRINTD("v %p size pre: %u\n", &v, (unsigned)vsizepre);
 
@@ -2444,7 +2446,9 @@ namespace tilogspace
 				lk.unlock();
 				thrd.mCV.notify_one();
 				// maybe thrd complete at once after notify,so wait_for nanos and wake up to check again.
+				++thrd.mMayWaitingThrds;
 				synchronized_u(lk_wait, thrd.mMtxWait) { thrd.mCvWait.wait_for(lk_wait, std::chrono::nanoseconds(NANOS[i])); }
+				--thrd.mMayWaitingThrds;
 				lk.lock();
 			}
 			return lk;
@@ -2493,10 +2497,10 @@ namespace tilogspace
 				SwapMergeCacheAndDeliverCache();
 				lk_merge.unlock();
 
+				if(mMerge.mMayWaitingThrds)
 				{
-					unique_lock<MiniSpinMutex> lk_wait(mMerge.mMtxWait);
-					lk_wait.unlock();
 					mMerge.mCvWait.notify_all();
+					mMerge.mMayWaitingThrds = 0;
 				}
 			}
 			DEBUG_PRINTA("mMerge.mMergedSize %llu\n", (long long unsigned)mMerge.mMergedSize);
@@ -2672,10 +2676,10 @@ namespace tilogspace
 				NotifyGC();
 				lk_deliver.unlock();
 
+				if(mDeliver.mMayWaitingThrds)
 				{
-					unique_lock<MiniSpinMutex> lk_wait(mDeliver.mMtxWait);
-					lk_wait.unlock();
 					mDeliver.mCvWait.notify_all();
+					mDeliver.mMayWaitingThrds = 0;
 				}
 			}
 			AtInternalThreadExit(&mDeliver, &mGC);
@@ -2696,10 +2700,10 @@ namespace tilogspace
 				mGC.mGCList.gc();
 				lk_del.unlock();
 
+				if(mGC.mMayWaitingThrds)
 				{
-					unique_lock<MiniSpinMutex> lk_wait(mGC.mMtxWait);
-					lk_wait.unlock();
 					mGC.mCvWait.notify_all();
+					mGC.mMayWaitingThrds = 0;
 				}
 
 				unique_lock<decltype(mThreadStruQueue)> lk_queue(mThreadStruQueue, std::try_to_lock);
@@ -3055,17 +3059,11 @@ namespace tilogspace
 	}	 // namespace internal
 
 
-	static void ctor_cout_mtx()
+	static void ctor_iostream_mtx() { ti_iostream_mtx = new ti_iostream_mtx_t(); }
+	static void dtor_iostream_mtx()
 	{
-		ticout_mtx = new sync_ostream_mtx_t();
-		ticerr_mtx = new sync_ostream_mtx_t();
-		ticlog_mtx = new sync_ostream_mtx_t();
-	}
-	static void dtor_cout_mtx()
-	{
-		delete ticlog_mtx;
-		delete ticerr_mtx;
-		delete ticout_mtx;
+		delete ti_iostream_mtx;
+		ti_iostream_mtx = nullptr;
 	}
 
 	static void ctor_single_instance_printers()
@@ -3082,18 +3080,22 @@ namespace tilogspace
 	TiLogModBase& TiLog::GetMoudleBaseRef(ETiLogModule mod) { return *TiLogEngines::getRInstance().engines[mod].tiLogModBase; }
 	TiLog::TiLog()
 	{
-		ctor_cout_mtx();
+		ctor_iostream_mtx();
+		atexit([] { dtor_iostream_mtx(); });
 		ctor_single_instance_printers();
 		TiLogEngines::init();
 		this->mods = &TiLogEngines::getRInstance().mods;
+		TICLOG << "TiLog " << &TiLog::getRInstance() << " TiLogEngines " << TiLogEngines::getInstance() << " in thrd "
+			   << std::this_thread::get_id() << '\n';
 	}
 
 	TiLog::~TiLog()
 	{
+		TICLOG << "~TiLog " << &TiLog::getRInstance() << " TiLogEngines " << TiLogEngines::getInstance() << " in thrd "
+			   << std::this_thread::get_id() << '\n';
 		TiLogEngines::uninit();
 		this->mods = nullptr;
 		dtor_single_instance_printers();
-		dtor_cout_mtx();
 	}
 }	 // namespace tilogspace
 
@@ -3117,7 +3119,7 @@ namespace tilogspace
 	namespace internal
 	{
 		static uint32_t tilog_nifty_counter;	// zero initialized at load time
-		static uint8_t tilogbuf[sizeof(TiLog)];
+		uint8_t tilogbuf[sizeof(TiLog)];
 
 		TiLogNiftyCounterIniter::TiLogNiftyCounterIniter()
 		{
@@ -3129,5 +3131,4 @@ namespace tilogspace
 		}
 	}	 // namespace internal
 
-	TiLog& TiLog::getRInstance() { return *((TiLog*)&tilogbuf); }
 }	 // namespace tilogspace
