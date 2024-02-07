@@ -132,9 +132,9 @@ namespace tilogspace
 	{
 		namespace tilogtimespace
 		{
-			TILOG_SINGLE_INSTANCE_DECLARE_OUTER(steady_flag_helper)
-			SteadyClockImpl::SystemTimePoint SteadyClockImpl::initSystemTime{};
-			SteadyClockImpl::TimePoint SteadyClockImpl::initSteadyTime{};
+			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_OUTSIDE(steady_flag_helper,steady_flag_helper_buf)
+			uint8_t SteadyClockImpl::initSystemTimeBuf[sizeof(SystemTimePoint)];
+			uint8_t SteadyClockImpl::initSteadyTimeBuf[sizeof(TimePoint)];
 		}	 // namespace tilogtimespace
 	}		 // namespace internal
 
@@ -970,6 +970,8 @@ namespace tilogspace
 		protected:
 			const String folderPath;
 			TiLogFile mFile;
+			uint32_t mFileIndex = 0;
+			char mPreTimeStr[TILOG_CTIME_MAX_LEN]{};
 			uint64_t index = 1;
 		};
 
@@ -1318,6 +1320,9 @@ namespace tilogspace
 
 		using VecLogCachePtrPriorQueue = PriorQueue<VecLogCachePtr, Vector<VecLogCachePtr>, VecLogCachePtrLesser>;
 
+		struct TiLogMap_t;
+		struct TiLogEngines;
+
 		class TiLogCore : public TiLogObject
 		{
 			friend struct ThreadExitWatcher;
@@ -1406,6 +1411,7 @@ namespace tilogspace
 
 			TiLogEngine* mTiLogEngine;
 			TiLogPrinterManager* mTiLogPrinterManager;
+			TiLogMap_t* mTiLogMap;
 
 			atomic_int32_t mExistThreads{ 0 };
 			atomic_bool mToExit{};
@@ -1457,9 +1463,6 @@ namespace tilogspace
 				TiLogTime::origin_time_type mPreLogTime{};
 				alignas(32) char mlogprefix[TILOG_PREFIX_LOG_SIZE];
 				char* mctimestr;
-#if TILOG_IS_WITH_FILE_LINE_INFO
-				char mlinemp[TILOG_CODE_CACHED_LINE_DEC_MAX][8];
-#endif
 
 				IOBean mIoBean;	   // output
 				SyncedIOBeanPool mIOBeanPool;
@@ -1511,17 +1514,26 @@ namespace tilogspace
 			mctimestr = mlogprefix + 3;
 #endif
 #if !TILOG_IS_WITH_FILE_LINE_INFO
-			mlogprefix[sizeof(mlogprefix)-1]=' ';
-#else
-			char mod[8 + 1] = ":000000]";
-			static_assert(TILOG_CODE_CACHED_LINE_DEC_MAX<=TILOG_CODE_LINE_DEC_MAX ,"fatal error");
-			for (uint32_t i = 0; i < TILOG_CODE_CACHED_LINE_DEC_MAX; i++)
-			{
-				sprintf(mod, ":%06d]", i);	   // ':000000]' -> ':999999]'
-				memcpy(mlinemp[i], mod, 8);
-			}
+			mlogprefix[sizeof(mlogprefix) - 1] = ' ';
 #endif
 		}
+
+		struct TiLogMap_t
+		{
+#if TILOG_IS_WITH_FILE_LINE_INFO
+			TiLogMap_t()
+			{
+				char mod[8 + 1] = ":000000]";
+				static_assert(TILOG_CODE_CACHED_LINE_DEC_MAX <= TILOG_CODE_LINE_DEC_MAX, "fatal error");
+				for (uint32_t i = 0; i < TILOG_CODE_CACHED_LINE_DEC_MAX; i++)
+				{
+					sprintf(mod, ":%06d]", i);	  // ':000000]' -> ':999999]'
+					memcpy(mlinemp[i], mod, 8);
+				}
+			}
+			char mlinemp[TILOG_CODE_CACHED_LINE_DEC_MAX][8];
+#endif
+		};
 
 
 		class TiLogPrinterData
@@ -1624,6 +1636,59 @@ namespace tilogspace
 			TiLogCore tiLogCore;
 			inline TiLogEngine() : tiLogModBase(), mod(), tiLogPrinterManager(this), tiLogCore(this) {}
 			inline TiLogEngine(TiLogModBase* b) : tiLogModBase(b), mod(b->mod), tiLogPrinterManager(this), tiLogCore(this) {}
+		};
+
+		struct TiLogEngines
+		{
+			struct ThreadIdStrRefCountFeat : TiLogConcurrentHashMapDefaultFeat<const String*, uint32_t>
+			{
+				constexpr static uint32_t CONCURRENT = TILOG_MAY_MAX_RUNNING_THREAD_NUM;
+			};
+			TiLogConcurrentHashMap<const String*, uint32_t, ThreadIdStrRefCountFeat> threadIdStrRefCount;
+			TiLogMods mods;
+			using engine_t = std::array<TiLogEngine, TILOG_MODULE_SPECS_SIZE>;
+			union
+			{
+				void* pe{};
+				engine_t engines;
+			};
+			TiLogMap_t tilogmap;
+			mempoolspace::mempool mpool;
+
+			static_assert(GetArgsNum<TILOG_REGISTER_MODULES>() == TILOG_MODULE_SPECS_SIZE, "fatal error,must be equal");
+
+			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE(TiLogEngines)
+
+			template <typename T>	 // T is TiLogModBase
+			inline void operator()(TiLogEngine* e, T& t) const
+			{
+				t.engine = e;
+				new (e) TiLogEngine(&t);	// init engines
+			}
+
+			template <std::size_t I = 0, typename FuncT, typename... Tp>
+			inline typename std::enable_if<I == sizeof...(Tp), void>::type for_index(int, std::tuple<Tp...>&, FuncT, TiLogEngine* e)
+			{
+			}
+
+			template <std::size_t I = 0, typename FuncT, typename... Tp>
+				inline typename std::enable_if
+				< I<sizeof...(Tp), void>::type for_index(int index, std::tuple<Tp...>& t, FuncT f, TiLogEngine* e)
+			{
+				if (index == 0)
+					this->template operator()(e, std::get<I>(t));
+				else
+					for_index<I + 1, FuncT, Tp...>(index - 1, t, f, e);
+			}
+
+			TiLogEngines()
+			{
+				for (int i = 0; i < engines.size(); i++)
+				{
+					for_index(i, mods, Functor(), &engines[i]);
+				}
+			}
+			~TiLogEngines() { engines.~engine_t(); }
 		};
 
 		void TiLogPrinterData::init()
@@ -1787,16 +1852,32 @@ namespace tilogspace
 			{
 				char* fileName = timeStr;
 				transformTimeStrToFileName(fileName, timeStr, size);
-				s.append(folderPath).append(fileName, size).append(".log", 4);
-			}
-			else
+				if (strcmp(timeStr, mPreTimeStr) == 0)
+				{
+					mFileIndex++;
+					if (mFileIndex > 9999) { mFileIndex = 1; }
+				} else
+				{
+					mFileIndex = 1;
+				}
+				strcpy(mPreTimeStr, timeStr);
+				char indexs[9];
+				snprintf(indexs, 9, "_idx%04u", (unsigned)mFileIndex);	  // 0000-9999
+#if TILOG_IS_WITH_MILLISECONDS == FALSE
+				constexpr size_t LOG_FILE_MIN = (1U << 20U);
+#else
+				constexpr size_t LOG_FILE_MIN = (1U << 10U);
+#endif
+				static_assert(TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE >= LOG_FILE_MIN, "too small file size,logs may overlap");
+				s.append(folderPath).append(fileName, size).append(indexs).append(".log", 4);
+			} else
 			{
 				char indexs[9];
 				snprintf(indexs, 9, "%07llu_", (unsigned long long)index);
 				s = folderPath + indexs;
+				index++;
 			}
 
-			index++;
 			mFile.open({ s.data(), s.size() }, "a");
 		}
 
@@ -1975,9 +2056,8 @@ namespace tilogspace
 	namespace internal
 	{
 #ifdef __________________________________________________TiLogCore__________________________________________________
-
-
-		TiLogCore::TiLogCore(TiLogEngine* e) : mTiLogEngine(e), mTiLogPrinterManager(&e->tiLogPrinterManager)
+		TiLogCore::TiLogCore(TiLogEngine* e)
+			: mTiLogEngine(e), mTiLogPrinterManager(&e->tiLogPrinterManager), mTiLogMap(&TiLogEngines::getRInstance().tilogmap)
 		{
 			DEBUG_PRINTA("TiLogCore::TiLogCore %p\n", this);
 			// TODO only happens in mingw64,Windows,maybe a mingw64 bug? see DEBUG_PRINTA("test printf lf %lf\n",1.0)
@@ -2557,7 +2637,7 @@ namespace tilogspace
 			logs.writend(bean.file, bean.fileLen);	  //-----bean.fileLen
 			if (bean.line < TILOG_CODE_CACHED_LINE_DEC_MAX)
 			{
-				logs.writend(mDeliver.mlinemp[bean.line], 8);	 // 8byte
+				logs.writend(mTiLogMap->mlinemp[bean.line], 8);	 // 8byte
 			} else if (bean.line < TILOG_CODE_LINE_DEC_MAX)
 			{
 				char decline[8 + 1];
@@ -2925,6 +3005,25 @@ namespace tilogspace
 #endif
 			tilogspace::internal::tilogtimespace::steady_flag_helper::uninit();
 		}
+
+		static void ctor_iostream_mtx() { ti_iostream_mtx = new ti_iostream_mtx_t(); }
+		static void dtor_iostream_mtx()
+		{
+			delete ti_iostream_mtx;
+			ti_iostream_mtx = nullptr;
+		}
+
+		static void ctor_single_instance_printers()
+		{
+			TiLogNonePrinter::init();
+			TiLogTerminalPrinter::init();
+		}
+		static void dtor_single_instance_printers()
+		{
+			TiLogTerminalPrinter::uninit();
+			TiLogNonePrinter::uninit();
+		}
+
 	}	 // namespace internal
 }	 // namespace tilogspace
 
@@ -2980,65 +3079,6 @@ namespace tilogspace
 
 	namespace internal
 	{
-		struct TiLogClockIniter
-		{
-			TiLogClockIniter() { tilogspace::internal::InitClocks(); }
-
-			~TiLogClockIniter() { tilogspace::internal::UnInitClocks(); }
-		};
-
-		struct TiLogEngines
-		{
-			struct ThreadIdStrRefCountFeat : TiLogConcurrentHashMapDefaultFeat<const String*, uint32_t>
-			{
-				constexpr static uint32_t CONCURRENT = TILOG_MAY_MAX_RUNNING_THREAD_NUM;
-			};
-			TiLogConcurrentHashMap<const String*, uint32_t, ThreadIdStrRefCountFeat> threadIdStrRefCount;
-			TiLogClockIniter tiLogClockIniter;
-			TiLogMods mods;
-			using engine_t = std::array<TiLogEngine, TILOG_MODULE_SPECS_SIZE>;
-			union
-			{
-				void* pe{};
-				engine_t engines;
-			};
-			mempoolspace::mempool mpool;
-
-			static_assert(GetArgsNum<TILOG_REGISTER_MODULES>() == TILOG_MODULE_SPECS_SIZE, "fatal error,must be equal");
-
-			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE(TiLogEngines)
-
-			template <typename T>	 // T is TiLogModBase
-			inline void operator()(TiLogEngine* e, T& t) const
-			{
-				t.engine = e;
-				new (e) TiLogEngine(&t);	// init engines
-			}
-
-			template <std::size_t I = 0, typename FuncT, typename... Tp>
-			inline typename std::enable_if<I == sizeof...(Tp), void>::type for_index(int, std::tuple<Tp...>&, FuncT, TiLogEngine* e)
-			{
-			}
-
-			template <std::size_t I = 0, typename FuncT, typename... Tp>
-				inline typename std::enable_if
-				< I<sizeof...(Tp), void>::type for_index(int index, std::tuple<Tp...>& t, FuncT f, TiLogEngine* e)
-			{
-				if (index == 0)
-					this->template operator()(e, std::get<I>(t));
-				else
-					for_index<I + 1, FuncT, Tp...>(index - 1, t, f, e);
-			}
-
-			TiLogEngines()
-			{
-				for (int i = 0; i < engines.size(); i++)
-				{
-					for_index(i, mods, Functor(), &engines[i]);
-				}
-			}
-			~TiLogEngines() { engines.~engine_t(); }
-		};
 		TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_OUTER(TiLogEngines);
 
 		uint32_t IncTidStrRefCnt(const String* s) { return ++TiLogEngines::getRInstance().threadIdStrRefCount.get(s); }
@@ -3058,31 +3098,13 @@ namespace tilogspace
 		}
 	}	 // namespace internal
 
-
-	static void ctor_iostream_mtx() { ti_iostream_mtx = new ti_iostream_mtx_t(); }
-	static void dtor_iostream_mtx()
-	{
-		delete ti_iostream_mtx;
-		ti_iostream_mtx = nullptr;
-	}
-
-	static void ctor_single_instance_printers()
-	{
-		TiLogNonePrinter::init();
-		TiLogTerminalPrinter::init();
-	}
-	static void dtor_single_instance_printers()
-	{
-		TiLogTerminalPrinter::uninit();
-		TiLogNonePrinter::uninit();
-	}
-
 	TiLogModBase& TiLog::GetMoudleBaseRef(ETiLogModule mod) { return *TiLogEngines::getRInstance().engines[mod].tiLogModBase; }
 	TiLog::TiLog()
 	{
 		ctor_iostream_mtx();
 		atexit([] { dtor_iostream_mtx(); });
 		ctor_single_instance_printers();
+		InitClocks();
 		TiLogEngines::init();
 		this->mods = &TiLogEngines::getRInstance().mods;
 		TICLOG << "TiLog " << &TiLog::getRInstance() << " TiLogEngines " << TiLogEngines::getInstance() << " in thrd "
@@ -3094,6 +3116,7 @@ namespace tilogspace
 		TICLOG << "~TiLog " << &TiLog::getRInstance() << " TiLogEngines " << TiLogEngines::getInstance() << " in thrd "
 			   << std::this_thread::get_id() << '\n';
 		TiLogEngines::uninit();
+		UnInitClocks();
 		this->mods = nullptr;
 		dtor_single_instance_printers();
 	}
@@ -3119,7 +3142,6 @@ namespace tilogspace
 	namespace internal
 	{
 		static uint32_t tilog_nifty_counter;	// zero initialized at load time
-		uint8_t tilogbuf[sizeof(TiLog)];
 
 		TiLogNiftyCounterIniter::TiLogNiftyCounterIniter()
 		{
@@ -3130,5 +3152,5 @@ namespace tilogspace
 			if (--tilog_nifty_counter == 0) ((TiLog*)&tilogbuf)->~TiLog();
 		}
 	}	 // namespace internal
-
+	TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_OUTSIDE(TiLog,tilogbuf)
 }	 // namespace tilogspace

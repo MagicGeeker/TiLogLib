@@ -236,10 +236,10 @@ namespace tilogspace
 	constexpr static size_t TILOG_SINGLE_LOG_RESERVE_LEN = 50;	// reserve for every log except for level,tid ...
 	constexpr static size_t TILOG_THREAD_ID_MAX_LEN = SIZE_MAX;	// tid max len,SIZE_MAX means no limit,in popular system limit is TILOG_UINT64_MAX_CHAR_LEN
 
-	constexpr static uint32_t TILOG_MAY_MAX_RUNNING_THREAD_NUM = 1024;	// may max running threads
+	constexpr static uint32_t TILOG_MAY_MAX_RUNNING_THREAD_NUM = 128;	// may max running threads,note 1 means strict single thread program
 	constexpr static uint32_t TILOG_AVERAGE_CONCURRENT_THREAD_NUM = 8;	// average concurrent threads
 	// thread local memory pool max num,can be bigger than TILOG_AVERAGE_CONCURRENT_THREAD_NUM for better formance
-	constexpr static uint32_t TILOG_LOCAL_MEMPOOL_MAX_NUM = 128;
+	constexpr static uint32_t TILOG_LOCAL_MEMPOOL_MAX_NUM = 32;
 
 	// user thread suspend and notify merge thread if merge rawdata size >= it.
 	// Set it smaller may make log latency lower but too small may make bandwidth even worse
@@ -1374,7 +1374,26 @@ namespace tilogspace
 	inline static CLASS_NAME& getRInstance();                                                                                  			   \
 	inline static void init();                                                                                                 			   \
 	inline static void uninit();
-	// clang-format on
+
+
+#define TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_INSIDE(CLASS_NAME, ...)                                                               \
+	inline static CLASS_NAME* getInstance();                                                                                               \
+	inline static CLASS_NAME& getRInstance();                                                                                              \
+	inline static void init();                                                                                                             \
+	inline static void uninit();
+
+#define TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_FUNC_IMPL(CLASS_NAME, instance, ...)                                                          \
+	extern uint8_t instance[];                                                                                                             \
+	void CLASS_NAME::init() { new ((void*)&instance) CLASS_NAME(); }                                                                       \
+	void CLASS_NAME::uninit() { reinterpret_cast<CLASS_NAME*>(&instance)->~CLASS_NAME(); }                                                 \
+	CLASS_NAME* CLASS_NAME::getInstance() { return reinterpret_cast<CLASS_NAME*>(&instance); }                                             \
+	CLASS_NAME& CLASS_NAME::getRInstance() { return *reinterpret_cast<CLASS_NAME*>(&instance); }
+
+#define TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_OUTSIDE(CLASS_NAME, instance)                                                         \
+	alignas(alignof(CLASS_NAME)) uint8_t instance[sizeof(CLASS_NAME)];
+
+
+// clang-format on
 
 	struct TiLogObjectPoolFeat
 	{
@@ -1910,7 +1929,7 @@ namespace tilogspace
 
 			struct steady_flag_helper : TiLogObject
 			{
-				TILOG_SINGLE_INSTANCE_DECLARE(steady_flag_helper)
+				TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_INSIDE(steady_flag_helper)
 
 				static inline steady_flag_t now() { return getRInstance().count++; }
 
@@ -1919,6 +1938,7 @@ namespace tilogspace
 				static constexpr inline steady_flag_t max() { return std::numeric_limits<steady_flag_t>::max(); }
 				std::atomic<steady_flag_t> count{ min() };
 			};
+			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_FUNC_IMPL(steady_flag_helper, steady_flag_helper_buf)
 
 			// for customize timer，must be similar to BaseTimeImpl
 			TILOG_ABSTRACT class BaseTimeImpl : public TiLogObject
@@ -1987,7 +2007,8 @@ namespace tilogspace
 				UserModeClockT()
 				{
 					th = std::thread([this] {
-					SetThreadName((thrd_t)(-1), "UserModeClockT");
+						SetThreadName((thrd_t)(-1), "UserModeClockT");
+						thrdCreated = true;
 						while (!toExit)
 						{
 							TimePoint tp = Clock::now();
@@ -1995,6 +2016,10 @@ namespace tilogspace
 							std::this_thread::sleep_for(std::chrono::microseconds(TILOG_USER_MODE_CLOCK_UPDATE_US));
 						}
 					});
+					while (!thrdCreated)
+					{
+						std::this_thread::yield();
+					}
 				}
 				~UserModeClockT()
 				{
@@ -2006,6 +2031,7 @@ namespace tilogspace
 				static time_t to_time_t(const TimePoint& point) { return (Clock::to_time_t(getRInstance().s_now)); }
 
 			protected:
+				std::atomic<bool> thrdCreated{};
 				std::thread th{};
 				std::atomic<TimePoint> s_now{ Clock::now() };
 				volatile bool toExit{};
@@ -2103,11 +2129,13 @@ namespace tilogspace
 			public:
 				static inline void init()
 				{
-					initSystemTime = SystemClock::now();
-					initSteadyTime = Clock::now();
+					auto t1 = SystemClock::now();
+					*(TimePoint*)&initSteadyTimeBuf = Clock::now();
+					auto t2 = SystemClock::now();
+					*(SystemTimePoint*)&initSystemTimeBuf = t1 + (t2 - t1) / 2;
 				}
-				static inline SystemTimePoint getInitSystemTime() { return initSystemTime; }
-				static inline TimePoint getInitSteadyTime() { return initSteadyTime; }
+				static inline SystemTimePoint getInitSystemTime() { return *(SystemTimePoint*)&initSystemTimeBuf; }
+				static inline TimePoint getInitSteadyTime() { return *(TimePoint*)&initSteadyTimeBuf; }
 				inline SteadyClockImpl() { chronoTime = TimePoint::min(); }
 
 				inline SteadyClockImpl(TimePoint t) { chronoTime = t; }
@@ -2124,8 +2152,8 @@ namespace tilogspace
 
 				inline time_t to_time_t() const
 				{
-					auto dura = chronoTime - initSteadyTime;
-					auto t = initSystemTime + std::chrono::duration_cast<SystemClock::duration>(dura);
+					auto dura = chronoTime - getInitSteadyTime();
+					auto t = getInitSystemTime() + std::chrono::duration_cast<SystemClock::duration>(dura);
 					return SystemClock::to_time_t(t);
 				}
 				inline void cast_to_sec() { chronoTime = std::chrono::time_point_cast<std::chrono::seconds>(chronoTime); }
@@ -2143,8 +2171,8 @@ namespace tilogspace
 
 			protected:
 				TimePoint chronoTime;
-				static SystemTimePoint initSystemTime;
-				static TimePoint initSteadyTime;
+				static uint8_t initSystemTimeBuf[sizeof(SystemTimePoint)];
+				static uint8_t initSteadyTimeBuf[sizeof(TimePoint)];
 			};
 
 			template <typename TimeImplType>
@@ -2451,7 +2479,7 @@ namespace tilogspace
 		}
 		static TiLogModBase& GetMoudleBaseRef(ETiLogModule mod);
 
-		inline static TiLog& getRInstance();
+		TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_INSIDE(TiLog)
 
 
 	private:
@@ -2463,7 +2491,6 @@ namespace tilogspace
 
 	namespace internal
 	{
-		extern uint8_t tilogbuf[];
 		// nifty counter for TiLog
 		static struct TiLogNiftyCounterIniter
 		{
@@ -2471,7 +2498,7 @@ namespace tilogspace
 			~TiLogNiftyCounterIniter();
 		} tiLogNiftyCounterIniter;
 	}	 // namespace internal
-	TiLog& TiLog::getRInstance() { return *((TiLog*)&internal::tilogbuf); }
+	TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_FUNC_IMPL(TiLog,tilogbuf)
 
 	class TiLogNoneStream;
 	namespace internal
