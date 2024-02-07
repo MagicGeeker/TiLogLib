@@ -283,40 +283,20 @@ TEST_CASE("file_multi_thread_log_lat_test_____________________")
 {
 	TILOG_GET_DEFAULT_MODULE_REF.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
 	{
-		TEST_CASE_COUT << "file_multi_thread_log_lat_test_____________________10\n";
-
-		double rdstc0 = SingleLoopTimeTestFunc<false, 10>("when without log");
-		double rdstc1 = SingleLoopTimeTestFunc<true, 10>("when with log");
-
-		TICOUT << "rdtsc0 " << rdstc0 << " rdtsc1 " << rdstc1 << " rdstc1/rdstc0= " << 100.0 * rdstc1 / rdstc0 << "%\n";
-		TICOUT << "single log cost rdtsc= " << (rdstc1 - rdstc0) << "\n";
+		auto lat = SingleLoopTimeTestFunc<10>("file_multi_thread_log_lat_test_____________________10");
+		TICOUT << LatDump(*lat);
 	}
 	{
-		TEST_CASE_COUT << "file_multi_thread_log_lat_test_____________________20\n";
-
-		double rdstc0 = SingleLoopTimeTestFunc<false, 20>("when without log");
-		double rdstc1 = SingleLoopTimeTestFunc<true, 20>("when with log");
-
-		TICOUT << "rdtsc0 " << rdstc0 << " rdtsc1 " << rdstc1 << " rdstc1/rdstc0= " << 100.0 * rdstc1 / rdstc0 << "%\n";
-		TICOUT << "single log cost rdtsc= " << (rdstc1 - rdstc0) << "\n";
+		auto lat = SingleLoopTimeTestFunc<25>("file_multi_thread_log_lat_test_____________________25");
+		TICOUT << LatDump(*lat);
 	}
 	{
-		TEST_CASE_COUT << "file_multi_thread_log_lat_test_____________________50\n";
-
-		double rdstc0 = SingleLoopTimeTestFunc<false, 50>("when without log");
-		double rdstc1 = SingleLoopTimeTestFunc<true, 50>("when with log");
-
-		TICOUT << "rdtsc0 " << rdstc0 << " rdtsc1 " << rdstc1 << " rdstc1/rdstc0= " << 100.0 * rdstc1 / rdstc0 << "%\n";
-		TICOUT << "single log cost rdtsc= " << (rdstc1 - rdstc0) << "\n";
+		auto lat = SingleLoopTimeTestFunc<50>("file_multi_thread_log_lat_test_____________________50");
+		TICOUT << LatDump(*lat);
 	}
 	{
-		TEST_CASE_COUT << "file_multi_thread_log_lat_test_____________________100\n";
-
-		double rdstc0 = SingleLoopTimeTestFunc<false, 100>("when without log");
-		double rdstc1 = SingleLoopTimeTestFunc<true, 100>("when with log");
-
-		TICOUT << "rdtsc0 " << rdstc0 << " rdtsc1 " << rdstc1 << " rdstc1/rdstc0= " << 100.0 * rdstc1 / rdstc0 << "%\n";
-		TICOUT << "single log cost rdtsc= " << (rdstc1 - rdstc0) << "\n";
+		auto lat = SingleLoopTimeTestFunc<100>("file_multi_thread_log_lat_test_____________________100");
+		TICOUT << LatDump(*lat);
 	}
 }
 
