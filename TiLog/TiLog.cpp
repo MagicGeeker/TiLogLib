@@ -93,11 +93,7 @@
 #define TILOG_STRING_AND_LEN(char_str) char_str, ((sizeof(char_str) - 1) / sizeof(char_str[0]))
 
 #define TILOG_CTIME_MAX_LEN 32
-#if TILOG_IS_WITH_FILE_LINE_INFO
-#define TILOG_LINE_STR_LEN 8
-#else
-#define TILOG_LINE_STR_LEN 0
-#endif
+
 
 #if TILOG_IS_WITH_MILLISECONDS
 #define TILOG_PREFIX_LOG_SIZE (32)		 // reserve for prefix static c-strings;
@@ -105,11 +101,9 @@
 #define TILOG_PREFIX_LOG_SIZE (24)		 // reserve for prefix static c-strings;
 #endif
 
-#define TILOG_RESERVE_LEN_L1 (TILOG_PREFIX_LOG_SIZE + TILOG_LINE_STR_LEN)	 // reserve for prefix static c-strings and other;
+#define TILOG_RESERVE_LEN_L1 (TILOG_PREFIX_LOG_SIZE)	 // reserve for prefix static c-strings and other;
 
 
-constexpr static uint32_t TILOG_CODE_LINE_DEC_MAX = (999999 + 1);  // 6 chars int max
-constexpr static uint32_t TILOG_CODE_LINE_HEX_MAX = (0XFFFFFF + 1); // 6 chars hex int max
 
 
 using SystemTimePoint = std::chrono::system_clock::time_point;
@@ -399,7 +393,7 @@ namespace tilogspace
 
 		const String* GetThreadIDString()
 		{
-			thread_local static const String* s_tid = new String(String("@") + GetNewThreadIDString() + " ");
+			thread_local static const String* s_tid = new String(String(" @") + GetNewThreadIDString() + " ");
 			return s_tid;
 		}
 
@@ -1507,32 +1501,16 @@ namespace tilogspace
 		TiLogCore::DeliverStru::DeliverStru()
 		{
 #if TILOG_IS_WITH_MILLISECONDS
-			memcpy(mlogprefix, "\nE# [2022-06-06  19:25:10.763] [", sizeof(mlogprefix));
+			memcpy(mlogprefix, "\n   [2022-06-06  19:25:10.763] #", sizeof(mlogprefix));
 			mctimestr = mlogprefix + 5;
 #else
-			memcpy(mlogprefix, "\nE[2022-06-06 19:25:10][", sizeof(mlogprefix));
+			memcpy(mlogprefix, "\n [2022-06-06 19:25:10]#", sizeof(mlogprefix));
 			mctimestr = mlogprefix + 3;
-#endif
-#if !TILOG_IS_WITH_FILE_LINE_INFO
-			mlogprefix[sizeof(mlogprefix) - 1] = ' ';
 #endif
 		}
 
 		struct TiLogMap_t
 		{
-#if TILOG_IS_WITH_FILE_LINE_INFO
-			TiLogMap_t()
-			{
-				char mod[8 + 1] = ":000000]";
-				static_assert(TILOG_CODE_CACHED_LINE_DEC_MAX <= TILOG_CODE_LINE_DEC_MAX, "fatal error");
-				for (uint32_t i = 0; i < TILOG_CODE_CACHED_LINE_DEC_MAX; i++)
-				{
-					sprintf(mod, ":%06d]", i);	  // ':000000]' -> ':999999]'
-					memcpy(mlinemp[i], mod, 8);
-				}
-			}
-			char mlinemp[TILOG_CODE_CACHED_LINE_DEC_MAX][8];
-#endif
 		};
 
 
@@ -2593,28 +2571,14 @@ namespace tilogspace
 			TiLogStringView logsv = TiLogStreamHelper::str_view(&bean);
 			auto& logs = mDeliver.mIoBean;
 			auto preSize = logs.size();
-#if TILOG_IS_WITH_FILE_LINE_INFO
-			auto fileLen = bean.fileLen;
-#else
-			auto fileLen = 0;
-#endif
-#if TILOG_IS_WITH_FUNCTION_NAME
-			auto funcLen = bean.funcLen;
-#else
-			auto funcLen = 0;
-#endif
+			auto souce_location_size = bean.source_location_size;
 			auto beanSVSize = logsv.size();
 			using llu = long long unsigned;
-			size_t L2 = (fileLen + funcLen + beanSVSize);
+			size_t L2 = (souce_location_size + beanSVSize);
 			size_t append_size = L2 + TILOG_RESERVE_LEN_L1;
 			size_t reserveSize = preSize + append_size;
 			logs.reserve(reserveSize);
 
-#ifndef IUILS_NDEBUG_WITHOUT_ASSERT
-			DEBUG_PRINTV(
-				"preSize %llu, tid %.*s, fileLen %llu, beanSVSize %llu\n", (llu)preSize, (int)bean.tidlen, logsv.data(), (llu)fileLen,
-				(llu)beanSVSize);
-#endif
 
 			TiLogTime::origin_time_type oriTime = bean.time().get_origin_time();
 			if (oriTime == mDeliver.mPreLogTime)
@@ -2630,44 +2594,17 @@ namespace tilogspace
 				mDeliver.mlogprefix[22] = ']';
 #endif
 			}
-			mDeliver.mlogprefix[1] = bean.level;
 			logs.writend(mDeliver.mlogprefix, sizeof(mDeliver.mlogprefix));
-
-#if TILOG_IS_WITH_FILE_LINE_INFO
-			logs.writend(bean.file, bean.fileLen);	  //-----bean.fileLen
-			if (bean.line < TILOG_CODE_CACHED_LINE_DEC_MAX)
-			{
-				logs.writend(mTiLogMap->mlinemp[bean.line], 8);	 // 8byte
-			} else if (bean.line < TILOG_CODE_LINE_DEC_MAX)
-			{
-				char decline[8 + 1];
-				sprintf(decline, ":%06d]", (int)bean.line);	   // 8byte  // ':000000]' -> '#FFFFFF]'
-				logs.writend(decline, 8);
-			} else if (bean.line < TILOG_CODE_LINE_HEX_MAX)
-			{
-				char hexline[8 + 1];
-				sprintf(hexline, "#%06X]", bean.line);	  // 8byte  // '#000000]' -> '#FFFFFF]'
-				logs.writend(hexline, 8);
-			} else
-			{
-				logs.writend("#INF   ]", 8);
-			}
-
-#endif
-#if TILOG_IS_WITH_FUNCTION_NAME
-			logs.writend(bean.func,bean.funcLen);
-#endif
+			logs.writend(bean.source_location_str,bean.source_location_size);
 			logs.writend(logsv.data(), beanSVSize);			 //-----logsv.size()
 													   // clang-format off
-			// |----mlogprefix(32or24)------|------------filelen----------------|linelen(8)|funclen|--logsv(tid|usedata)-----|
-			// I# [2023-10-21  11:52:43.884] [D:\Codes\CMake\TiLogLib\Test\test.cpp:000741]main@1 line ?
-			// I# [2023-10-21  11:52:43.884] [																	mlogprefix(32or24)
-			//                                D:\Codes\CMake\TiLogLib\Test\test.cpp                             filelen
-			//                                                                     :000741]                     linelen(8)
-			//                                                                             main                 funcLen
-			//                                                                                 @1 line ?        logsv(include tid+userdata)
-			// static L1= sizeof(mDeliver.mlogprefix)(32or24)+linelen(8)
-			// dynamic L2= bean.fileLen +funcLen+ logsv.size()
+			// |----mlogprefix(32or24)----------|------------source_location----------------------------|--logsv(tid|usedata)-----|
+			// \n   [2024-04-21  15:52:25.886] #ERR D:\Codes\CMake\TiLogLib\Test\test.cpp:708 operator() @39344 nullptr
+			// \n   [2024-04-21  15:52:25.886] #
+			//                                  ERR D:\Codes\CMake\TiLogLib\Test\test.cpp:708 operator()
+			//                                                                                           @39344 nullptr
+			// static L1= sizeof(mDeliver.mlogprefix)(32or24)
+			// dynamic L2= source_location+ logsv.size()
 			// reserve preSize+L1+L2 bytes
 													   // clang-format on
 			DEBUG_DECLARE(auto newSize = logs.size();)

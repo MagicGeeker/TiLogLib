@@ -133,7 +133,6 @@
 #define TILOG_USE_USER_MODE_CLOCK  TRUE  // TRUE or FALSE,if true use user mode clock,otherwise use kernel mode clock
 #define TILOG_IS_WITH_MILLISECONDS TRUE  // TRUE or FALSE,if false no ms info in timestamp
 
-#define TILOG_DEFINE__FUNC__     constexpr static char __func__[]="not in func";  // if TiLogStream is created not inside function,__func__ may be not defined
 #define TILOG_IS_WITH_FUNCTION_NAME TRUE  // TRUE or FALSE,if false no function name in print
 #define TILOG_IS_WITH_FILE_LINE_INFO FALSE  // TRUE or FALSE,if false no file and line in print
 
@@ -1512,6 +1511,7 @@ namespace tilogspace
 
 
 	constexpr char LOG_PREFIX[] = "???AFEWIDV????";	   // begin ??? ,and end ???? is invalid
+	constexpr char LOG_LEVELS[][9] = {"????????","????????","????????","ALWAYS  ","FATAL   ","ERROR   ","WARNING ","INFO    ","DEBUG  ","VERBOSE ","????????","????????","????????","????????"};
 
 	// reserve +1 for '\0'
 	constexpr size_t TILOG_UINT16_MAX_CHAR_LEN = (5 + 1);
@@ -1576,6 +1576,92 @@ namespace tilogspace
 #endif
 
 		using EPlaceHolder = decltype(std::placeholders::_1);
+
+
+
+		template <size_t... Args>
+		struct index_sequence
+		{
+		};
+
+		template <size_t N, size_t... M>
+		struct make_index_sequence : public make_index_sequence<N - 1, N - 1, M...>
+		{
+		};
+
+		template <size_t... M>
+		struct make_index_sequence<0, M...> : public index_sequence<M...>
+		{
+		};
+
+
+		enum EStaticStringTrait
+		{
+			LITERAL,
+			CONCAT
+		};
+
+		template <size_t N, int type>
+		struct static_string;
+
+		template <size_t N>
+		struct static_string<N, LITERAL>
+		{
+			constexpr static_string(const char (&s)[N + 1]) : s(s) {}
+			constexpr static_string(const char* s, void*) : s(s) {}
+			constexpr const char* data() const { return s; }
+			constexpr size_t size() const { return N; }
+			const char* s;
+		};
+
+		template <size_t N>
+		struct static_string<N, CONCAT>
+		{
+			template <size_t N1, int T1, size_t N2, int T2>
+			constexpr static_string(const static_string<N1, T1>& s1, const static_string<N2, T2>& s2)
+				: static_string(s1, make_index_sequence<N1>{}, s2, make_index_sequence<N2>{})
+			{
+			}
+
+			template <size_t N1, int T1, size_t... I1, size_t N2, int T2, size_t... I2>
+			constexpr static_string(
+				const static_string<N1, T1>& s1, index_sequence<I1...>, const static_string<N2, T2>& s2, index_sequence<I2...>)
+				: s{ s1.s[I1]..., s2.s[I2]..., '\0' }
+			{
+				static_assert(N == N1 + N2, "static_string length error");
+			}
+			constexpr const char* data() const { return s; }
+			constexpr size_t size() const { return N; }
+			alignas(32) char s[N + 1];
+		};
+
+		template <size_t N>
+		constexpr static_string<N - 1, LITERAL> string_literal(const char (&s)[N])
+		{
+			return static_string<N - 1, LITERAL>(s);
+		}
+
+		template <size_t N1, int T1, size_t N2, int T2>
+		constexpr static_string<N1 + N2, CONCAT> string_concat(const static_string<N1, T1>& s1, const static_string<N2, T2>& s2)
+		{
+			return static_string<N1 + N2, CONCAT>(s1, s2);
+		}
+
+		template <size_t N1, int T1, size_t N2, int T2, size_t N3, int T3>
+		constexpr static_string<N1 + N2 + N3, CONCAT>
+		string_concat(const static_string<N1, T1>& s1, const static_string<N2, T2>& s2, const static_string<N3, T3>& s3)
+		{
+			return string_concat(string_concat(s1, s2), s3);
+		}
+
+		// Search the str for the first occurrence of c
+		// return index in str(finded) or Len-1(not find)
+		template <std::size_t Len>
+		constexpr int find(const char (&str)[Len], char c, int pos = 0)
+		{
+			return pos >= Len ? (Len - 1) : (str[pos] == c ? pos : find(str, c, pos + 1));
+		}
+
 
 		class TiLogStringView
 		{
@@ -2243,18 +2329,6 @@ namespace tilogspace
 	{
 #ifdef H__________________________________________________TiLogBean__________________________________________________
 
-#if TILOG_IS_WITH_FILE_LINE_INFO
-#define TILOGBEAN_FILE_LINE_DECLARE(...) __VA_ARGS__;
-#else
-#define TILOGBEAN_FILE_LINE_DECLARE(...)
-#endif
-
-#if TILOG_IS_WITH_FUNCTION_NAME
-#define TILOGBEAN_FUNCTION_DECLARE(...) __VA_ARGS__;
-#else
-#define TILOGBEAN_FUNCTION_DECLARE(...)
-#endif
-
 		class TiLogBean : public TiLogObject
 		{
 		public:
@@ -2271,11 +2345,8 @@ namespace tilogspace
 		public:
 			DEBUG_CANARY_UINT32(flag1)
 			TiLogTime tiLogTime;
-			TILOGBEAN_FILE_LINE_DECLARE(const char* file;)
-			TILOGBEAN_FUNCTION_DECLARE(const char* func;)
-			TILOGBEAN_FILE_LINE_DECLARE(uint32_t line;)
-			TILOGBEAN_FILE_LINE_DECLARE(uint16_t fileLen;)
-			TILOGBEAN_FUNCTION_DECLARE(uint8_t funcLen;)
+			const char* source_location_str;
+			size_t source_location_size;
 			char level;
 			ETiLogModule mod;
 
@@ -2288,33 +2359,11 @@ namespace tilogspace
 
 			TiLogTime& time() { return tiLogTime; }
 
-			inline static void DestroyInstance(TiLogBean* p)
-			{
-				check(p);
-#if TILOG_IS_WITH_FILE_LINE_INFO
-				DEBUG_RUN(p->file = nullptr);
-				DEBUG_RUN(p->line = 0, p->fileLen = 0);
-#endif
-#if TILOG_IS_WITH_FUNCTION_NAME
-				DEBUG_RUN(p->func = nullptr);
-				DEBUG_RUN(p->funcLen = 0);
-#endif
-				DEBUG_RUN(p->level = (char)ELogLevelFlag::FREED);
-				tifree(p);
-			}
-
 			inline static void check(const TiLogBean* p)
 			{
 				auto f = [p] {
 					DEBUG_ASSERT(p != nullptr);	   // in this program,p is not null
-#if TILOG_IS_WITH_FILE_LINE_INFO
-					DEBUG_ASSERT(!(p->file == nullptr));
-					DEBUG_ASSERT(!(p->line == 0 || p->fileLen == 0));
-#endif
-#if TILOG_IS_WITH_FUNCTION_NAME
-					DEBUG_ASSERT(!(p->func == nullptr));
-					DEBUG_ASSERT(!(p->funcLen == 0));
-#endif
+					DEBUG_ASSERT(p->source_location_str != nullptr);
 					for (auto c : LOG_PREFIX)
 					{
 						if (c == p->level) { return; }
@@ -2617,8 +2666,7 @@ namespace internal
 		inline explicit TiLogStream(EPlaceHolder) noexcept : StringType(EPlaceHolder{}) { bindToNoUseStream(); }
 
 		// make a valid stream
-		inline TiLogStream(
-			ETiLogModule mod, uint32_t lv, const char* file, uint16_t fileLen, const char* func, uint8_t funcLen, uint32_t line)
+		inline TiLogStream(ETiLogModule mod, uint32_t lv, const char* source_location_str, size_t source_location_size)
 			: StringType(EPlaceHolder{})
 		{
 			if (lv > TiLog::GetMoudleBaseRef(mod).GetLogLevel())
@@ -2629,15 +2677,8 @@ namespace internal
 			create(TILOG_SINGLE_LOG_RESERVE_LEN);
 			TiLogBean& bean = *ext();
 			bean.mod = mod;
-#if TILOG_IS_WITH_FILE_LINE_INFO
-			bean.file = file;
-			bean.fileLen = fileLen;
-			bean.line = line;
-#endif
-#if TILOG_IS_WITH_FUNCTION_NAME
-			bean.func = func;
-			bean.funcLen = funcLen;
-#endif
+			bean.source_location_str = source_location_str;
+			bean.source_location_size = source_location_size;
 			bean.level = tilogspace::LOG_PREFIX[lv];
 			const String* tidstr = tilogspace::internal::GetThreadIDString();
 			DEBUG_RUN(bean.tidlen = (uint8_t)(tidstr->size() - 1));
@@ -3105,36 +3146,18 @@ namespace tilogspace
 	}
 
 
-	template <
-		uint32_t fileLen, uint32_t funcLen, uint32_t line, uint32_t level, ETiLogModule MOD = tilogspace::ETiLogModule::TILOG_MODULE_START,
-		bool... b>
-	inline static auto CreateNewTiLogStream(const char* file, const char* func) ->
-		typename std::conditional<all_true<b...>::value && level <= GetLogLevel(MOD), TiLogStream, TiLogNoneStream>::type
+	template <uint32_t level, ETiLogModule MOD = tilogspace::ETiLogModule::TILOG_MODULE_START>
+	inline static auto CreateNewTiLogStream(tilogspace::internal::TiLogStringView s) ->
+		typename std::conditional<level <= GetLogLevel(MOD), TiLogStream, TiLogNoneStream>::type
 	{
-		static_assert(
-			std::is_array<typename std::remove_reference<decltype(__FILE__)>::type>::value,
-			"fatal error,only array can use sizeof to calculator length");
-		static_assert(
-			std::is_array<typename std::remove_reference<decltype(__func__)>::type>::value,
-			"fatal error,only array can use sizeof to calculator length");
-		static_assert(fileLen <= UINT16_MAX, "fatal error,file path is too long");
-		static_assert(level >= tilogspace::ELevel::MIN, "fatal error,level overflow");
-		static_assert(level <= tilogspace::ELevel::MAX, "fatal error,level overflow");
-		constexpr uint8_t funclen = funcLen > UINT8_MAX ? UINT8_MAX : funcLen;	  // truncate func if >256bytes
-		return { MOD, level, file, fileLen, func, funclen, line };
+		return { MOD, level, s.data(), s.size() };
 	}
 
-	template <uint32_t fileLen, uint32_t funcLen, uint32_t line, typename... b1>
+	template <typename=void>
 	inline static TiLogStream CreateNewTiLogStream(
-		const char* file, const char* func, uint32_t level, ETiLogModule MOD = tilogspace::ETiLogModule::TILOG_MODULE_START, b1... b)
+		tilogspace::internal::TiLogStringView s,uint32_t level, ETiLogModule MOD = tilogspace::ETiLogModule::TILOG_MODULE_START)
 	{
-		static_assert(fileLen <= UINT16_MAX, "fatal error,file path is too long");
-		DEBUG_ASSERT3(level >= tilogspace::ELevel::MIN, file, line, level);
-		DEBUG_ASSERT3(level <= tilogspace::ELevel::MAX, file, line, level);
-		constexpr uint8_t funclen = funcLen > UINT8_MAX ? UINT8_MAX : funcLen;	  // truncate func if >256bytes
-		bool iflog = all_true_dynamic(b...);
-		uint32_t lv = iflog ? level : tilogspace::ELevel::MAX;
-		return { MOD, lv, file, (uint16_t)fileLen, func, funclen, line };
+		return { MOD, level, s.data(), s.size() };
 	}
 }	 // namespace tilogspace
 
@@ -3166,12 +3189,61 @@ namespace tilogspace
 
 
 // clang-format off
+#define LINE_STRING0(l) #l
+#define LINE_STRING(l) LINE_STRING0(l)
 
-#define TILOG_INTERNAL_CREATE_TILOG_STREAM_DYNAMIC_LV(mod, lv, ...)                                                                                  \
-	tilogspace::CreateNewTiLogStream<(sizeof(__FILE__) - 1), (sizeof(__func__) - 1), __LINE__>(__FILE__, __func__, (lv),mod,##__VA_ARGS__)
+#if defined(__GNUC__)
+#define FUNCTION_DETAIL0 __PRETTY_FUNCTION__
+#elif defined(_MSC_VER)
+#define FUNCTION_DETAIL0 __FUNCSIG__
+#else
+#define FUNCTION_DETAIL0 __func__
+#endif
 
-#define TILOG_INTERNAL_CREATE_TILOG_STREAM(mod, lv, ...)                                                                                   \
-	tilogspace::CreateNewTiLogStream<(sizeof(__FILE__) - 1), (sizeof(__func__) - 1), __LINE__, (lv), mod, ##__VA_ARGS__>(__FILE__, __func__)
+#define LEVEL_DETAIL(constexpr_lv) tilogspace::internal::string_literal(tilogspace::LOG_LEVELS[constexpr_lv])
+#define FILE_LINE_DETAIL tilogspace::internal::string_literal(__FILE__ ":" LINE_STRING(__LINE__) " ")
+#define FUNCTION_DETAIL tilogspace::internal::static_string<tilogspace::internal::find(FUNCTION_DETAIL0, ':'),tilogspace::internal::LITERAL>(FUNCTION_DETAIL0,nullptr)
+
+
+#if TILOG_IS_WITH_FILE_LINE_INFO == TRUE && TILOG_IS_WITH_FUNCTION_NAME == TRUE
+#define TILOG_INTERNAL_GET_SOURCE_LOCATION_STRING(constexpr_lv)                                                                            \
+	tilogspace::internal::string_concat(LEVEL_DETAIL(constexpr_lv), FILE_LINE_DETAIL, FUNCTION_DETAIL)
+#endif
+#if TILOG_IS_WITH_FILE_LINE_INFO == FALSE && TILOG_IS_WITH_FUNCTION_NAME == TRUE
+#define TILOG_INTERNAL_GET_SOURCE_LOCATION_STRING(constexpr_lv)                                                                            \
+	tilogspace::internal::string_concat(LEVEL_DETAIL(constexpr_lv), FUNCTION_DETAIL)
+#endif
+#if TILOG_IS_WITH_FILE_LINE_INFO == TRUE && TILOG_IS_WITH_FUNCTION_NAME == FALSE
+#define TILOG_INTERNAL_GET_SOURCE_LOCATION_STRING(constexpr_lv)                                                                            \
+	tilogspace::internal::string_concat(LEVEL_DETAIL(constexpr_lv), FILE_LINE_DETAIL)
+#endif
+#if TILOG_IS_WITH_FILE_LINE_INFO == FALSE && TILOG_IS_WITH_FUNCTION_NAME == FALSE
+#define TILOG_INTERNAL_GET_SOURCE_LOCATION_STRING(constexpr_lv) LEVEL_DETAIL(constexpr_lv)
+#endif
+
+#define TILOG_INTERNAL_GET_SOURCE_LOCATION(constexpr_lv)                                                                                   \
+	[] {                                                                                                                                   \
+		constexpr static auto source{ TILOG_INTERNAL_GET_SOURCE_LOCATION_STRING(constexpr_lv) };                                           \
+		tilogspace::internal::TiLogStringView sv(source.data(), source.size());                                                            \
+		return sv;                                                                                                                         \
+	}()
+
+#define TILOG_INTERNAL_GET_SOURCE_LOCATION_DYNAMIC_LV(lv)                                                                                  \
+	std::array<tilogspace::internal::TiLogStringView, 10>{ TILOG_INTERNAL_GET_SOURCE_LOCATION(tilogspace::ELevel::ALWAYS - 3),             \
+														   TILOG_INTERNAL_GET_SOURCE_LOCATION(tilogspace::ELevel::ALWAYS - 2),             \
+														   TILOG_INTERNAL_GET_SOURCE_LOCATION(tilogspace::ELevel::ALWAYS - 1),             \
+														   TILOG_INTERNAL_GET_SOURCE_LOCATION(tilogspace::ELevel::ALWAYS),                 \
+														   TILOG_INTERNAL_GET_SOURCE_LOCATION(tilogspace::ELevel::FATAL),                  \
+														   TILOG_INTERNAL_GET_SOURCE_LOCATION(tilogspace::ELevel::ERROR),                  \
+														   TILOG_INTERNAL_GET_SOURCE_LOCATION(tilogspace::ELevel::WARN),                   \
+														   TILOG_INTERNAL_GET_SOURCE_LOCATION(tilogspace::ELevel::INFO),                   \
+														   TILOG_INTERNAL_GET_SOURCE_LOCATION(tilogspace::ELevel::DEBUG),                  \
+														   TILOG_INTERNAL_GET_SOURCE_LOCATION(tilogspace::ELevel::VERBOSE) }[lv]
+
+#define TILOG_INTERNAL_CREATE_TILOG_STREAM_DYNAMIC_LV(mod, lv, ...)                                                                        \
+	tilogspace::CreateNewTiLogStream<>(TILOG_INTERNAL_GET_SOURCE_LOCATION_DYNAMIC_LV(lv),lv,mod)
+
+#define TILOG_INTERNAL_CREATE_TILOG_STREAM(mod, lv, ...) tilogspace::CreateNewTiLogStream<lv, mod>(TILOG_INTERNAL_GET_SOURCE_LOCATION(lv))
 // clang-format on
 
 //------------------------------------------define micro for user------------------------------------------//
