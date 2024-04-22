@@ -998,13 +998,12 @@ namespace tilogspace
 			ThreadLocalSpinMutex spinMtx;	 // protect cache
 
 			mempoolspace::local_mempool* lpool;
-			TiLogStream* noUseStream;
 			const String* tid;
 			std::mutex thrdExistMtx;
 			std::condition_variable thrdExistCV;
 
 			explicit ThreadStru(TiLogCore* core, size_t cacheSize)
-				: pCore(core), qCache(), spinMtx(), lpool(get_local_mempool()), noUseStream(TiLogStreamHelper::get_no_used_stream()),
+				: pCore(core), qCache(), spinMtx(), lpool(get_local_mempool()),
 				  tid(GetThreadIDString()), thrdExistMtx(), thrdExistCV()
 			{
 				DEBUG_PRINTI("ThreadStru ator pCore %p this %p tid [%p %s]\n", pCore, this, tid, tid->c_str());
@@ -1016,7 +1015,6 @@ namespace tilogspace
 				uint32_t refcnt = DecTidStrRefCnt(tid);
 				if (refcnt == 0)
 				{
-					TiLogStreamHelper::free_no_used_stream(noUseStream);
 					free_local_mempool(lpool);
 					DEBUG_PRINTI("ThreadStru dtor pCore %p this %p tid [%p %s]\n", pCore, this, tid, tid->c_str());
 					delete (tid);
@@ -1632,6 +1630,7 @@ namespace tilogspace
 			};
 			TiLogMap_t tilogmap;
 			mempoolspace::mempool mpool;
+			TiLogStream nullstream{ EPlaceHolder{},false };
 
 			static_assert(GetArgsNum<TILOG_REGISTER_MODULES>() == TILOG_MODULE_SPECS_SIZE, "fatal error,must be equal");
 
@@ -1666,7 +1665,11 @@ namespace tilogspace
 					for_index(i, mods, Functor(), &engines[i]);
 				}
 			}
-			~TiLogEngines() { engines.~engine_t(); }
+			~TiLogEngines()
+			{
+				nullstream.markNullStreamCanBeFreed();
+				engines.~engine_t();
+			}
 		};
 
 		void TiLogPrinterData::init()
@@ -3044,6 +3047,7 @@ namespace tilogspace
 		InitClocks();
 		TiLogEngines::init();
 		this->mods = &TiLogEngines::getRInstance().mods;
+		this->nullstream = &TiLogEngines::getRInstance().nullstream;
 		TICLOG << "TiLog " << &TiLog::getRInstance() << " TiLogEngines " << TiLogEngines::getInstance() << " in thrd "
 			   << std::this_thread::get_id() << '\n';
 	}

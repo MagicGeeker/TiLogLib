@@ -1551,7 +1551,7 @@ namespace tilogspace
 			I = 'I',
 			D = 'D',
 			V = 'V',
-			NO_USE = 'x',
+			NULL_STREAM = 'x',
 			INVALID = 'y',
 			FREED = 'z'
 		};
@@ -1921,9 +1921,7 @@ namespace tilogspace
 				return this->writend(std::forward<Args>(args)...);
 			}
 
-			inline void request_new_size(const size_type new_size) { ((this_type)this)->do_request_new_size(new_size); }
-
-			inline void do_request_new_size(const size_type new_size) { ensureCap(new_size + size()); }
+			inline void request_new_size(const size_type new_size) { ensureCap(new_size + size()); }
 
 			inline void ensureCap(size_type ensure_cap)
 			{
@@ -2524,6 +2522,7 @@ namespace tilogspace
 
 	private:
 		TiLogMods* mods;
+		TiLogStream* nullstream;
 
 	public:
 		template <ETiLogModule mod>
@@ -2532,6 +2531,8 @@ namespace tilogspace
 			return std::get<mod>(*getRInstance().mods);
 		}
 		static TiLogModBase& GetMoudleBaseRef(ETiLogModule mod);
+
+		inline TiLogStream* GetNullStream() { return nullstream; }
 
 		TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_INSIDE(TiLog)
 
@@ -2629,8 +2630,6 @@ namespace internal
 
 		inline static TiLogStringView str_view(const TiLogBean* p);
 		inline static void DestroyPushedTiLogBean(const Vector<TiLogBean*>& to_free, TiLogStreamMemoryManagerCache& cache);
-		inline static TiLogStream* get_no_used_stream();
-		inline static void free_no_used_stream(TiLogStream* p);
 		template <typename... Args>
 		static void mini_format_impl(TiLogStream& outs, TiLogStringView fmt, std::tuple<Args...>&& args);
 		template <typename... Args>
@@ -2664,9 +2663,9 @@ namespace internal
 			ext()->level = (char)ELogLevelFlag::INVALID;
 		}
 		// move constructor
-		inline TiLogStream(TiLogStream&& rhs) noexcept : StringType(std::move(rhs)) { rhs.bindToNoUseStream(); }
+		inline TiLogStream(TiLogStream&& rhs) noexcept : StringType(std::move(rhs)) { rhs.bindToNullStream(); }
 		// make a empty stream
-		inline explicit TiLogStream(EPlaceHolder) noexcept : StringType(EPlaceHolder{}) { bindToNoUseStream(); }
+		inline explicit TiLogStream(EPlaceHolder) noexcept : StringType(EPlaceHolder{}) { bindToNullStream(); }
 
 		// make a valid stream
 		inline TiLogStream(ETiLogModule mod, uint32_t lv, const char* source_location_str, size_t source_location_size)
@@ -2700,7 +2699,7 @@ namespace internal
 				DEBUG_RUN(TiLogBean::check(this->ext()));
 				TiLog::GetMoudleBaseRef(ext()->mod).PushLog(this->ext());
 				// goto next case
-			case ELogLevelFlag::NO_USE:
+			case ELogLevelFlag::NULL_STREAM:
 				// no need set pCore = nullptr,do nothing and shortly call do_overwrited_super_destructor
 				break;
 			case ELogLevelFlag::INVALID:
@@ -2826,7 +2825,7 @@ namespace internal
 	protected:
 		inline TiLogStream& resetLogLevel(ELevel lv)
 		{
-			if (!isNoUsedStream()) { this->ext()->level = LOG_PREFIX[lv]; }
+			if (!isNullStream()) { this->ext()->level = LOG_PREFIX[lv]; }
 			return *this;
 		}
 
@@ -2861,40 +2860,18 @@ namespace internal
 			}
 			return *this;
 		}
-		// special constructor for s_pNoUsedStream
-		inline TiLogStream(EPlaceHolder, bool) : StringType(EPlaceHolder{}, TILOG_NO_USED_STREAM_LENGTH) { setAsNoUsedStream(); }
-		inline bool isNoUsedStream() { return ext()->level == (char)ELogLevelFlag::NO_USE; }
-		inline void setAsNoUsedStream() { ext()->level = (char)ELogLevelFlag::NO_USE; }
-		inline void bindToNoUseStream() { this->pCore = get_no_used_stream()->pCore; }
+	public:	
+		// special constructor for nullstream
+		inline TiLogStream(EPlaceHolder, bool) : StringType(EPlaceHolder{}, TILOG_NO_USED_STREAM_LENGTH) { markAsNullStream(); }
+		inline bool isNullStream() { return ext()->level == (char)ELogLevelFlag::NULL_STREAM; }
+		inline void markAsNullStream() { ext()->level = (char)ELogLevelFlag::NULL_STREAM; }
+		inline void markNullStreamCanBeFreed(){ext()->level = (char)ELogLevelFlag::INVALID;}
+		inline void bindToNullStream() { this->pCore = TiLog::getRInstance().GetNullStream()->pCore; }
 
 	private:
 		// force overwrite super destructor,do nothing
 		inline void do_destructor() {}
 
-		// force overwrite super class request_new_size
-		inline void do_request_new_size(size_type new_size)
-		{
-			size_type pre_cap = capacity();
-			size_type pre_size = size();
-			size_type ensure_cap = pre_size + new_size;
-			DEBUG_ASSERT3(pre_size <= ensure_cap && new_size <= ensure_cap, pre_size, new_size, ensure_cap);
-			if (ensure_cap <= pre_cap) { return; }
-
-			if (!isNoUsedStream())
-			{
-				ensureCapNoCheck(ensure_cap);
-			} else
-			{
-				if (pre_cap >= new_size)
-				{
-					pCore->size = 0;	// force set size=0
-				} else
-				{
-					ensureCapNoCheck(ensure_cap);
-					get_no_used_stream()->pCore = this->pCore;	 // update the s_pNoUsedStream->pCore
-				}
-			}
-		}
 		inline void do_malloc(const size_type size, const size_type cap)
 		{
 			DEBUG_ASSERT(size <= cap);
@@ -2920,12 +2897,6 @@ namespace internal
 		}
 		inline void do_free() { internal::TiLogStreamMemoryManager::tifree(this->pCore); }
 
-
-		inline static TiLogStream* get_no_used_stream()
-		{
-			static thread_local auto s_pNoUsedStream = new TiLogStream(EPlaceHolder{}, false);
-			return s_pNoUsedStream;
-		}
 	};
 #undef TILOG_INTERNAL_STRING_TYPE
 
@@ -2948,12 +2919,6 @@ namespace internal
 			{
 				TiLogStreamHelper::memmgr_type::tifree(&cache.cache0.front(), cache.cache0.size(), cache.cache1);
 			}
-		}
-		inline TiLogStream* TiLogStreamHelper::get_no_used_stream() { return TiLogStream::get_no_used_stream(); }
-		inline void TiLogStreamHelper::free_no_used_stream(TiLogStream* p)
-		{
-			p->ext()->level = (char)ELogLevelFlag::INVALID;
-			delete (p);
 		}
 
 		struct Functor
