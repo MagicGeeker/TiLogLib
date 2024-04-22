@@ -2497,6 +2497,11 @@ namespace tilogspace
 	{
 	public:
 		inline TiLogModFile() { mod = ETiLogModule::TILOG_MODULE_GLOBAL_FILE; }
+		inline constexpr ELevel GetLogLevel() const
+		{
+			return TILOG_ACTIVE_MODULE_SPECS[ETiLogModule::TILOG_MODULE_GLOBAL_FILE].STATIC_LOG_LEVEL;
+		}
+		inline void SetLogLevel(ELevel level){};
 	};
 
 	class TiLogModTerminal : public TiLogModBase
@@ -2549,7 +2554,6 @@ namespace tilogspace
 	}	 // namespace internal
 	TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_FUNC_IMPL(TiLog,tilogbuf)
 
-	class TiLogNoneStream;
 	namespace internal
 	{
 		struct TiLogStreamHelper;
@@ -2662,18 +2666,12 @@ namespace internal
 		// move constructor
 		inline TiLogStream(TiLogStream&& rhs) noexcept : StringType(std::move(rhs)) { rhs.bindToNoUseStream(); }
 		// make a empty stream
-		inline TiLogStream(const TiLogNoneStream& rhs) noexcept : StringType(EPlaceHolder{}) { bindToNoUseStream(); }
 		inline explicit TiLogStream(EPlaceHolder) noexcept : StringType(EPlaceHolder{}) { bindToNoUseStream(); }
 
 		// make a valid stream
 		inline TiLogStream(ETiLogModule mod, uint32_t lv, const char* source_location_str, size_t source_location_size)
 			: StringType(EPlaceHolder{})
 		{
-			if (lv > TiLog::GetMoudleBaseRef(mod).GetLogLevel())
-			{
-				bindToNoUseStream();
-				return;
-			}
 			create(TILOG_SINGLE_LOG_RESERVE_LEN);
 			TiLogBean& bean = *ext();
 			bean.mod = mod;
@@ -2738,7 +2736,7 @@ namespace internal
 		}
 
 		template <typename... Args>
-		inline TiLogStream& print_obj(Args&&... args)
+		inline TiLogStream& prints(Args&&... args)
 		{
 			return appends(std::forward<Args>(args)...);
 		}
@@ -2750,6 +2748,7 @@ namespace internal
 		}
 
 	public:
+		inline constexpr operator bool() const { return true; }
 		inline TiLogStream& operator<<(bool b) { return (b ? append("true", 4) : append("false", 5)), *this; }
 		inline TiLogStream& operator<<(unsigned char c) { return append(c), *this; }
 		inline TiLogStream& operator<<(signed char c) { return append(c), *this; }
@@ -2962,7 +2961,7 @@ namespace internal
 			template <typename T>
 			inline void operator()(TiLogStream& out, const T& t) const
 			{
-				out.print_obj(t);
+				out.prints(t);
 			}
 		};
 
@@ -3085,34 +3084,18 @@ namespace internal
 		}
 	}	 // namespace internal
 
-	class TiLogNoneStream
+	class TiLogStreamEx
 	{
 	public:
-		template <typename... Args>
-		inline TiLogNoneStream(Args&&... args) noexcept {};
+		inline TiLogStreamEx(TiLogStream&& s0, bool should_log0) : s(std::move(s0)), should_log(should_log0){};
 
-		inline ~TiLogNoneStream() noexcept = default;
+		inline TiLogStream& Stream() noexcept { return s; }
 
-		inline TiLogNoneStream(const TiLogNoneStream&) = delete;
-		inline TiLogNoneStream(TiLogNoneStream&&) noexcept {}
+		inline bool ShouldLog() noexcept { return should_log; }
 
-		template <typename T>
-		inline TiLogNoneStream& operator<<(T&&) noexcept
-		{
-			return *this;
-		}
-
-		template <typename... Args>
-		inline TiLogNoneStream& print_obj(Args&&...) noexcept
-		{
-			return *this;
-		}
-		inline TiLogNoneStream& printf(const char* fmt, ...) noexcept { return *this; }
-		template <typename... Args>
-		inline TiLogNoneStream& print(internal::TiLogStringView fmt, Args&&... args) noexcept
-		{
-			return *this;
-		}
+	protected:
+		TiLogStream s;
+		const bool should_log;
 	};
 }	 // namespace tilogspace
 
@@ -3145,17 +3128,15 @@ namespace tilogspace
 		return b0 && all_true_dynamic(b...);
 	}
 
-
-	template <uint32_t level, ETiLogModule MOD = tilogspace::ETiLogModule::TILOG_MODULE_START>
-	inline static auto CreateNewTiLogStream(tilogspace::internal::TiLogStringView s) ->
-		typename std::conditional<level <= GetLogLevel(MOD), TiLogStream, TiLogNoneStream>::type
+	template <ETiLogModule mod, uint32_t level>
+	inline constexpr bool should_log()
 	{
-		return { MOD, level, s.data(), s.size() };
+		return level <= TiLog::GetMoudleRef<mod>().GetLogLevel();
 	}
 
-	template <typename=void>
-	inline static TiLogStream CreateNewTiLogStream(
-		tilogspace::internal::TiLogStringView s,uint32_t level, ETiLogModule MOD = tilogspace::ETiLogModule::TILOG_MODULE_START)
+	inline bool should_log(ETiLogModule mod, uint32_t level) { return level <= TiLog::GetMoudleBaseRef(mod).GetLogLevel(); }
+
+	inline static TiLogStream CreateNewTiLogStream(tilogspace::internal::TiLogStringView s, uint32_t level, ETiLogModule MOD)
 	{
 		return { MOD, level, s.data(), s.size() };
 	}
@@ -3239,33 +3220,48 @@ namespace tilogspace
 														   TILOG_INTERNAL_GET_SOURCE_LOCATION(tilogspace::ELevel::INFO),                   \
 														   TILOG_INTERNAL_GET_SOURCE_LOCATION(tilogspace::ELevel::DEBUG),                  \
 														   TILOG_INTERNAL_GET_SOURCE_LOCATION(tilogspace::ELevel::VERBOSE) }[lv]
-
-#define TILOG_INTERNAL_CREATE_TILOG_STREAM_DYNAMIC_LV(mod, lv, ...)                                                                        \
-	tilogspace::CreateNewTiLogStream<>(TILOG_INTERNAL_GET_SOURCE_LOCATION_DYNAMIC_LV(lv),lv,mod)
-
-#define TILOG_INTERNAL_CREATE_TILOG_STREAM(mod, lv, ...) tilogspace::CreateNewTiLogStream<lv, mod>(TILOG_INTERNAL_GET_SOURCE_LOCATION(lv))
 // clang-format on
 
 //------------------------------------------define micro for user------------------------------------------//
+// force create a TiLogStream, regardless of what lv is
+#define TILOG_STREAM_CREATE_DLV(mod, lv) tilogspace::CreateNewTiLogStream(TILOG_INTERNAL_GET_SOURCE_LOCATION_DYNAMIC_LV(lv), lv, mod)
+// same as TILOG_STREAM_CREATE_DLV, and use constexpr mod,lv (better performace)
+#define TILOG_STREAM_CREATE(mod, lv) tilogspace::CreateNewTiLogStream(TILOG_INTERNAL_GET_SOURCE_LOCATION(lv), lv, mod)
+// create a TiLogStreamEx
+#define TILOG_STREAMEX_CREATE(mod, lv)                                                                                                     \
+	tilogspace::TiLogStreamEx(                                                                                                             \
+		tilogspace::CreateNewTiLogStream(TILOG_INTERNAL_GET_SOURCE_LOCATION(lv), lv, mod), tilogspace::should_log(mod, lv))
 
 #define TICOUT (std::unique_lock<tilogspace::sync_ostream_mtx_t>(tilogspace::ti_iostream_mtx->ticout_mtx), std::cout)
 #define TICERR (std::unique_lock<tilogspace::sync_ostream_mtx_t>(tilogspace::ti_iostream_mtx->ticerr_mtx), std::cerr)
 #define TICLOG (std::unique_lock<tilogspace::sync_ostream_mtx_t>(tilogspace::ti_iostream_mtx->ticlog_mtx), std::clog)
 
-#define TILOGA TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::TILOG_MODULE_START, tilogspace::ELevel::ALWAYS)
-#define TILOGF TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::TILOG_MODULE_START, tilogspace::ELevel::FATAL)
-#define TILOGE TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::TILOG_MODULE_START, tilogspace::ELevel::ERROR)
-#define TILOGW TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::TILOG_MODULE_START, tilogspace::ELevel::WARN)
-#define TILOGI TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::TILOG_MODULE_START, tilogspace::ELevel::INFO)
-#define TILOGD TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::TILOG_MODULE_START, tilogspace::ELevel::DEBUG)
-#define TILOGV TILOG_INTERNAL_CREATE_TILOG_STREAM(tilogspace::TILOG_MODULE_START, tilogspace::ELevel::VERBOSE)
+#define TILOGA TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, tilogspace::ELevel::ALWAYS)
+#define TILOGF TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, tilogspace::ELevel::FATAL)
+#define TILOGE TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, tilogspace::ELevel::ERROR)
+#define TILOGW TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, tilogspace::ELevel::WARN)
+#define TILOGI TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, tilogspace::ELevel::INFO)
+#define TILOGD TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, tilogspace::ELevel::DEBUG)
+#define TILOGV TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, tilogspace::ELevel::VERBOSE)
 
-// constexpr mod and level only (better performace)
-//(constexpr mod enum,constexpr log level,constexpr bool...) if any of ... is false ,will NOT log
-#define TILOG_FAST(constexpr_mod, constexpr_lv, ...) TILOG_INTERNAL_CREATE_TILOG_STREAM(constexpr_mod, constexpr_lv, ##__VA_ARGS__)
+#define TIDLOGA TIDLOG(TILOG_GET_DEFAULT_MODULE_ENUM, tilogspace::ELevel::ALWAYS)
+#define TIDLOGF TIDLOG(TILOG_GET_DEFAULT_MODULE_ENUM, tilogspace::ELevel::FATAL)
+#define TIDLOGE TIDLOG(TILOG_GET_DEFAULT_MODULE_ENUM, tilogspace::ELevel::ERROR)
+#define TIDLOGW TIDLOG(TILOG_GET_DEFAULT_MODULE_ENUM, tilogspace::ELevel::WARN)
+#define TIDLOGI TIDLOG(TILOG_GET_DEFAULT_MODULE_ENUM, tilogspace::ELevel::INFO)
+#define TIDLOGD TIDLOG(TILOG_GET_DEFAULT_MODULE_ENUM, tilogspace::ELevel::DEBUG)
+#define TIDLOGV TIDLOG(TILOG_GET_DEFAULT_MODULE_ENUM, tilogspace::ELevel::VERBOSE)
+
 // support dynamic mod and log level
-//(mod enum,log level,bool...) if any of ... is false ,will NOT log
-#define TILOG(mod, lv, ...) TILOG_INTERNAL_CREATE_TILOG_STREAM_DYNAMIC_LV(mod, lv, ##__VA_ARGS__)
+#define TIDLOG(mod, lv) tilogspace::should_log(mod, lv) && TILOG_STREAM_CREATE_DLV(mod, lv)
+// constexpr mod and level only (better performace)
+#define TILOG(constexpr_mod, constexpr_lv)                                                                                                 \
+	tilogspace::should_log<constexpr_mod, constexpr_lv>() && TILOG_STREAM_CREATE(constexpr_mod, constexpr_lv)
+
+#define TILOGEX(stream) stream.ShouldLog() && stream.Stream()
+
+#define TIIF(...) tilogspace::all_true_dynamic<>(__VA_ARGS__)
+
 //------------------------------------------end define micro for user------------------------------------------//
 
 

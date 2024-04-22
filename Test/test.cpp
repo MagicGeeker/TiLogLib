@@ -84,14 +84,15 @@ static bool b0_file_static_log_test = []() {
 	TEST_CASE_COUT << "file_static_log_test_____________________\n";
 	TICOUT << "Prepare file_static_log_test_____________________\n";
 
-	auto s = std::move(TILOGE.printf("long string \n"));
+	auto s = TILOG_STREAMEX_CREATE(TILOG_GET_DEFAULT_MODULE_ENUM, tilogspace::ELevel::ERROR);
+	TILOGEX(s).printf("long string \n");
 	for (uint32_t i = 0; i < 10000; i++)
 	{
-		s << (char('a' + i % 26));
+		TILOGEX(s) << (char('a' + i % 26));
 		if (i % 26 != 25)
-			s << " ";
+			TILOGEX(s) << " ";
 		else
-			s << " " << i / 26 << '\n';
+			TILOGEX(s) << " " << i / 26 << '\n';
 	}
 	return true;
 }();
@@ -642,12 +643,12 @@ TEST_CASE("terminal_single_thread_long_string_log_test_____________________")
 	MultiThreadTest<testLoop_t>(
 		"terminal_single_thread_long_string_log_test_____________________", tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL,
 		[](int32_t index) {
-			auto x = std::move(TILOGE);
+			auto x = TILOG_STREAMEX_CREATE(TILOG_GET_DEFAULT_MODULE_ENUM,tilogspace::ELevel::ERROR);
 			for (uint32_t j = 0; j < 1000; j++)
 			{
-				x << (char('R' + j % 11));
+				TILOGEX(x) << (char('R' + j % 11));
 			}
-			x << "\n";
+			TILOGEX(x) << "\n";
 		});
 }
 #endif
@@ -723,13 +724,14 @@ TEST_CASE("terminal_multi_way_log_test_____________________")
 	TILOGE << 54231.0f;
 	TILOGE << 54231.0e6;
 	TILOGE << std::string("e3");
-	TILOGE.print_obj("e4", "e5");
-	TILOGV.print_obj(" e6 ", 'e', 101, " e7 ", 00.123f, " e8 ", 54231.0e6);
+	TILOGE.prints("e4", "e5");
+	TILOGV.prints(" e6 ", 'e', 101, " e7 ", 00.123f, " e8 ", 54231.0e6);
 	TILOGV.printf("%d %s %llf", 888, " e9 ", 0.3556);
-	(TILOGV << " e10 ").printf("abc %d %lld", 123, 456LL);
-	(TILOGV << "666").printf("abc %0999999999999999d %", 123, 456LL);	  // TODO error?
-	(TILOGV << "6601000010000000000100000000100000000000230100000000000230002300000000236").printf(
+	TILOGV.prints(" e10 ").printf("abc %d %lld", 123, 456LL);
+	TILOGV.prints("666").printf("abc %0999999999999999d %", 123, 456LL);	  // TODO error?
+	TILOGV.prints("6601000010000000000100000000100000000000230100000000000230002300000000236").printf(
 		"abc 0100000000010000000000101000000000002300000000000023002301000000000002300023 %d %lld", 123, 456LL);
+	TILOGA.prints("e12 ").printf("%d %f ", 1, 3.58).print("{} {} ", 99.9, -71551);
 
 	TILOGI << "e20" << std::boolalpha;
 	TILOGI << "e21" << std::endl;
@@ -738,20 +740,20 @@ TEST_CASE("terminal_multi_way_log_test_____________________")
 
 	{
 		using namespace tilogspace;
-		TILOG_FAST(TILOG_GET_DEFAULT_MODULE_ENUM, ALWAYS) << "e24.0 fast";
+		TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, ALWAYS) << "e24.0 fast";
 		TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, ALWAYS) << "e24.1 nofast";
 
-		TILOG_FAST(TILOG_GET_DEFAULT_MODULE_ENUM, ALWAYS, ON_DEV) << "e25 fast only print on debug exe";
-		TILOG_FAST(TILOG_GET_DEFAULT_MODULE_ENUM, ALWAYS, ON_RELEASE) << "e26 fast only print on release exe";
-		TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, WARN, ON_DEV) << "e27 only print on debug exe";
-		TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, WARN, ON_RELEASE) << "e28 only print on release exe";
-		TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, INFO, 10 > 8) << "e29 10>8";
-		TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, ERROR, 10 < 8) << "e30 10<8";
-		TILOG_FAST(TILOG_GET_DEFAULT_MODULE_ENUM, INFO, true, 1 + 1 == 2, 2 * 3 == 6) << "e30.0 1 + 1 == 2, 2 * 3 == 6";
-		TILOG_FAST(TILOG_GET_DEFAULT_MODULE_ENUM, ERROR, true, 1 + 1 == 2, 2 * 3 == 7) << "e30.1 1 + 1 == 2, 2 * 3 == 7";
+		TIIF(ON_DEV) && TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, ALWAYS) << "e25 fast only print on debug exe";
+		TIIF(ON_RELEASE) && TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, ALWAYS ) << "e26 fast only print on release exe";
+		TIIF(ON_DEV) && TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, WARN) << "e27 only print on debug exe";
+		TIIF(ON_RELEASE) && TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, WARN) << "e28 only print on release exe";
+		TIIF(10 > 8) && TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, INFO) << "e29 10>8";
+		TIIF(10 < 8) && TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, ERROR) << "e30 10<8";
+		TIIF(true, 1 + 1 == 2, 2 * 3 == 6) && TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, INFO) << "e30.0 1 + 1 == 2, 2 * 3 == 6";
+		TIIF(true, 1 + 1 == 2, 2 * 3 == 7) && TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, ERROR) << "e30.1 1 + 1 == 2, 2 * 3 == 7";
 		int x = 1, y = 2;
-		TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, INFO, true, x == 1, y == 2) << "e30.2 x==1,y==2";
-		TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, ERROR, true, x == 10, y == 2) << "e30.3 x==10,y==2";
+		TIIF(ON_DEV, true, x == 1, y == 2) && TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, INFO) << "e30.2 x==1,y==2";
+		TIIF(ON_DEV, true, x == 10, y == 2) && TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, ERROR) << "e30.3 x==10,y==2";
 	}
 	{
 		TILOGI.print("\n\n");
@@ -823,13 +825,13 @@ TEST_CASE("user_module_test_____________________")
 			switch (j % 3)
 			{
 			case 0:
-				TILOG_FAST(tilogspace::TILOG_MODULE_0, tilogspace::ELevel::ERROR) << "mod0 index= " << index << " j= " << j;
+				TILOG(tilogspace::TILOG_MODULE_0, tilogspace::ELevel::ERROR) << "mod0 index= " << index << " j= " << j;
 				break;
 			case 1:
-				TILOG_FAST(tilogspace::TILOG_MODULE_1, tilogspace::ELevel::ERROR) << "mod1 index= " << index << " j= " << j;
+				TILOG(tilogspace::TILOG_MODULE_1, tilogspace::ELevel::ERROR) << "mod1 index= " << index << " j= " << j;
 				break;
 			case 2:
-				TILOG_FAST(tilogspace::TILOG_MODULE_2, tilogspace::ELevel::ERROR) << "mod2 index= " << index << " j= " << j;
+				TILOG(tilogspace::TILOG_MODULE_2, tilogspace::ELevel::ERROR) << "mod2 index= " << index << " j= " << j;
 				break;
 			}
 		}
