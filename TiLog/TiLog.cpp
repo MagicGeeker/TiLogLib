@@ -1606,12 +1606,15 @@ namespace tilogspace
 
 		struct TiLogEngine
 		{
-			TiLogModBase* tiLogModBase;
-			ETiLogModule mod;
+			TiLogModBase tiLogModBase;
+			mod_ids_t mod;
 			TiLogPrinterManager tiLogPrinterManager;
 			TiLogCore tiLogCore;
-			inline TiLogEngine() : tiLogModBase(), mod(), tiLogPrinterManager(this), tiLogCore(this) {}
-			inline TiLogEngine(TiLogModBase* b) : tiLogModBase(b), mod(b->mod), tiLogPrinterManager(this), tiLogCore(this) {}
+			inline TiLogEngine(mod_ids_t m) : tiLogModBase(), mod(m), tiLogPrinterManager(this), tiLogCore(this)
+			{
+				tiLogModBase.engine = this;
+				tiLogModBase.mod = mod;
+			}
 		};
 
 		struct TiLogEngines
@@ -1621,7 +1624,6 @@ namespace tilogspace
 				constexpr static uint32_t CONCURRENT = TILOG_MAY_MAX_RUNNING_THREAD_NUM;
 			};
 			TiLogConcurrentHashMap<const String*, uint32_t, ThreadIdStrRefCountFeat> threadIdStrRefCount;
-			TiLogMods mods;
 			using engine_t = std::array<TiLogEngine, TILOG_MODULE_SPECS_SIZE>;
 			union
 			{
@@ -1631,38 +1633,14 @@ namespace tilogspace
 			TiLogMap_t tilogmap;
 			mempoolspace::mempool mpool;
 			TiLogStream nullstream{ EPlaceHolder{},false };
-
-			static_assert(GetArgsNum<TILOG_REGISTER_MODULES>() == TILOG_MODULE_SPECS_SIZE, "fatal error,must be equal");
-
+			
 			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE(TiLogEngines)
-
-			template <typename T>	 // T is TiLogModBase
-			inline void operator()(TiLogEngine* e, T& t) const
-			{
-				t.engine = e;
-				new (e) TiLogEngine(&t);	// init engines
-			}
-
-			template <std::size_t I = 0, typename FuncT, typename... Tp>
-			inline typename std::enable_if<I == sizeof...(Tp), void>::type for_index(int, std::tuple<Tp...>&, FuncT, TiLogEngine* e)
-			{
-			}
-
-			template <std::size_t I = 0, typename FuncT, typename... Tp>
-				inline typename std::enable_if
-				< I<sizeof...(Tp), void>::type for_index(int index, std::tuple<Tp...>& t, FuncT f, TiLogEngine* e)
-			{
-				if (index == 0)
-					this->template operator()(e, std::get<I>(t));
-				else
-					for_index<I + 1, FuncT, Tp...>(index - 1, t, f, e);
-			}
 
 			TiLogEngines()
 			{
 				for (int i = 0; i < engines.size(); i++)
 				{
-					for_index(i, mods, Functor(), &engines[i]);
+					new (&engines[i]) TiLogEngine(TILOG_ACTIVE_MODULE_SPECS[i].mod);
 				}
 			}
 			~TiLogEngines()
@@ -1896,7 +1874,7 @@ namespace tilogspace
 
 		TiLogPrinterManager::TiLogPrinterManager(TiLogEngine* e)
 			: m_engine(e), m_printers(GetPrinterNum()), m_dest(TILOG_ACTIVE_MODULE_SPECS[e->mod].defaultEnabledPrinters),
-			  m_level(TILOG_ACTIVE_MODULE_SPECS[e->mod].STATIC_LOG_LEVEL)
+			  m_level(TILOG_ACTIVE_MODULE_SPECS[e->mod].defaultLogLevel)
 		{
 			addPrinter(CreatePrinter(e, EPrinterID::PRINTER_ID_NONE));
 			for (EPrinterID x = PRINTER_ID_BEGIN; x < PRINTER_ID_MAX; x = (EPrinterID)(x << 1U))
@@ -3038,7 +3016,7 @@ namespace tilogspace
 		}
 	}	 // namespace internal
 
-	TiLogModBase& TiLog::GetMoudleBaseRef(ETiLogModule mod) { return *TiLogEngines::getRInstance().engines[mod].tiLogModBase; }
+	TiLogModBase& TiLog::GetMoudleBaseRef(mod_ids_t mod) { return TiLogEngines::getRInstance().engines[mod].tiLogModBase; }
 	TiLog::TiLog()
 	{
 		ctor_iostream_mtx();
@@ -3046,7 +3024,6 @@ namespace tilogspace
 		ctor_single_instance_printers();
 		InitClocks();
 		TiLogEngines::init();
-		this->mods = &TiLogEngines::getRInstance().mods;
 		this->nullstream = &TiLogEngines::getRInstance().nullstream;
 		TICLOG << "TiLog " << &TiLog::getRInstance() << " TiLogEngines " << TiLogEngines::getInstance() << " in thrd "
 			   << std::this_thread::get_id() << '\n';
@@ -3058,7 +3035,6 @@ namespace tilogspace
 			   << std::this_thread::get_id() << '\n';
 		TiLogEngines::uninit();
 		UnInitClocks();
-		this->mods = nullptr;
 		dtor_single_instance_printers();
 	}
 }	 // namespace tilogspace
