@@ -4,19 +4,20 @@
 #ifdef TILOG_MODULE_DECLARE
 namespace tilogspace
 {
-	enum ETiLogModuleEx : mod_ids_t
+	enum ETiLogModuleEx : mod_id_t
 	{
 		TILOG_MODULE_0 = 0,
 		TILOG_MODULE_1 = 1,
 		TILOG_MODULE_2 = 2,
 	};
 
-#define TILOG_GET_DEFAULT_MODULE_REF tilogspace::TiLog::GetMoudleBaseRef(tilogspace::TILOG_MODULE_0)
-#define TILOG_GET_DEFAULT_MODULE_ENUM tilogspace::TILOG_MODULE_0
+#ifndef TILOG_CURRENT_MODULE_ID
+#define TILOG_CURRENT_MODULE_ID tilogspace::TILOG_MODULE_0
+#endif
 
 
 	constexpr static TiLogModuleSpec TILOG_ACTIVE_MODULE_SPECS[] = {
-		{ TILOG_MODULE_0, "mod0", "a:/mod0/", PRINTER_TILOG_FILE, VERBOSE, false },
+		{ TILOG_MODULE_0, "mod0", "a:/mod0/", PRINTER_TILOG_FILE, VERBOSE, true },
 		{ TILOG_MODULE_1, "mod1", "a:/mod1/", PRINTER_TILOG_FILE, VERBOSE, false },
 		{ TILOG_MODULE_2, "mod2", "a:/mod2/", PRINTER_TILOG_FILE, VERBOSE, false },
 	};

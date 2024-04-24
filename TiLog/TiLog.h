@@ -271,8 +271,8 @@ namespace tilogspace
 		PRINTER_ID_MAX						// end with PRINTER_ID_MAX
 	};
 
-	using mod_ids_t = uint8_t;
-	enum ETiLogModule : mod_ids_t
+	using mod_id_t = uint8_t;
+	enum ETiLogModule : mod_id_t
 	{
 		TILOG_MODULE_START = 0,
 		//...// user defined mod id begin
@@ -285,7 +285,7 @@ namespace tilogspace
 
 	struct TiLogModuleSpec
 	{
-		mod_ids_t mod;
+		mod_id_t mod;
 		const char moduleName[32];
 		const char data[256];
 		printer_ids_t defaultEnabledPrinters;
@@ -302,8 +302,9 @@ namespace tilogspace
 namespace tilogspace
 {
 	
-#define TILOG_GET_DEFAULT_MODULE_REF tilogspace::TiLog::GetMoudleBaseRef(tilogspace::TILOG_MODULE_START)
-#define TILOG_GET_DEFAULT_MODULE_ENUM tilogspace::TILOG_MODULE_START
+#ifndef TILOG_CURRENT_MODULE_ID
+#define TILOG_CURRENT_MODULE_ID tilogspace::TILOG_MODULE_START
+#endif
 
 
 	constexpr static TiLogModuleSpec TILOG_ACTIVE_MODULE_SPECS[] = {
@@ -314,6 +315,10 @@ namespace tilogspace
 	constexpr static size_t TILOG_MODULE_SPECS_SIZE = sizeof(TILOG_ACTIVE_MODULE_SPECS) / sizeof(TILOG_ACTIVE_MODULE_SPECS[0]);
 }	 // namespace tilogspace
 #endif
+
+#define TILOG_CURRENT_MODULE tilogspace::TiLog::GetMoudleBaseRef(TILOG_CURRENT_MODULE_ID)
+#define TILOG_MODULE(mod_id) tilogspace::TiLog::GetMoudleBaseRef(mod_id)
+
 // clang-format on
 
 
@@ -2341,7 +2346,7 @@ namespace tilogspace
 			const char* source_location_str;
 			size_t source_location_size;
 			char level;
-			mod_ids_t mod;
+			mod_id_t mod;
 
 			DEBUG_DECLARE(uint8_t tidlen)
 			DEBUG_CANARY_UINT64(flag3)
@@ -2478,7 +2483,7 @@ namespace tilogspace
 
 	protected:
 		internal::TiLogEngine* engine{};
-		mod_ids_t mod{};
+		mod_id_t mod{};
 	};
 
 
@@ -2490,7 +2495,7 @@ namespace tilogspace
 		TiLogStream* nullstream;
 
 	public:
-		static TiLogModBase& GetMoudleBaseRef(mod_ids_t mod);
+		static TiLogModBase& GetMoudleBaseRef(mod_id_t mod);
 
 		inline TiLogStream* GetNullStream() { return nullstream; }
 
@@ -2628,7 +2633,7 @@ namespace internal
 		inline explicit TiLogStream(EPlaceHolder) noexcept : StringType(EPlaceHolder{}) { bindToNullStream(); }
 
 		// make a valid stream
-		inline TiLogStream(mod_ids_t mod, uint32_t lv, const char* source_location_str, size_t source_location_size)
+		inline TiLogStream(mod_id_t mod, uint32_t lv, const char* source_location_str, size_t source_location_size)
 			: StringType(EPlaceHolder{})
 		{
 			create(TILOG_SINGLE_LOG_RESERVE_LEN);
@@ -3027,8 +3032,8 @@ namespace internal
 
 namespace tilogspace
 {
-	TILOG_FORCEINLINE constexpr ELevel GetDefaultLogLevel(mod_ids_t MOD) { return TILOG_ACTIVE_MODULE_SPECS[MOD].defaultLogLevel; }
-	TILOG_FORCEINLINE constexpr bool SupportDynamicLevel(mod_ids_t MOD) { return TILOG_ACTIVE_MODULE_SPECS[MOD].supportDynamicLogLevel; }
+	TILOG_FORCEINLINE constexpr ELevel GetDefaultLogLevel(mod_id_t MOD) { return TILOG_ACTIVE_MODULE_SPECS[MOD].defaultLogLevel; }
+	TILOG_FORCEINLINE constexpr bool SupportDynamicLevel(mod_id_t MOD) { return TILOG_ACTIVE_MODULE_SPECS[MOD].supportDynamicLogLevel; }
 
 	template <bool... b>
 	struct all_true;
@@ -3054,12 +3059,12 @@ namespace tilogspace
 		return b0 && all_true_dynamic(b...);
 	}
 
-	TILOG_FORCEINLINE constexpr bool should_log(mod_ids_t mod, uint32_t level)
+	TILOG_FORCEINLINE constexpr bool should_log(mod_id_t mod, uint32_t level)
 	{
 		return SupportDynamicLevel(mod) ? (level <= TiLog::GetMoudleBaseRef(mod).GetLogLevel()) : (level <= GetDefaultLogLevel(mod));
 	}
 
-	TILOG_FORCEINLINE TiLogStream CreateNewTiLogStream(tilogspace::internal::TiLogStringView s, uint32_t level, mod_ids_t MOD)
+	TILOG_FORCEINLINE TiLogStream CreateNewTiLogStream(tilogspace::internal::TiLogStringView s, uint32_t level, mod_id_t MOD)
 	{
 		return { MOD, level, s.data(), s.size() };
 	}
@@ -3159,21 +3164,21 @@ namespace tilogspace
 #define TICERR (std::unique_lock<tilogspace::sync_ostream_mtx_t>(tilogspace::ti_iostream_mtx->ticerr_mtx), std::cerr)
 #define TICLOG (std::unique_lock<tilogspace::sync_ostream_mtx_t>(tilogspace::ti_iostream_mtx->ticlog_mtx), std::clog)
 
-#define TILOGA TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, tilogspace::ELevel::ALWAYS)
-#define TILOGF TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, tilogspace::ELevel::FATAL)
-#define TILOGE TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, tilogspace::ELevel::ERROR)
-#define TILOGW TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, tilogspace::ELevel::WARN)
-#define TILOGI TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, tilogspace::ELevel::INFO)
-#define TILOGD TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, tilogspace::ELevel::DEBUG)
-#define TILOGV TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, tilogspace::ELevel::VERBOSE)
+#define TILOGA TILOG(TILOG_CURRENT_MODULE_ID, tilogspace::ELevel::ALWAYS)
+#define TILOGF TILOG(TILOG_CURRENT_MODULE_ID, tilogspace::ELevel::FATAL)
+#define TILOGE TILOG(TILOG_CURRENT_MODULE_ID, tilogspace::ELevel::ERROR)
+#define TILOGW TILOG(TILOG_CURRENT_MODULE_ID, tilogspace::ELevel::WARN)
+#define TILOGI TILOG(TILOG_CURRENT_MODULE_ID, tilogspace::ELevel::INFO)
+#define TILOGD TILOG(TILOG_CURRENT_MODULE_ID, tilogspace::ELevel::DEBUG)
+#define TILOGV TILOG(TILOG_CURRENT_MODULE_ID, tilogspace::ELevel::VERBOSE)
 
-#define TIDLOGA TIDLOG(TILOG_GET_DEFAULT_MODULE_ENUM, tilogspace::ELevel::ALWAYS)
-#define TIDLOGF TIDLOG(TILOG_GET_DEFAULT_MODULE_ENUM, tilogspace::ELevel::FATAL)
-#define TIDLOGE TIDLOG(TILOG_GET_DEFAULT_MODULE_ENUM, tilogspace::ELevel::ERROR)
-#define TIDLOGW TIDLOG(TILOG_GET_DEFAULT_MODULE_ENUM, tilogspace::ELevel::WARN)
-#define TIDLOGI TIDLOG(TILOG_GET_DEFAULT_MODULE_ENUM, tilogspace::ELevel::INFO)
-#define TIDLOGD TIDLOG(TILOG_GET_DEFAULT_MODULE_ENUM, tilogspace::ELevel::DEBUG)
-#define TIDLOGV TIDLOG(TILOG_GET_DEFAULT_MODULE_ENUM, tilogspace::ELevel::VERBOSE)
+#define TIDLOGA TIDLOG(TILOG_CURRENT_MODULE_ID, tilogspace::ELevel::ALWAYS)
+#define TIDLOGF TIDLOG(TILOG_CURRENT_MODULE_ID, tilogspace::ELevel::FATAL)
+#define TIDLOGE TIDLOG(TILOG_CURRENT_MODULE_ID, tilogspace::ELevel::ERROR)
+#define TIDLOGW TIDLOG(TILOG_CURRENT_MODULE_ID, tilogspace::ELevel::WARN)
+#define TIDLOGI TIDLOG(TILOG_CURRENT_MODULE_ID, tilogspace::ELevel::INFO)
+#define TIDLOGD TIDLOG(TILOG_CURRENT_MODULE_ID, tilogspace::ELevel::DEBUG)
+#define TIDLOGV TIDLOG(TILOG_CURRENT_MODULE_ID, tilogspace::ELevel::VERBOSE)
 
 // support dynamic mod and log level
 #define TIDLOG(mod, lv) tilogspace::should_log(mod, lv) && TILOG_STREAM_CREATE_DLV(mod, lv)

@@ -80,11 +80,11 @@ struct Student
 
 #ifdef file_static_log_test_____________________
 static bool b0_file_static_log_test = []() {
-	TILOG_GET_DEFAULT_MODULE_REF.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
+	TILOG_CURRENT_MODULE.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
 	TEST_CASE_COUT << "file_static_log_test_____________________\n";
 	TICOUT << "Prepare file_static_log_test_____________________\n";
 
-	auto s = TILOG_STREAMEX_CREATE(TILOG_GET_DEFAULT_MODULE_ENUM, tilogspace::ELevel::ERROR);
+	auto s = TILOG_STREAMEX_CREATE(TILOG_CURRENT_MODULE_ID, tilogspace::ELevel::ERROR);
 	TILOGEX(s).printf("long string \n");
 	for (uint32_t i = 0; i < 10000; i++)
 	{
@@ -155,7 +155,7 @@ TEST_CASE("multi_thread_log_test_____________________")
 
 TEST_CASE("file_multi_thread_log_test_____________________")
 {
-	TILOG_GET_DEFAULT_MODULE_REF.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
+	TILOG_CURRENT_MODULE.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
 	TEST_CASE_COUT << "file_multi_thread_log_test_____________________\n";
 	TILOGI << "file_multi_thread_log_test_____________________\n";
 	TILOGI << "adcc";
@@ -219,7 +219,7 @@ TEST_CASE("terminal_many_thread_log_test_____________________")
 TEST_CASE("none_single_thread_multi_size_log_test_____________________")
 {
 	TEST_CASE_COUT << "none_single_thread_multi_size_log_test_____________________\n";
-	TILOG_GET_DEFAULT_MODULE_REF.SetPrinters(tilogspace::EPrinterID::PRINTER_ID_NONE);
+	TILOG_CURRENT_MODULE.SetPrinters(tilogspace::EPrinterID::PRINTER_ID_NONE);
 	std::string str;
 	for (int i = 0; i < 10240; i++)
 	{
@@ -282,7 +282,7 @@ TEST_CASE("file_time_many_thread_log_test_with_sleep_____________________")
 
 TEST_CASE("file_multi_thread_log_lat_test_____________________")
 {
-	TILOG_GET_DEFAULT_MODULE_REF.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
+	TILOG_CURRENT_MODULE.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
 	{
 		auto lat = SingleLoopTimeTestFunc<10>("file_multi_thread_log_lat_test_____________________10");
 		TICOUT << LatDump(*lat);
@@ -375,7 +375,7 @@ TEST_CASE("file_multi_thread_benchmark_test_with_format_____________________")
 TEST_CASE("file_multi_thread_close_print_benchmark_test_____________________")
 {
 	static_assert(TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL, "fatal error,enable it to begin test");
-	TILOG_GET_DEFAULT_MODULE_REF.ClearPrintedLogsNumber();
+	TILOG_CURRENT_MODULE.ClearPrintedLogsNumber();
 
 	struct testLoop_t : multi_thread_test_loop_t
 	{
@@ -390,12 +390,12 @@ TEST_CASE("file_multi_thread_close_print_benchmark_test_____________________")
 			for (uint64_t j = 0; j < loops; j++)
 			{
 				TILOGD << "index= " << index << " j= " << j;
-				if (j == loops / 4) { TILOG_GET_DEFAULT_MODULE_REF.SetLogLevel(tilogspace::GLOBAL_CLOSED); }
-				if (j == loops * 3 / 4) { TILOG_GET_DEFAULT_MODULE_REF.SetLogLevel(tilogspace::GLOBAL_OPEN); }
+				if (j == loops / 4) { TILOG_CURRENT_MODULE.SetLogLevel(tilogspace::GLOBAL_CLOSED); }
+				if (j == loops * 3 / 4) { TILOG_CURRENT_MODULE.SetLogLevel(tilogspace::GLOBAL_OPEN); }
 			}
 		});
-	TICOUT << (1e6 * TILOG_GET_DEFAULT_MODULE_REF.GetPrintedLogs() / ns) << " logs per millisecond\n";
-	TICOUT << 1.0 * ns / (TILOG_GET_DEFAULT_MODULE_REF.GetPrintedLogs()) << " ns per log\n";
+	TICOUT << (1e6 * TILOG_CURRENT_MODULE.GetPrintedLogs() / ns) << " logs per millisecond\n";
+	TICOUT << 1.0 * ns / (TILOG_CURRENT_MODULE.GetPrintedLogs()) << " ns per log\n";
 }
 
 #endif
@@ -517,7 +517,7 @@ TEST_CASE("none_multi_thread_set_printer_test_____________________")
 			for (uint64_t j = 0; j < loops; j++)
 			{
 				TILOGE << "loop= " << loops << " j= " << j;
-				if (j % 10 == 0) { TILOG_GET_DEFAULT_MODULE_REF.SetPrinters(EPrinterID::PRINTER_ID_NONE); }
+				if (j % 10 == 0) { TILOG_CURRENT_MODULE.SetPrinters(EPrinterID::PRINTER_ID_NONE); }
 			}
 			mycout << " " << index << " to exit \n";
 		});
@@ -643,7 +643,7 @@ TEST_CASE("terminal_single_thread_long_string_log_test_____________________")
 	MultiThreadTest<testLoop_t>(
 		"terminal_single_thread_long_string_log_test_____________________", tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL,
 		[](int32_t index) {
-			auto x = TILOG_STREAMEX_CREATE(TILOG_GET_DEFAULT_MODULE_ENUM,tilogspace::ELevel::ERROR);
+			auto x = TILOG_STREAMEX_CREATE(TILOG_CURRENT_MODULE_ID,tilogspace::ELevel::ERROR);
 			for (uint32_t j = 0; j < 1000; j++)
 			{
 				TILOGEX(x) << (char('R' + j % 11));
@@ -658,8 +658,8 @@ TEST_CASE("terminal_single_thread_long_string_log_test_____________________")
 TEST_CASE("file_multi_thread_print_level_test_____________________")
 {
 	static_assert(TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL, "fatal error,enable it to begin test");
-	TILOG_GET_DEFAULT_MODULE_REF.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
-	TILOG_GET_DEFAULT_MODULE_REF.ClearPrintedLogsNumber();
+	TILOG_CURRENT_MODULE.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
+	TILOG_CURRENT_MODULE.ClearPrintedLogsNumber();
 
 	struct testLoop_t : multi_thread_test_loop_t
 	{
@@ -673,19 +673,19 @@ TEST_CASE("file_multi_thread_print_level_test_____________________")
 			index = index + (int32_t)ELevel::ALWAYS - 1;
 			for (uint64_t j = 1; j <= loops; j++)
 			{
-				TILOG(TILOG_GET_DEFAULT_MODULE_ENUM,index) << "index= " << index << " j= " << j;
+				TILOG(TILOG_CURRENT_MODULE_ID,index) << "index= " << index << " j= " << j;
 				if (index == ELevel::ALWAYS && (j * 8) % loops == 0)
 				{
 					uint64_t v = j * 8 / loops;	   // 1-8
-					TILOG_GET_DEFAULT_MODULE_REF.SetLogLevel((tilogspace::ELevel)(9 - v));
+					TILOG_CURRENT_MODULE.SetLogLevel((tilogspace::ELevel)(9 - v));
 				}
 			}
 		});
 
 
-	TILOG_GET_DEFAULT_MODULE_REF.SetLogLevel(tilogspace::ELevel::VERBOSE);
-	TICOUT << (1e6 * TILOG_GET_DEFAULT_MODULE_REF.GetPrintedLogs() / ns) << " logs per millisecond\n";
-	TICOUT << 1.0 * ns / (TILOG_GET_DEFAULT_MODULE_REF.GetPrintedLogs()) << " us per log\n";
+	TILOG_CURRENT_MODULE.SetLogLevel(tilogspace::ELevel::VERBOSE);
+	TICOUT << (1e6 * TILOG_CURRENT_MODULE.GetPrintedLogs() / ns) << " logs per millisecond\n";
+	TICOUT << 1.0 * ns / (TILOG_CURRENT_MODULE.GetPrintedLogs()) << " us per log\n";
 }
 
 #endif
@@ -695,7 +695,7 @@ TEST_CASE("file_multi_thread_print_level_test_____________________")
 TEST_CASE("terminal_multi_way_log_test_____________________")
 {
 	TEST_CASE_COUT << "terminal_multi_way_log_test_____________________\n";
-	TILOG_GET_DEFAULT_MODULE_REF.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
+	TILOG_CURRENT_MODULE.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
 
 	TILOGE << true;
 	TILOGE << 'e';
@@ -740,20 +740,20 @@ TEST_CASE("terminal_multi_way_log_test_____________________")
 
 	{
 		using namespace tilogspace;
-		TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, ALWAYS) << "e24.0 fast";
-		TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, ALWAYS) << "e24.1 nofast";
+		TILOG(TILOG_CURRENT_MODULE_ID, ALWAYS) << "e24.0 fast";
+		TILOG(TILOG_CURRENT_MODULE_ID, ALWAYS) << "e24.1 nofast";
 
-		TIIF(ON_DEV) && TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, ALWAYS) << "e25 fast only print on debug exe";
-		TIIF(ON_RELEASE) && TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, ALWAYS ) << "e26 fast only print on release exe";
-		TIIF(ON_DEV) && TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, WARN) << "e27 only print on debug exe";
-		TIIF(ON_RELEASE) && TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, WARN) << "e28 only print on release exe";
-		TIIF(10 > 8) && TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, INFO) << "e29 10>8";
-		TIIF(10 < 8) && TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, ERROR) << "e30 10<8";
-		TIIF(true, 1 + 1 == 2, 2 * 3 == 6) && TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, INFO) << "e30.0 1 + 1 == 2, 2 * 3 == 6";
-		TIIF(true, 1 + 1 == 2, 2 * 3 == 7) && TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, ERROR) << "e30.1 1 + 1 == 2, 2 * 3 == 7";
+		TIIF(ON_DEV) && TILOG(TILOG_CURRENT_MODULE_ID, ALWAYS) << "e25 fast only print on debug exe";
+		TIIF(ON_RELEASE) && TILOG(TILOG_CURRENT_MODULE_ID, ALWAYS ) << "e26 fast only print on release exe";
+		TIIF(ON_DEV) && TILOG(TILOG_CURRENT_MODULE_ID, WARN) << "e27 only print on debug exe";
+		TIIF(ON_RELEASE) && TILOG(TILOG_CURRENT_MODULE_ID, WARN) << "e28 only print on release exe";
+		TIIF(10 > 8) && TILOG(TILOG_CURRENT_MODULE_ID, INFO) << "e29 10>8";
+		TIIF(10 < 8) && TILOG(TILOG_CURRENT_MODULE_ID, ERROR) << "e30 10<8";
+		TIIF(true, 1 + 1 == 2, 2 * 3 == 6) && TILOG(TILOG_CURRENT_MODULE_ID, INFO) << "e30.0 1 + 1 == 2, 2 * 3 == 6";
+		TIIF(true, 1 + 1 == 2, 2 * 3 == 7) && TILOG(TILOG_CURRENT_MODULE_ID, ERROR) << "e30.1 1 + 1 == 2, 2 * 3 == 7";
 		int x = 1, y = 2;
-		TIIF(ON_DEV, true, x == 1, y == 2) && TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, INFO) << "e30.2 x==1,y==2";
-		TIIF(ON_DEV, true, x == 10, y == 2) && TILOG(TILOG_GET_DEFAULT_MODULE_ENUM, ERROR) << "e30.3 x==10,y==2";
+		TIIF(ON_DEV, true, x == 1, y == 2) && TILOG(TILOG_CURRENT_MODULE_ID, INFO) << "e30.2 x==1,y==2";
+		TIIF(ON_DEV, true, x == 10, y == 2) && TILOG(TILOG_CURRENT_MODULE_ID, ERROR) << "e30.3 x==10,y==2";
 	}
 	{
 		TILOGI.print("\n\n");
@@ -792,7 +792,7 @@ TEST_CASE("terminal_multi_way_log_test_____________________")
 TEST_CASE("terminal_log_show_test_____________________")
 {
 	TEST_CASE_COUT << "terminal_log_show_test_____________________\n";
-	TILOG_GET_DEFAULT_MODULE_REF.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
+	TILOG_CURRENT_MODULE.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
 	TILOGI << "line ?";
 #line 66666
 	TILOGI << "line 66666";
@@ -810,7 +810,7 @@ TEST_CASE("terminal_log_show_test_____________________")
 #ifdef user_module_test_____________________
 TEST_CASE("user_module_test_____________________")
 {
-	TILOG_GET_DEFAULT_MODULE_REF.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
+	TILOG_CURRENT_MODULE.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
 
 	struct testLoop_t : multi_thread_test_loop_t
 	{
@@ -843,9 +843,9 @@ TEST_CASE("user_module_test_____________________")
 TEST_CASE("special_log_test_____________________")
 {
 	static_assert(TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL, "enable it to test");
-	TILOG_GET_DEFAULT_MODULE_REF.SetLogLevel(ELevel::WARN);
+	TILOG_CURRENT_MODULE.SetLogLevel(ELevel::WARN);
 	TICOUT << "special_log_test_____________________\n";
-	TILOG_GET_DEFAULT_MODULE_REF.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
+	TILOG_CURRENT_MODULE.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
 	{
 		auto& tilogcout = TICOUT;
 		tilogcout << "tilogcout test__";
@@ -893,7 +893,7 @@ TEST_CASE("special_log_test_____________________")
 TEST_CASE("static_log_level_multi_thread_benchmark_test_____________________")
 {
 	static_assert(!TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL, "disable it to test");
-	static_assert(TILOG_GET_DEFAULT_MODULE_REF.GetLogLevel() == ELevel::WARN, "set warn to begin test");
+	static_assert(TILOG_CURRENT_MODULE.GetLogLevel() == ELevel::WARN, "set warn to begin test");
 
 	struct testLoop_t : multi_thread_test_loop_t
 	{
@@ -915,7 +915,7 @@ TEST_CASE("static_log_level_multi_thread_benchmark_test_____________________")
 #ifdef dynamic_log_level_multi_thread_benchmark_test_____________________
 TEST_CASE("dynamic_log_level_multi_thread_benchmark_test_____________________")
 {
-	TILOG_GET_DEFAULT_MODULE_REF.SetLogLevel(ELevel::WARN);
+	TILOG_CURRENT_MODULE.SetLogLevel(ELevel::WARN);
 	static_assert(TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL, "enable it to test");
 
 	struct testLoop_t : multi_thread_test_loop_t
@@ -929,7 +929,7 @@ TEST_CASE("dynamic_log_level_multi_thread_benchmark_test_____________________")
 		"dynamic_log_level_multi_thread_benchmark_test_____________________", tilogspace::EPrinterID::PRINTER_TILOG_FILE, [](int index) {
 			for (uint64_t j = 0; j < testLoop_t::GET_SINGLE_THREAD_LOOPS(); j++)
 			{
-				TILOG(TILOG_GET_DEFAULT_MODULE_ENUM,ELevel::WARN) << "index= " << index << " j= " << j;
+				TILOG(TILOG_CURRENT_MODULE_ID,ELevel::WARN) << "index= " << index << " j= " << j;
 			}
 		});
 }

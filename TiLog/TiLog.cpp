@@ -1607,10 +1607,10 @@ namespace tilogspace
 		struct TiLogEngine
 		{
 			TiLogModBase tiLogModBase;
-			mod_ids_t mod;
+			mod_id_t mod;
 			TiLogPrinterManager tiLogPrinterManager;
 			TiLogCore tiLogCore;
-			inline TiLogEngine(mod_ids_t m) : tiLogModBase(), mod(m), tiLogPrinterManager(this), tiLogCore(this)
+			inline TiLogEngine(mod_id_t m) : tiLogModBase(), mod(m), tiLogPrinterManager(this), tiLogCore(this)
 			{
 				tiLogModBase.engine = this;
 				tiLogModBase.mod = mod;
@@ -3016,7 +3016,7 @@ namespace tilogspace
 		}
 	}	 // namespace internal
 
-	TiLogModBase& TiLog::GetMoudleBaseRef(mod_ids_t mod) { return TiLogEngines::getRInstance().engines[mod].tiLogModBase; }
+	TiLogModBase& TiLog::GetMoudleBaseRef(mod_id_t mod) { return TiLogEngines::getRInstance().engines[mod].tiLogModBase; }
 	TiLog::TiLog()
 	{
 		ctor_iostream_mtx();
