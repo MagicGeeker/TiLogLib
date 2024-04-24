@@ -318,6 +318,8 @@ namespace tilogspace
 
 #define TILOG_CURRENT_MODULE tilogspace::TiLog::GetMoudleBaseRef(TILOG_CURRENT_MODULE_ID)
 #define TILOG_MODULE(mod_id) tilogspace::TiLog::GetMoudleBaseRef(mod_id)
+#define TILOG_CURRENT_MODULE_SPEC tilogspace::TILOG_ACTIVE_MODULE_SPECS[TILOG_CURRENT_MODULE_ID]
+#define TILOG_MODULE_SPEC(mod_id) tilogspace::TILOG_ACTIVE_MODULE_SPECS[mod_id]
 
 // clang-format on
 
@@ -2571,6 +2573,9 @@ namespace tilogspace
 
 #ifdef H__________________________________________________TiLogStream__________________________________________________
 
+	TILOG_FORCEINLINE constexpr bool should_log(mod_id_t mod, uint32_t level);
+	class TiLogStreamEx;
+
 namespace internal
 {
 	struct TiLogStreamMemoryManager
@@ -2608,6 +2613,7 @@ namespace internal
 	{
 		friend class TILOG_INTERNAL_STRING_TYPE;
 		friend struct tilogspace::internal::TiLogStreamHelper;
+		friend class TiLogStreamEx;
 	protected:
 		using StringType = TILOG_INTERNAL_STRING_TYPE;
 		using TiLogStringView = tilogspace::internal::TiLogStringView;
@@ -3017,14 +3023,28 @@ namespace internal
 	class TiLogStreamEx
 	{
 	public:
-		inline TiLogStreamEx(TiLogStream&& s0, bool should_log0) : s(std::move(s0)), should_log(should_log0){};
+		inline TiLogStreamEx(mod_id_t mod, uint32_t lv, tilogspace::internal::TiLogStringView source)
+			: should_log(tilogspace::should_log(mod, lv))
+		{
+			if (should_log)
+			{
+				const char* source_location_str = source.data();
+				size_t source_location_size = source.size();
+				new (s) TiLogStream(mod, lv, source_location_str, source_location_size);
+			}
+		};
 
-		inline TiLogStream& Stream() noexcept { return s; }
+		~TiLogStreamEx()
+		{
+			if (should_log) { Stream()->~TiLogStream(); }
+		}
+
+		inline TiLogStream* Stream() noexcept { return (should_log ? (TiLogStream*)&s : nullptr); }
 
 		inline bool ShouldLog() noexcept { return should_log; }
 
 	protected:
-		TiLogStream s;
+		char s[sizeof(TiLogStream)];
 		const bool should_log;
 	};
 }	 // namespace tilogspace
@@ -3156,9 +3176,7 @@ namespace tilogspace
 // same as TILOG_STREAM_CREATE_DLV, and use constexpr mod,lv (better performace)
 #define TILOG_STREAM_CREATE(mod, lv) tilogspace::CreateNewTiLogStream(TILOG_INTERNAL_GET_SOURCE_LOCATION(lv), lv, mod)
 // create a TiLogStreamEx
-#define TILOG_STREAMEX_CREATE(mod, lv)                                                                                                     \
-	tilogspace::TiLogStreamEx(                                                                                                             \
-		tilogspace::CreateNewTiLogStream(TILOG_INTERNAL_GET_SOURCE_LOCATION(lv), lv, mod), tilogspace::should_log(mod, lv))
+#define TILOG_STREAMEX_CREATE(mod, lv) tilogspace::TiLogStreamEx(mod, lv, TILOG_INTERNAL_GET_SOURCE_LOCATION(lv))
 
 #define TICOUT (std::unique_lock<tilogspace::sync_ostream_mtx_t>(tilogspace::ti_iostream_mtx->ticout_mtx), std::cout)
 #define TICERR (std::unique_lock<tilogspace::sync_ostream_mtx_t>(tilogspace::ti_iostream_mtx->ticerr_mtx), std::cerr)
@@ -3186,7 +3204,7 @@ namespace tilogspace
 #define TILOG(constexpr_mod, constexpr_lv)                                                                                                 \
 	tilogspace::should_log(constexpr_mod, constexpr_lv) && TILOG_STREAM_CREATE(constexpr_mod, constexpr_lv)
 
-#define TILOGEX(stream) stream.ShouldLog() && stream.Stream()
+#define TILOGEX(stream_ex) stream_ex.ShouldLog() && (*stream_ex.Stream())
 
 #define TIIF(...) tilogspace::all_true_dynamic<>(__VA_ARGS__)
 
