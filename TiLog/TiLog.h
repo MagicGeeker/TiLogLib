@@ -2114,7 +2114,7 @@ namespace tilogspace
 				}
 				static TimePoint now() noexcept { return getRInstance().s_now.load(); };
 				TILOG_SINGLE_INSTANCE_DECLARE(UserModeClockT<Clock>)
-				static time_t to_time_t(const TimePoint& point) { return (Clock::to_time_t(getRInstance().s_now)); }
+				static time_t to_time_t(const TimePoint& point) { return (Clock::to_time_t(point)); }
 
 			protected:
 				std::atomic<bool> thrdCreated{};
