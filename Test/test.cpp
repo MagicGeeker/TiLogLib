@@ -35,7 +35,6 @@ using namespace tilogspace;
 
 
 //__________________________________________________long time test__________________________________________________//
-//#define file_time_multi_thread_simulation__log_test_____________________
 //#define terminal_multi_thread_poll__log_test_____________________
 #define none_multi_thread_memory_leak_stress_test_____________________
 //#define none_multi_thread_set_printer_test_____________________
@@ -374,7 +373,7 @@ TEST_CASE("file_multi_thread_benchmark_test_with_format_____________________")
 
 TEST_CASE("file_multi_thread_close_print_benchmark_test_____________________")
 {
-	static_assert(TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL, "fatal error,enable it to begin test");
+	static_assert(TILOG_CURRENT_MODULE_SPEC.supportDynamicLogLevel, "fatal error,enable it to begin test");
 	TILOG_CURRENT_MODULE.ClearPrintedLogsNumber();
 
 	struct testLoop_t : multi_thread_test_loop_t
@@ -657,7 +656,7 @@ TEST_CASE("terminal_single_thread_long_string_log_test_____________________")
 
 TEST_CASE("file_multi_thread_print_level_test_____________________")
 {
-	static_assert(TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL, "fatal error,enable it to begin test");
+	static_assert(TILOG_CURRENT_MODULE_SPEC.supportDynamicLogLevel, "fatal error,enable it to begin test");
 	TILOG_CURRENT_MODULE.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
 	TILOG_CURRENT_MODULE.ClearPrintedLogsNumber();
 
@@ -673,7 +672,7 @@ TEST_CASE("file_multi_thread_print_level_test_____________________")
 			index = index + (int32_t)ELevel::ALWAYS - 1;
 			for (uint64_t j = 1; j <= loops; j++)
 			{
-				TILOG(TILOG_CURRENT_MODULE_ID,index) << "index= " << index << " j= " << j;
+				TIDLOG(TILOG_CURRENT_MODULE_ID,index) << "index= " << index << " j= " << j;
 				if (index == ELevel::ALWAYS && (j * 8) % loops == 0)
 				{
 					uint64_t v = j * 8 / loops;	   // 1-8
@@ -842,49 +841,49 @@ TEST_CASE("user_module_test_____________________")
 #ifdef special_log_test_____________________
 TEST_CASE("special_log_test_____________________")
 {
-	static_assert(TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL, "enable it to test");
+	static_assert(TILOG_CURRENT_MODULE_SPEC.supportDynamicLogLevel, "enable it to test");
 	TILOG_CURRENT_MODULE.SetLogLevel(ELevel::WARN);
+	TILOG_CURRENT_MODULE.FSync();
 	TICOUT << "special_log_test_____________________\n";
 	TILOG_CURRENT_MODULE.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
 	{
-		auto& tilogcout = TICOUT;
-		tilogcout << "tilogcout test__";
-	}
-	{
-		auto tilog001 = TILOGW;
-		tilog001 << "tilog001 test__";
+		auto tilog001 = TILOG_STREAMEX_CREATE(TILOG_CURRENT_MODULE_ID, tilogspace::WARN);
+		TILOGEX(tilog001) << "tilog001 test__";
 	}
 	{
 		TILOGV << "tilog003";
 	}
 	{
-		auto tilog004 = std::move(TILOGV << "tilog004");
+		TiLogStreamEx tilogv = TILOG_STREAMEX_CREATE(TILOG_CURRENT_MODULE_ID, tilogspace::VERBOSE);
+		TILOGEX(tilogv) << "tilogv test__";
+		TILOGEX(tilogv) << "tilogv test__ 123";
+		TILOGEX(tilogv) << "tilogv test__ 456";
 	}
 	{
-		TiLogStream tilogv = std::move(TILOGV << "tilogv test__");
-		tilogv << "tilogv test__ 123";
-		tilogv << "tilogv test__ 456";
+		TiLogStreamEx tilogd = TILOG_STREAMEX_CREATE(TILOG_CURRENT_MODULE_ID, tilogspace::DEBUG);
+		TILOGEX(tilogd) << "tilogd test__";
+		TILOGEX(tilogd) << "tilogd test__ 123";
+		TILOGEX(tilogd) << "tilogd test__ 456";
 	}
 	{
-		TiLogStream tilogd = std::move(TILOGD << "tilogd test__");
-		tilogd << "tilogd test__ 123";
-		tilogd << "tilogd test__ 456";
+		TiLogStreamEx tilogi = TILOG_STREAMEX_CREATE(TILOG_CURRENT_MODULE_ID, tilogspace::INFO);
+		TILOGEX(tilogi) << "tilogi test__";
+		TILOGEX(tilogi) << "tilogi test__ 123";
+		TILOGEX(tilogi) << "tilogi test__ 456";
 	}
 	{
-		TiLogStream tilogi = std::move(TILOGI << "tilogi test__");
-		tilogi << "tilogi test__ 123";
-		tilogi << "tilogi test__ 456";
+		TiLogStreamEx tilogw = TILOG_STREAMEX_CREATE(TILOG_CURRENT_MODULE_ID, tilogspace::WARN);
+		TILOGEX(tilogw) << "tilogw test__";
+		TILOGEX(tilogw) << "tilogw test__ 123";
+		TILOGEX(tilogw) << "tilogw test__ 456";
 	}
 	{
-		TiLogStream tilogw = std::move(TILOGW << "tilogw test__");
-		tilogw << "tilogw test__ 123";
-		tilogw << "tilogw test__ 456";
+		TiLogStreamEx tiloge = TILOG_STREAMEX_CREATE(TILOG_CURRENT_MODULE_ID, tilogspace::ERROR);
+		TILOGEX(tiloge) << "tiloge test__";
+		TILOGEX(tiloge) << "tiloge test__ 123";
+		TILOGEX(tiloge) << "tiloge test__ 456";
 	}
-	{
-		TiLogStream tiloge = std::move(TILOGE << "tiloge test__");
-		tiloge << "tiloge test__ 123";
-		tiloge << "tiloge test__ 456";
-	}
+	TILOG_CURRENT_MODULE.FSync();
 }
 #endif
 
@@ -892,8 +891,8 @@ TEST_CASE("special_log_test_____________________")
 #ifdef static_log_level_multi_thread_benchmark_test_____________________
 TEST_CASE("static_log_level_multi_thread_benchmark_test_____________________")
 {
-	static_assert(!TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL, "disable it to test");
-	static_assert(TILOG_CURRENT_MODULE.GetLogLevel() == ELevel::WARN, "set warn to begin test");
+	static_assert(!TILOG_CURRENT_MODULE_SPEC.supportDynamicLogLevel, "disable it to test");
+	static_assert(tilogspace::GetDefaultLogLevel(TILOG_CURRENT_MODULE_ID) == ELevel::WARN, "set warn to begin test");
 
 	struct testLoop_t : multi_thread_test_loop_t
 	{
@@ -916,7 +915,7 @@ TEST_CASE("static_log_level_multi_thread_benchmark_test_____________________")
 TEST_CASE("dynamic_log_level_multi_thread_benchmark_test_____________________")
 {
 	TILOG_CURRENT_MODULE.SetLogLevel(ELevel::WARN);
-	static_assert(TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL, "enable it to test");
+	static_assert(TILOG_CURRENT_MODULE_SPEC.supportDynamicLogLevel, "enable it to test");
 
 	struct testLoop_t : multi_thread_test_loop_t
 	{
