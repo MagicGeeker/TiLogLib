@@ -1152,8 +1152,8 @@ namespace tilogspace
 			List<ThreadStru*> toDelQueue;			 // thread is dead and no logs exist,need to delete by gc thread
 
 			List<ThreadStru*> priThrdQueue;	   // queue for internal threads
-			atomic<uint64_t> handledUserThreadCnt;
-			atomic<uint64_t> diedUserThreadCnt;
+			atomic<uint64_t> handledUserThreadCnt{};
+			atomic<uint64_t> diedUserThreadCnt{};
 		};
 
 
