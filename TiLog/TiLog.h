@@ -1513,7 +1513,9 @@ namespace tilogspace
 
 
 	constexpr char LOG_PREFIX[] = "???AFEWIDV????";	   // begin ??? ,and end ???? is invalid
-	constexpr char LOG_LEVELS[][9] = {"????????","????????","????????","ALWAYS  ","FATAL   ","ERROR   ","WARNING ","INFO    ","DEBUG  ","VERBOSE ","????????","????????","????????","????????"};
+	constexpr const char* const LOG_LEVELS[] = { "????????", "????????", "????????", "ALWAYS  ", "FATAL   ", "ERROR   ", "WARNING ",
+												 "INFO    ", "DEBUG   ", "VERBOSE ", "????????", "????????", "????????", "????????" };
+	constexpr size_t LOG_LEVELS_STRING_LEN = 8;
 
 	// reserve +1 for '\0'
 	constexpr size_t TILOG_UINT16_MAX_CHAR_LEN = (5 + 1);
@@ -3121,15 +3123,21 @@ namespace tilogspace
 #define LINE_STRING0(l) #l
 #define LINE_STRING(l) LINE_STRING0(l)
 
-#if defined(__GNUC__)
+#if defined(__clang__)
 #define FUNCTION_DETAIL0 __PRETTY_FUNCTION__
+#elif defined(__GNUC__)
+	#if (__GNUC__ >= 9 && __GNUC_MINOR__ >= 1)
+	#define FUNCTION_DETAIL0 __PRETTY_FUNCTION__
+	#else
+	#define FUNCTION_DETAIL0 "?" // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=66639
+	#endif
 #elif defined(_MSC_VER)
 #define FUNCTION_DETAIL0 __FUNCSIG__
 #else
 #define FUNCTION_DETAIL0 __func__
 #endif
 
-#define LEVEL_DETAIL(constexpr_lv) tilogspace::internal::string_literal(tilogspace::LOG_LEVELS[constexpr_lv])
+#define LEVEL_DETAIL(constexpr_lv) tilogspace::internal::static_string<tilogspace::LOG_LEVELS_STRING_LEN,tilogspace::internal::LITERAL>(tilogspace::LOG_LEVELS[constexpr_lv],nullptr)
 #define FILE_LINE_DETAIL tilogspace::internal::string_literal(__FILE__ ":" LINE_STRING(__LINE__) " ")
 #define FUNCTION_DETAIL tilogspace::internal::static_string<tilogspace::internal::find(FUNCTION_DETAIL0, ':'),tilogspace::internal::LITERAL>(FUNCTION_DETAIL0,nullptr)
 
