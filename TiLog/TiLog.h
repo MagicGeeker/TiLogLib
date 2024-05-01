@@ -210,8 +210,8 @@ namespace tilogspace
 		constexpr static bool ON_RELEASE = false, ON_DEV = true;
 #endif
 
-	// interval of user mode clock sync with kernel(microseconds),may affect the order of logs if multi-thread
-	constexpr static uint32_t TILOG_USER_MODE_CLOCK_UPDATE_US = TILOG_IS_WITH_MILLISECONDS ? 100 : 100000;
+	// interval of user mode clock sync with kernel(microseconds),should be smaller than timestamp print accuracy
+	constexpr static uint32_t TILOG_USER_MODE_CLOCK_UPDATE_US = TILOG_IS_WITH_MILLISECONDS ? 300 : 300000;
 
 	constexpr static uint32_t TILOG_CODE_CACHED_LINE_DEC_MAX = (19999 + 1); // cached line -> line string table size
 
@@ -2090,15 +2090,21 @@ namespace tilogspace
 				{
 					th = std::thread([this] {
 						SetThreadName((thrd_t)(-1), "UserModeClockT");
-						thrdCreated = true;
 						while (!toExit)
 						{
 							TimePoint tp = Clock::now();
-							if (Clock::is_steady || s_now.load() < tp) { s_now = tp; }
+							if (Clock::is_steady || s_now.load() < tp)
+							{
+#ifdef TILOG_IS_WITH_MILLISECONDS
+								s_now = std::chrono::time_point_cast<std::chrono::milliseconds>(tp);
+#else
+								s_now = std::chrono::time_point_cast<std::chrono::seconds>(tp);
+#endif
+							}
 							std::this_thread::sleep_for(std::chrono::microseconds(TILOG_USER_MODE_CLOCK_UPDATE_US));
 						}
 					});
-					while (!thrdCreated)
+					while (now() == TimePoint::min())
 					{
 						std::this_thread::yield();
 					}
@@ -2114,8 +2120,7 @@ namespace tilogspace
 
 			protected:
 				static uint64_t instance[];
-				std::atomic<TimePoint> s_now{ Clock::now() };
-				std::atomic<bool> thrdCreated{};
+				std::atomic<TimePoint> s_now{ TimePoint::min() };
 				std::thread th{};
 				uint32_t magic{ 0xf001a001 };
 				volatile bool toExit{};
@@ -2271,6 +2276,13 @@ namespace tilogspace
 				inline ITiLogTime(EPlaceHolder)
 				{
 					impl = TimeImplType::now();
+#ifndef TILOG_USE_USER_MODE_CLOCK
+#ifdef TILOG_IS_WITH_MILLISECONDS
+					cast_to_ms();
+#else
+					cast_to_sec();
+#endif
+#endif
 				}
 				inline ITiLogTime(const TimeImplType& t) { impl = t; }
 
