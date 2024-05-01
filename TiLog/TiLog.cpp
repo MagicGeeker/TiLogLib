@@ -3056,18 +3056,19 @@ namespace tilogspace
 }	 // namespace tilogspace
 namespace tilogspace
 {
+	TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_OUTSIDE(TiLog,tilogbuf);
+
 	namespace internal
 	{
 		static uint32_t tilog_nifty_counter;	// zero initialized at load time
 
 		TiLogNiftyCounterIniter::TiLogNiftyCounterIniter()
 		{
-			if (tilog_nifty_counter++ == 0) new ((TiLog*)&tilogbuf) TiLog();	// placement new
+			if (tilog_nifty_counter++ == 0) TiLog::init();
 		}
 		TiLogNiftyCounterIniter::~TiLogNiftyCounterIniter()
 		{
-			if (--tilog_nifty_counter == 0) ((TiLog*)&tilogbuf)->~TiLog();
+			if (--tilog_nifty_counter == 0) TiLog::uninit();
 		}
 	}	 // namespace internal
-	TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_OUTSIDE(TiLog,tilogbuf)
 }	 // namespace tilogspace

@@ -1376,23 +1376,16 @@ namespace tilogspace
 	inline static void init();                                                                                                 			   \
 	inline static void uninit();
 
-
-#define TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_INSIDE(CLASS_NAME, ...)                                                               \
-	inline static CLASS_NAME* getInstance();                                                                                               \
-	inline static CLASS_NAME& getRInstance();                                                                                              \
-	inline static void init();                                                                                                             \
-	inline static void uninit();
-
 #define TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_FUNC_IMPL(CLASS_NAME, instance, ...)                                                          \
-	extern uint8_t instance[];                                                                                                             \
-	void CLASS_NAME::init() { new ((void*)&instance) CLASS_NAME(); }                                                                       \
-	void CLASS_NAME::uninit() { reinterpret_cast<CLASS_NAME*>(&instance)->~CLASS_NAME(); }                                                 \
-	CLASS_NAME* CLASS_NAME::getInstance() { return reinterpret_cast<CLASS_NAME*>(&instance); }                                             \
-	CLASS_NAME& CLASS_NAME::getRInstance() { return *reinterpret_cast<CLASS_NAME*>(&instance); }
+	inline static void init() { new ((void*)&instance) CLASS_NAME(); }                                                                     \
+	inline static void uninit() { reinterpret_cast<CLASS_NAME*>(&instance)->~CLASS_NAME(); }                                               \
+	inline static CLASS_NAME* getInstance() { return reinterpret_cast<CLASS_NAME*>(&instance); }                                           \
+	inline static CLASS_NAME& getRInstance() { return *reinterpret_cast<CLASS_NAME*>(&instance); }
+
+#define TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_MEMBER_DECLARE(CLASS_NAME, instance) static uint8_t instance[];
 
 #define TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_OUTSIDE(CLASS_NAME, instance)                                                         \
-	alignas(alignof(CLASS_NAME)) uint8_t instance[sizeof(CLASS_NAME)];
-
+	alignas(alignof(CLASS_NAME)) uint8_t CLASS_NAME::instance[sizeof(CLASS_NAME)];
 
 // clang-format on
 
@@ -2017,7 +2010,9 @@ namespace tilogspace
 
 			struct steady_flag_helper : TiLogObject
 			{
-				TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_INSIDE(steady_flag_helper)
+				TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_MEMBER_DECLARE(steady_flag_helper, steady_flag_helper_buf)
+				TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_FUNC_IMPL(steady_flag_helper,steady_flag_helper_buf)
+
 
 				static inline steady_flag_t now() { return getRInstance().count++; }
 
@@ -2026,7 +2021,6 @@ namespace tilogspace
 				static constexpr inline steady_flag_t max() { return std::numeric_limits<steady_flag_t>::max(); }
 				std::atomic<steady_flag_t> count{ min() };
 			};
-			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_FUNC_IMPL(steady_flag_helper, steady_flag_helper_buf)
 
 			// for customize timer，must be similar to BaseTimeImpl
 			TILOG_ABSTRACT class BaseTimeImpl : public TiLogObject
@@ -2111,23 +2105,25 @@ namespace tilogspace
 				}
 				~UserModeClockT()
 				{
-					getRInstance().toExit = true;
+					toExit = true;
 					if (th.joinable()) { th.join(); }
 				}
 				static TimePoint now() noexcept { return getRInstance().s_now.load(); };
-				TILOG_SINGLE_INSTANCE_DECLARE(UserModeClockT<Clock>)
+				TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_FUNC_IMPL(UserModeClockT<Clock>, instance)
 				static time_t to_time_t(const TimePoint& point) { return (Clock::to_time_t(point)); }
 
 			protected:
+				static uint64_t instance[];
+				std::atomic<TimePoint> s_now{ Clock::now() };
 				std::atomic<bool> thrdCreated{};
 				std::thread th{};
-				std::atomic<TimePoint> s_now{ Clock::now() };
+				uint32_t magic{ 0xf001a001 };
 				volatile bool toExit{};
 			};
 
-			// template static member declare
 			template <typename Clock>
-			TILOG_SINGLE_INSTANCE_DECLARE_OUTER(UserModeClockT<Clock>)
+			uint64_t UserModeClockT<Clock>::instance[sizeof(UserModeClockT<Clock>) / sizeof(uint64_t) + 1];
+			// gcc compiler error if add alignas, so replace use uint64_t
 
 			using UserModeClock = typename std::conditional<
 				TILOG_TIME_IMPL_TYPE == TILOG_INTERNAL_STD_STEADY_CLOCK, UserModeClockT<std::chrono::steady_clock>,
@@ -2502,13 +2498,12 @@ namespace tilogspace
 		static TiLogModBase& GetMoudleBaseRef(mod_id_t mod);
 
 		inline TiLogStream* GetNullStream() { return nullstream; }
-
-		TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_INSIDE(TiLog)
-
+		TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_FUNC_IMPL(TiLog, tilogbuf)
 
 	private:
 		TiLog();
 		~TiLog();
+		TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_MEMBER_DECLARE(TiLog, tilogbuf)
 	};
 
 #endif
@@ -2522,7 +2517,7 @@ namespace tilogspace
 			~TiLogNiftyCounterIniter();
 		} tiLogNiftyCounterIniter;
 	}	 // namespace internal
-	TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_FUNC_IMPL(TiLog,tilogbuf)
+	
 
 	namespace internal
 	{
