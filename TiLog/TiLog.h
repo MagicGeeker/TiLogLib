@@ -148,6 +148,7 @@
 //#define TILOG_ALIGNED_OPERATOR_DELETE(ptr, alignment) ::operator delete(ptr,(std::align_val_t)alignment,std::nothrow)
 
 #define TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL FALSE //TRUE or FALSE,if false TiLog::SetLogLevel no effect
+#define TILOG_STRICT_ORDERED_LOG FALSE //TRUE or FALSE,if false some log may be unordered in log printer
 #define TILOG_ERROR_FORMAT_STRING  " !!!ERR FMT "
 
 /**************************************************user-defined data structure**************************************************/
@@ -217,6 +218,7 @@ namespace tilogspace
 
 	constexpr static uint32_t TILOG_NO_USED_STREAM_LENGTH = 64;	// no used stream length
 
+	constexpr static uint32_t TILOG_DAEMON_PROCESSER_NUM = 4;	// tilog daemon processer num
 	constexpr static uint32_t TILOG_POLL_THREAD_MAX_SLEEP_MS = 500;	// max poll period to ensure print every logs for every thread
 	constexpr static uint32_t TILOG_POLL_THREAD_MIN_SLEEP_MS = 100;	// min poll period to ensure print every logs for every thread
 	constexpr static uint32_t TILOG_POLL_THREAD_SLEEP_MS_IF_EXIST_THREAD_DYING = 5;	// poll period if some user threads are dying
@@ -224,7 +226,6 @@ namespace tilogspace
 	constexpr static uint32_t TILOG_POLL_MS_ADJUST_PERCENT_RATE = 75;	// range(0,100),a percent number to adjust poll time
 	constexpr static uint32_t TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MIN_CENTI = 120;	// range(0,200],a min percent number to adjust deliver cache capacity
 	constexpr static uint32_t TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MAX_CENTI = 150;	// range(0,200],a max percent number to adjust deliver cache capacity
-	constexpr static uint32_t TILOG_DELIVER_CACHE_DEFAULT_MEMORY_BYTES = 100<<10;	// default memory of a single deliver cache
 
 	constexpr static size_t TILOG_GLOBAL_BUF_SIZE = ((size_t)1 << 20U);						 // global cache string reserve length
 	constexpr static size_t TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE = ((size_t)1 << 8U);			 // single thread cache queue max length
@@ -232,7 +233,8 @@ namespace tilogspace
 	constexpr static size_t TILOG_DELIVER_QUEUE_SIZE = ((size_t)4);	// deliver queue max length
 	constexpr static size_t TILOG_IO_STRING_DATA_POOL_SIZE = ((size_t)4);	// io string data max szie
 	constexpr static size_t TILOG_GARBAGE_COLLECTION_QUEUE_RATE = ((size_t)4);	// (garbage collection queue length)/(global cache queue max length)
-	constexpr static size_t TILOG_SINGLE_LOG_RESERVE_LEN = 50;	// reserve for every log except for level,tid ...
+	constexpr static size_t TILOG_SINGLE_LOG_RESERVE_LEN = 60 + 40;	// reserve size for every log(include sizeof TiLogBean)
+	constexpr static size_t TILOG_SINGLE_LOG_AVERAGE_LEN = 120; // single log averge printable log(include field in TiLogBean)
 	constexpr static size_t TILOG_THREAD_ID_MAX_LEN = SIZE_MAX;	// tid max len,SIZE_MAX means no limit,in popular system limit is TILOG_UINT64_MAX_CHAR_LEN
 
 	constexpr static uint32_t TILOG_MAY_MAX_RUNNING_THREAD_NUM = 128;	// may max running threads,note 1 means strict single thread program
@@ -246,6 +248,9 @@ namespace tilogspace
 	// user thread notify merge thread if merge rawdata size >= it.
 	// Set it smaller may make log latency lower but too small may make bandwidth even worse
 	constexpr static size_t TILOG_MERGE_RAWDATA_QUEUE_NEARLY_FULL_SIZE = (size_t)(TILOG_MERGE_RAWDATA_QUEUE_FULL_SIZE * 0.75);
+	constexpr static size_t TILOG_DELIVER_CACHE_DEFAULT_MEMORY_BYTES = TILOG_SINGLE_LOG_AVERAGE_LEN * TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE
+		* (TILOG_AVERAGE_CONCURRENT_THREAD_NUM + TILOG_MERGE_RAWDATA_QUEUE_FULL_SIZE);	  // default memory of a single deliver cache
+
 
 	constexpr static size_t TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE= (16U << 20U);	// log size per file,it is not accurate,especially TILOG_GLOBAL_BUF_SIZE is bigger
 }	 // namespace tilogspace
@@ -791,9 +796,9 @@ namespace tilogspace
 	constexpr static memblk_t memblks[objtypecnt] = {
 		{ 64, 2, 512, 512 },	   // blk 64
 		{ 96, 3, 1024, 2048 },	   // blk 96
-		{ 128, 4, 256, 3072 },	   // blk 128
+		{ 128, 4, 256, 4096 },	   // blk 128
 		{ 160, 5, 1024, 2048 },	   // blk 160
-		{ 192, 6, 512, 1536 },	   // blk 192
+		{ 192, 6, 512, 2048 },	   // blk 192
 		{ 224, 7, 1024, 1024 },	   // blk 224
 		{ 256, 8, 128, 768 },	   // blk 256
 		{ 320, 10, 512, 512 },	   // blk 320
@@ -802,7 +807,7 @@ namespace tilogspace
 		{ 512, 16, 64, 64 },	   // blk 512
 	};
 	// if mem block is unavailable,try find bigger mem block times
-	constexpr static uint32_t local_mempool_find_blk_max_times = 2;
+	constexpr static uint32_t local_mempool_find_blk_max_times = 3;
 	constexpr static size_t get_total_cnt_obj_t(uint32_t n = objtypecnt - 1)
 	{
 		return n == 0 ? (memblks[0].blkcnt * memblks[0].d32) : (get_total_cnt_obj_t(n - 1) + memblks[n].blkcnt * memblks[n].d32);
@@ -984,6 +989,17 @@ namespace tilogspace
 		constexpr static uint32_t MAGIC_NUMBER_DEAD = 0xdeaddead;		 // can not xmalloc and xfree
 		DEBUG_DECLARE(std::atomic<uint32_t> magic_number{ MAGIC_NUMBER_ACTIVE };)
 		DEBUG_DECLARE(std::thread::id owner;)
+
+		std::string dump()
+		{
+			char s[150];
+			using llu = long long unsigned;
+			snprintf(
+				s, sizeof(s), "this: %p id:%llu get_by_mempool_cnt: %llu get_by_malloc_cnt: %llu hit %4.1f%%  put_by_mempool_cnt: %llu",
+				this, (llu)id, (llu)get_by_mempool_cnt, (llu)get_by_malloc_cnt,
+				100.0 * get_by_mempool_cnt / (get_by_mempool_cnt + get_by_malloc_cnt), (llu)put_by_mempool_cnt);
+			return s;
+		}
 	};
 	constexpr static size_t SIZE_OF_LOCAL_MEMPOOL_META = sizeof(local_mempool_meta_t);
 

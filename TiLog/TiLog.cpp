@@ -1015,7 +1015,12 @@ namespace tilogspace
 				uint32_t refcnt = DecTidStrRefCnt(tid);
 				if (refcnt == 0)
 				{
-					free_local_mempool(lpool);
+					if (lpool != nullptr)
+					{
+						auto dumpstr = lpool->dump();
+						DEBUG_PRINTA("lpool dump %s\n", dumpstr.c_str());
+						free_local_mempool(lpool);
+					}
 					DEBUG_PRINTI("ThreadStru dtor pDaemon %p this %p tid [%p %s]\n", pDaemon, this, tid, tid->c_str());
 					delete (tid);
 					// DEBUG_RUN(tid = NULL);
@@ -1151,7 +1156,7 @@ namespace tilogspace
 			List<ThreadStru*> waitMergeQueue;		 // thread is dead, but some logs have not merge to global print string
 			List<ThreadStru*> toDelQueue;			 // thread is dead and no logs exist,need to delete by gc thread
 
-			List<ThreadStru*> priThrdQueue;	   // queue for internal threads
+			List<ThreadStru*> coreThrdQueue;	   // queue for internal threads
 			atomic<uint64_t> handledUserThreadCnt{};
 			atomic<uint64_t> diedUserThreadCnt{};
 		};
@@ -1315,7 +1320,21 @@ namespace tilogspace
 		struct TiLogMap_t;
 		struct TiLogEngines;
 
-		class TiLogCore final : public CoreThrdStru
+		struct TiLogCoreMini
+		{
+			constexpr static uint64_t SEQ_FREE = UINT64_MAX;
+			uint64_t seq;
+			TiLogCore* core;
+			TiLogCoreMini() : seq(SEQ_FREE), core(nullptr) {}
+			TiLogCoreMini(uint64_t seq, TiLogCore* core) : seq(seq), core(core) {}
+			bool operator<(const TiLogCoreMini& rhs) const
+			{
+				return this->seq < rhs.seq || (this->seq == rhs.seq && this->core < rhs.core);
+			}
+		};
+		constexpr uint64_t TiLogCoreMini::SEQ_FREE;
+
+		class TiLogCore final : public CoreThrdStru, public TiLogCoreMini
 		{
 			friend struct ThreadExitWatcher;
 			friend class TiLogDaemon;
@@ -1323,9 +1342,9 @@ namespace tilogspace
 		public:
 			const char* GetName() override { return "PROC"; };
 			CoreThrdEntryFuncType GetThrdEntryFunc() override { return &TiLogCore::Entry; };
-			bool IsBusy() override { return false; };
+			bool IsBusy() override { return mDoing; };
 
-			inline explicit TiLogCore(TiLogEngine* e);
+			inline explicit TiLogCore(TiLogDaemon*d);
 			inline ~TiLogCore() final;
 
 		private:
@@ -1339,8 +1358,6 @@ namespace tilogspace
 
 			void CountSortForGlobalQueue();
 
-			inline void AtInternalThreadExit(CoreThrdStru* thrd, CoreThrdStru* nextExitThrd);
-
 			TiLogTime mergeLogsToOneString(VecLogCache& deliverCache);
 
 			void pushLogsToPrinters(IOBean* pIObean);
@@ -1350,13 +1367,10 @@ namespace tilogspace
 			inline void DeliverLogs();
 
 		private:
+			TiLogDaemon* mTiLogDaemon;
 			TiLogEngine* mTiLogEngine;
 			TiLogPrinterManager* mTiLogPrinterManager;
 			TiLogMap_t* mTiLogMap;
-
-			atomic_bool mToExit{};
-			atomic_bool mInited{};
-
 			atomic_uint64_t mPrintedLogs{ 0 };
 
 			atomic_bool mSyncing{};
@@ -1400,6 +1414,7 @@ namespace tilogspace
 		class TiLogDaemon
 		{
 			friend struct ThreadExitWatcher;
+			friend class TiLogCore;
 
 		public:
 			explicit TiLogDaemon(TiLogEngine* e);
@@ -1424,7 +1439,7 @@ namespace tilogspace
 
 			void MergeThreadStruQueueToSet(List<ThreadStru*>& thread_queue, TiLogBean& bean);
 
-			void InitMergeLogVecVec(size_t needMergeSortReserveSize);
+			static void InitMergeLogVecVec(MergeVecVecLogcahes& vv, size_t needMergeSortReserveSize = SIZE_MAX);
 			void CollectRawDatas();
 
 			bool Prepared();
@@ -1438,14 +1453,15 @@ namespace tilogspace
 
 			inline std::unique_lock<std::mutex> GetPollLock();
 
+			void ChangeCoreSeq(TiLogCore* core, uint64_t seq);
+
 			void thrdFuncPoll();
 
 			inline void NotifyPoll();
 
 			inline void InitCoreThreadBeforeRun(const char* tag);
 
-			inline void InitThreadStruBeforeRun(List<ThreadStru*>& dstQueue, atomic_int32_t& counter, const char* tag);
-
+			inline void AtInternalThreadExit(CoreThrdStru* thrd, CoreThrdStru* nextExitThrd);
 
 		private:
 			static constexpr uint64_t MAGIC_NUMBER = 0x1234abcd1234abcd;
@@ -1457,7 +1473,6 @@ namespace tilogspace
 			TiLogPrinterManager* mTiLogPrinterManager;
 			TiLogMap_t* mTiLogMap;
 
-			atomic_int32_t mExistThreads{ 0 };
 			atomic_bool mToExit{};
 			atomic_bool mInited{};
 
@@ -1468,8 +1483,16 @@ namespace tilogspace
 			ThreadStruQueue mThreadStruQueue;
 			std::thread mPollThread;
 			TiLogTaskQueue mTaskQueue;
-			Vector<TiLogCore*> mCores;
-			TiLogCore* mCurrCore;
+
+			struct
+			{
+				std::array<TiLogCore*, TILOG_DAEMON_PROCESSER_NUM> mCoreArr;
+				MultiSet<TiLogCoreMini> mCoreMap;
+				uint64_t mSeq{};
+				atomic<uint64_t> mCoreWaitCount{};
+				TILOG_MUTEXABLE_CLASS_MACRO_WITH_CV(OptimisticMutex, mtx, cv_type, cv)
+			} mScheduler;
+
 
 			struct MergeStru
 			{
@@ -1482,6 +1505,8 @@ namespace tilogspace
 				Vector<ThreadStru*> mDyingThreadStrus;
 				atomic<uint32_t> mPollPeriodMs = { TILOG_POLL_THREAD_MAX_SLEEP_MS };
 				TiLogTime s_log_last_time{ tilogtimespace::ELogTime::MAX };
+				uint64_t free_core_use_cnt = 0;
+				uint64_t nofree_core_use_cnt = 0;
 				const char* GetName() override { return "poll"; }
 				// CoreThrdEntryFuncType GetThrdEntryFunc() override { return &TiLogDaemon::thrdFuncPoll; }
 				CoreThrdEntryFuncType GetThrdEntryFunc() override { return nullptr; }
@@ -2028,37 +2053,32 @@ namespace tilogspace
 	namespace internal
 	{
 #ifdef __________________________________________________TiLogCore__________________________________________________
-		TiLogCore::TiLogCore(TiLogEngine* e)
-			: mTiLogEngine(e), mTiLogPrinterManager(&e->tiLogPrinterManager), mTiLogMap(&TiLogEngines::getRInstance().tilogmap)
+		TiLogCore::TiLogCore(TiLogDaemon* d)
+			: TiLogCoreMini(TiLogCoreMini::SEQ_FREE, this), mTiLogDaemon(d), mTiLogEngine(d->mTiLogEngine),
+			  mTiLogPrinterManager(&mTiLogEngine->tiLogPrinterManager), mTiLogMap(&TiLogEngines::getRInstance().tilogmap)
 		{
 			DEBUG_PRINTA("TiLogCore::TiLogCore %p\n", this);
-			// TODO only happens in mingw64,Windows,maybe a mingw64 bug? see DEBUG_PRINTA("test printf lf %lf\n",1.0)
-			DEBUG_PRINTA("TiLogCore fix dtoa deadlock in (s)printf for mingw64 %f %f", 1.0f, 1.0);
 			CreateCoreThread();
-
-			mInited = true;
-			// TODO //WaitPrepared("TiLogCore::TiLogCore waiting\n");
 		}
 
 		TiLogCore::~TiLogCore() { mThread.join(); }
 
 		inline void TiLogCore::CreateCoreThread()
 		{
-			mStatus = RUN;
 			auto& thrd = *this;
 			mThread = std::move(std::thread([this, &thrd] {
 				char tname[16];
 				snprintf(tname, 16, "%s@%d", thrd.GetName(), (int)this->mTiLogEngine->mod);
 				SetThreadName((thrd_t)-1, tname);
 				auto f = thrd.GetThrdEntryFunc();
+				mStatus = RUN;
 				(this->*f)();
 			}));
 		}
 
 		void TiLogCore::Entry()
 		{
-			// TODO
-			// InitCoreThreadBeforeRun(" Merge ");	   // this thread is no need log
+			mTiLogDaemon->InitCoreThreadBeforeRun(GetName());
 			while (true)
 			{
 				if (mStatus == ON_FINAL_LOOP) { break; }
@@ -2085,12 +2105,22 @@ namespace tilogspace
 					TiLogStreamHelper::DestroyPushedTiLogBean(mGC.mGCList, mGC.cache);
 					mGC.mGCList.clear();
 				}
-				lk_merge.unlock();
+				TiLogDaemon::InitMergeLogVecVec(mMerge.mMergeLogVecVec);
+				mTiLogDaemon->ChangeCoreSeq(this, TiLogCoreMini::SEQ_FREE);
 			}
-			// TODO
-			// DEBUG_PRINTA("mMerge.mMergedSize %llu\n", (long long unsigned)mMerge.mMergedSize);
-			// AtInternalThreadExit(&mMerge, &mDeliver);
-			// return;
+			DEBUG_PRINTA("mMerge.mMergedSize %llu\n", (long long unsigned)mMerge.mMergedSize);
+			TiLogCore* core = nullptr;
+			auto& schd = mTiLogDaemon->mScheduler;
+			synchronized(schd)
+			{
+				TiLogCoreMini cmini = *this;
+				auto it = schd.mCoreMap.find(cmini);
+				DEBUG_ASSERT(it != schd.mCoreMap.end());
+				it = std::next(it);
+				if (it != schd.mCoreMap.end()) { core = (*it).core; }
+			}
+			mTiLogDaemon->AtInternalThreadExit(this, core);
+			return;
 		}
 
 		inline bool TiLogDaemon::LocalCircularQueuePushBack(ThreadStru& stru, TiLogBean* obj)
@@ -2158,15 +2188,18 @@ namespace tilogspace
 			: mTiLogEngine(e), mTiLogPrinterManager(&e->tiLogPrinterManager), mTiLogMap(&TiLogEngines::getRInstance().tilogmap)
 		{
 			DEBUG_PRINTA("TiLogDaemon::TiLogDaemon %p\n", this);
-			// TODO only happens in mingw64,Windows,maybe a mingw64 bug? see DEBUG_PRINTA("test printf lf %lf\n",1.0)
-			DEBUG_PRINTA("TiLogDaemon fix dtoa deadlock in (s)printf for mingw64 %f %f", 1.0f, 1.0);
 
-			mCores.emplace_back(new TiLogCore(e));
-			mCurrCore = mCores[0];
+			for (size_t i = 0; i < TILOG_DAEMON_PROCESSER_NUM; ++i)
+			{
+				auto core = new TiLogCore(this);
+				mScheduler.mCoreArr[i] = core;
+				TiLogCoreMini cmini{ TiLogCoreMini::SEQ_FREE, core };
+				mScheduler.mCoreMap.emplace(cmini);
+			}
 			mPollThread = std::move(std::thread([this] { thrdFuncPoll(); }));
 
 			mInited = true;
-			// TODO //WaitPrepared("TiLogCore::TiLogCore waiting\n");
+			WaitPrepared("TiLogDaemon::TiLogDaemon waiting\n");
 		}
 
 		TiLogDaemon::~TiLogDaemon()
@@ -2177,7 +2210,7 @@ namespace tilogspace
 			NotifyPoll();
 
 			mPollThread.join();
-			for (auto c : mCores)
+			for (auto c : mScheduler.mCoreArr)
 			{
 				delete c;
 			}
@@ -2194,7 +2227,7 @@ namespace tilogspace
 		void TiLogDaemon::FreeMemory()
 		{
 			DEBUG_PRINTA("FreeMemory begin\n");
-			DestroyThreadStrus(mThreadStruQueue.priThrdQueue);
+			DestroyThreadStrus(mThreadStruQueue.coreThrdQueue);
 			DEBUG_PRINTA("FreeMemory exit\n");
 		}
 
@@ -2217,7 +2250,15 @@ namespace tilogspace
 			}
 		}
 
-		bool TiLogDaemon::Prepared() { return mTiLogPrinterManager->Prepared() && mExistThreads == 4; }
+		bool TiLogDaemon::Prepared()
+		{
+			if (!mTiLogPrinterManager->Prepared()) { return false; }
+			for (auto c : mScheduler.mCoreArr)
+			{
+				if (c->mStatus != RUN) { return false; }
+			}
+			return true;
+		}
 
 		void TiLogDaemon::WaitPrepared(TiLogStringView msg)
 		{
@@ -2374,19 +2415,20 @@ namespace tilogspace
 			}
 		}
 
-		void TiLogDaemon::InitMergeLogVecVec(size_t needMergeSortReserveSize)
+		void TiLogDaemon::InitMergeLogVecVec(MergeVecVecLogcahes& vv, size_t needMergeSortReserveSize)
 		{
-			mMerge.mMergeLogVecVec.resize(needMergeSortReserveSize);
-			for (VecLogCache& vecLogCache : mMerge.mMergeLogVecVec)
+			if (needMergeSortReserveSize != SIZE_MAX) { vv.resize(needMergeSortReserveSize); }
+			for (VecLogCache& vecLogCache : vv)
 			{
 				vecLogCache.clear();
 			}
-			mMerge.mMergeLogVecVec.mIndex = 0;
+			vv.mIndex = 0;
 		}
 
 		void TiLogDaemon::CollectRawDatas()
 		{
-			DEBUG_PRINTI("Begin of MergeSortForGlobalQueue\n");
+			DEBUG_PRINTD("Begin of CollectRawDatas\n");
+			size_t init_size = 0;
 			TiLogBean referenceBean;
 			referenceBean.time() = mPoll.s_log_last_time = TiLogTime::now();	// referenceBean's time is the biggest up to now
 
@@ -2394,10 +2436,11 @@ namespace tilogspace
 			{
 				size_t availQueueSize = mThreadStruQueue.availQueue.size();
 				size_t waitMergeQueueSize = mThreadStruQueue.waitMergeQueue.size();
-				InitMergeLogVecVec(availQueueSize + waitMergeQueueSize);
-				DEBUG_PRINTI("MergeThreadStruQueueToSet availQueue.size()= %u\n", (unsigned)availQueueSize);
+				init_size = availQueueSize + waitMergeQueueSize;
+				InitMergeLogVecVec(mMerge.mMergeLogVecVec,init_size);
 				MergeThreadStruQueueToSet(mThreadStruQueue.availQueue, referenceBean);
-				DEBUG_PRINTI("MergeThreadStruQueueToSet waitMergeQueue.size()= %u\n", (unsigned)waitMergeQueueSize);
+				DEBUG_PRINTI(
+					"CollectRawDatas availQueueSize %u waitMergeQueueSize %u\n", (unsigned)availQueueSize, (unsigned)waitMergeQueueSize);
 				MergeThreadStruQueueToSet(mThreadStruQueue.waitMergeQueue, referenceBean);
 			}
 		}
@@ -2623,6 +2666,7 @@ namespace tilogspace
 
 		void TiLogCore::pushLogsToPrinters(IOBean* pIObean)
 		{
+			static_assert(TILOG_STRICT_ORDERED_LOG == FALSE, "strict ordered log not implement!");
 			mTiLogPrinterManager->pushLogsToPrinters({ pIObean, [this](IOBean* p) { mDeliver.mIOBeanPool.release(p); } });
 		}
 
@@ -2668,9 +2712,22 @@ namespace tilogspace
 			if (!mPoll.mDoing) mPoll.mCV.notify_one();
 		}
 
+		//core should be locked
+		void TiLogDaemon::ChangeCoreSeq(TiLogCore* core, uint64_t seq)
+		{
+			TiLogCoreMini cmini_old = *core;
+			core->seq = seq;
+			TiLogCoreMini cmini_new = *core;
+			synchronized(mScheduler)
+			{
+				mScheduler.mCoreMap.erase(cmini_old);
+				mScheduler.mCoreMap.emplace(cmini_new);
+			}
+		}
+
 		void TiLogDaemon::thrdFuncPoll()
 		{
-			InitCoreThreadBeforeRun(" Poll ");	  // this thread is no need log
+			InitCoreThreadBeforeRun(mPoll.GetName());
 			SteadyTimePoint lastPoolTime{ SteadyTimePoint ::min() }, nowTime{};
 			for (;;)
 			{
@@ -2683,13 +2740,38 @@ namespace tilogspace
 				mPoll.mDoing = true;
 
 				{
+					if (mPoll.mStatus == ON_FINAL_LOOP)
+					{
+						for (auto core : mScheduler.mCoreArr)
+						{
+							GetCoreThrdLock(*core);	   // wait for all core
+						}
+					}
 					CollectRawDatas();
-
-					synchronized(mCurrCore->mMtx) { mCurrCore->mMerge.mMergeLogVecVec.swap(mMerge.mMergeLogVecVec); }
-					mCurrCore->mCV.notify_one();
-
+					TiLogCore* currCore;
+					synchronized(mScheduler)
+					{
+						TiLogCoreMini free_core;
+						auto it = mScheduler.mCoreMap.lower_bound(free_core);
+						if (it != mScheduler.mCoreMap.end())
+						{
+							++mPoll.free_core_use_cnt;
+							currCore = it->core;
+						} else
+						{
+							++mPoll.nofree_core_use_cnt;
+							currCore = mScheduler.mCoreMap.begin()->core;
+						}
+					}
+					synchronized(currCore->mMtx)
+					{
+						ChangeCoreSeq(currCore, mScheduler.mSeq);
+						mScheduler.mSeq++;
+						DEBUG_ASSERT(currCore->mMerge.mMergeLogVecVec.mIndex == 0);
+						currCore->mMerge.mMergeLogVecVec.swap(mMerge.mMergeLogVecVec);
+					}
+					currCore->mCV.notify_one();
 					mMerge.mRawDatas.clear();
-					mMerge.mMergeLogVecVec.clear();
 					if (mPoll.mMayWaitingThrds)
 					{
 						mPoll.mCvWait.notify_all();
@@ -2797,33 +2879,30 @@ namespace tilogspace
 			}
 
 			DEBUG_ASSERT(mToExit);
-			DEBUG_PRINTI("poll thrd prepare to exit,try last poll\n");
-			
-			//TODO
-			//AtInternalThreadExit(&mPoll, &mMerge);
-			//return;
+			DEBUG_PRINTA(
+				"poll thrd prepare to exit,try last poll mPoll.free_core_use_cnt %llu mPoll.nofree_core_use_cnt %llu hit %4.1f%%\n",
+				(long long unsigned)mPoll.free_core_use_cnt, (long long unsigned)mPoll.nofree_core_use_cnt,
+				(100.0 * mPoll.free_core_use_cnt / (mPoll.free_core_use_cnt + mPoll.nofree_core_use_cnt)));
+			mScheduler.lock();
+			auto core = mScheduler.mCoreMap.begin()->core;
+			mScheduler.unlock();
+			AtInternalThreadExit(&mPoll, core);
+			return;
 		}
 
 		inline void TiLogDaemon::InitCoreThreadBeforeRun(const char* tag)
 		{
-			InitThreadStruBeforeRun(mThreadStruQueue.priThrdQueue, mExistThreads, tag);
-		}
-
-		inline void TiLogDaemon::InitThreadStruBeforeRun(List<ThreadStru*>& dstQueue, atomic_int32_t& counter, const char* tag)
-		{
-			DEBUG_PRINTA("InitThreadStruBeforeRun %s\n", tag);
+			DEBUG_PRINTA("InitCoreThreadBeforeRun %s\n", tag);
 			while (!mInited)	// make sure all variables are inited
 			{
 				this_thread::yield();
 			}
-			GetThreadStru(&dstQueue);
-			++counter;
+			GetThreadStru(&mThreadStruQueue.coreThrdQueue);
 			return;
 		}
 
-		inline void TiLogCore::AtInternalThreadExit(CoreThrdStru* thrd, CoreThrdStru* nextExitThrd)
+		inline void TiLogDaemon::AtInternalThreadExit(CoreThrdStru* thrd, CoreThrdStru* nextExitThrd)
 		{
-			#if 0
 			DEBUG_PRINTI("thrd %s to exit.\n", thrd->GetName());
 			thrd->mStatus = TO_EXIT;
 			CoreThrdStru* t = nextExitThrd;
@@ -2844,9 +2923,7 @@ namespace tilogspace
 			}
 
 			DEBUG_PRINTI("thrd %s exit.\n", thrd->GetName());
-			mExistThreads--;
 			thrd->mStatus = DEAD;
-			#endif
 		}
 
 		inline uint64_t TiLogDaemon::GetPrintedLogs() { return mPrintedLogs; }
@@ -2977,6 +3054,8 @@ namespace tilogspace
 	TiLogModBase& TiLog::GetMoudleBaseRef(mod_id_t mod) { return TiLogEngines::getRInstance().engines[mod].tiLogModBase; }
 	TiLog::TiLog()
 	{
+		// TODO only happens in mingw64,Windows,maybe a mingw64 bug? see DEBUG_PRINTA("test printf lf %lf\n",1.0)
+		DEBUG_PRINTA("fix dtoa deadlock in (s)printf for mingw64 %f %f", 1.0f, 1.0);
 		ctor_iostream_mtx();
 		atexit([] { dtor_iostream_mtx(); });
 		ctor_single_instance_printers();
