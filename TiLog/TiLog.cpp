@@ -3,7 +3,6 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <time.h>
-#include <signal.h>
 #include <string.h>
 #include <iostream>
 #include <sstream>
@@ -12,7 +11,6 @@
 #include <chrono>
 #include <algorithm>
 #include <thread>
-#include <future>
 #include <atomic>
 #include <utility>
 
@@ -243,23 +241,6 @@ namespace tiloghelperspace
 		}
 	}
 
-	static inline bool tryLocks(std::unique_lock<mutex>& lk1, std::mutex& mtx1)
-	{
-		lk1 = unique_lock<mutex>(mtx1, std::try_to_lock);
-		return lk1.owns_lock();
-	}
-
-	static inline bool tryLocks(std::unique_lock<mutex>& lk1, std::mutex& mtx1, std::unique_lock<mutex>& lk2, std::mutex& mtx2)
-	{
-		lk1 = unique_lock<mutex>(mtx1, std::try_to_lock);
-		if (lk1.owns_lock())
-		{
-			lk2 = unique_lock<mutex>(mtx2, std::try_to_lock);
-			if (lk2.owns_lock()) { return true; }
-			lk1.unlock();
-		}
-		return false;
-	}
 
 	//return string such as ||2022-06-06  19:35:08.064|| (24Bytes)
 	//or return string such as ||2022-06-06 19:25:10|| (19Bytes)
@@ -1647,8 +1628,8 @@ namespace tilogspace
 			TiLogModBase tiLogModBase;
 			mod_id_t mod;
 			TiLogPrinterManager tiLogPrinterManager;
-			TiLogDaemon tiLogCore;
-			inline TiLogEngine(mod_id_t m) : tiLogModBase(), mod(m), tiLogPrinterManager(this), tiLogCore(this)
+			TiLogDaemon tiLogDaemon;
+			inline TiLogEngine(mod_id_t m) : tiLogModBase(), mod(m), tiLogPrinterManager(this), tiLogDaemon(this)
 			{
 				tiLogModBase.engine = this;
 				tiLogModBase.mod = mod;
@@ -2992,14 +2973,14 @@ namespace tilogspace
 	void TiLogModBase::AsyncEnablePrinter(EPrinterID printer) { engine->tiLogPrinterManager.AsyncEnablePrinter(printer); }
 	void TiLogModBase::AsyncDisablePrinter(EPrinterID printer) { engine->tiLogPrinterManager.AsyncDisablePrinter(printer); }
 	void TiLogModBase::AsyncSetPrinters(printer_ids_t printerIds) { engine->tiLogPrinterManager.AsyncSetPrinters(printerIds); }
-	void TiLogModBase::Sync() { engine->tiLogCore.Sync(); }
-	void TiLogModBase::PushLog(TiLogBean* pBean) { engine->tiLogCore.PushLog(pBean); }
-	uint64_t TiLogModBase::GetPrintedLogs() { return engine->tiLogCore.GetPrintedLogs(); }
-	void TiLogModBase::ClearPrintedLogsNumber() { engine->tiLogCore.ClearPrintedLogsNumber(); }
+	void TiLogModBase::Sync() { engine->tiLogDaemon.Sync(); }
+	void TiLogModBase::PushLog(TiLogBean* pBean) { engine->tiLogDaemon.PushLog(pBean); }
+	uint64_t TiLogModBase::GetPrintedLogs() { return engine->tiLogDaemon.GetPrintedLogs(); }
+	void TiLogModBase::ClearPrintedLogsNumber() { engine->tiLogDaemon.ClearPrintedLogsNumber(); }
 
 	void TiLogModBase::FSync()
 	{
-		engine->tiLogCore.Sync();
+		engine->tiLogDaemon.Sync();
 		engine->tiLogPrinterManager.waitForIO();
 	}
 	printer_ids_t TiLogModBase::GetPrinters() { return engine->tiLogPrinterManager.GetPrinters(); }
@@ -3010,19 +2991,19 @@ namespace tilogspace
 	bool TiLogModBase::IsPrinterActive(EPrinterID printer) { return engine->tiLogPrinterManager.IsPrinterActive(printer); }
 	void TiLogModBase::EnablePrinter(EPrinterID printer)
 	{
-		engine->tiLogCore.AfterDeliver([this, printer] { AsyncEnablePrinter(printer); });
+		engine->tiLogDaemon.AfterDeliver([this, printer] { AsyncEnablePrinter(printer); });
 	}
 	void TiLogModBase::DisablePrinter(EPrinterID printer)
 	{
-		engine->tiLogCore.AfterDeliver([this, printer] { AsyncEnablePrinter(printer); });
+		engine->tiLogDaemon.AfterDeliver([this, printer] { AsyncEnablePrinter(printer); });
 	}
 
 	void TiLogModBase::SetPrinters(printer_ids_t printerIds)
 	{
-		engine->tiLogCore.AfterDeliver([this, printerIds] { AsyncSetPrinters(printerIds); });
+		engine->tiLogDaemon.AfterDeliver([this, printerIds] { AsyncSetPrinters(printerIds); });
 	}
 
-	void TiLogModBase::AfterSync(callback_t callback) { engine->tiLogCore.AfterDeliver(callback); }
+	void TiLogModBase::AfterSync(callback_t callback) { engine->tiLogDaemon.AfterDeliver(callback); }
 
 	void TiLogModBase::SetLogLevel(ELevel level) { engine->tiLogPrinterManager.SetLogLevel(level); }
 	ELevel TiLogModBase::GetLogLevel() { return engine->tiLogPrinterManager.GetLogLevel(); }

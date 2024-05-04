@@ -214,8 +214,6 @@ namespace tilogspace
 	// interval of user mode clock sync with kernel(microseconds),should be smaller than timestamp print accuracy
 	constexpr static uint32_t TILOG_USER_MODE_CLOCK_UPDATE_US = TILOG_IS_WITH_MILLISECONDS ? 300 : 300000;
 
-	constexpr static uint32_t TILOG_CODE_CACHED_LINE_DEC_MAX = (19999 + 1); // cached line -> line string table size
-
 	constexpr static uint32_t TILOG_NO_USED_STREAM_LENGTH = 64;	// no used stream length
 
 	constexpr static uint32_t TILOG_DAEMON_PROCESSER_NUM = 4;	// tilog daemon processer num
@@ -227,7 +225,6 @@ namespace tilogspace
 	constexpr static uint32_t TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MIN_CENTI = 120;	// range(0,200],a min percent number to adjust deliver cache capacity
 	constexpr static uint32_t TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MAX_CENTI = 150;	// range(0,200],a max percent number to adjust deliver cache capacity
 
-	constexpr static size_t TILOG_GLOBAL_BUF_SIZE = ((size_t)1 << 20U);						 // global cache string reserve length
 	constexpr static size_t TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE = ((size_t)1 << 8U);			 // single thread cache queue max length
 	
 	constexpr static size_t TILOG_DELIVER_QUEUE_SIZE = ((size_t)4);	// deliver queue max length
@@ -252,7 +249,7 @@ namespace tilogspace
 		* (TILOG_AVERAGE_CONCURRENT_THREAD_NUM + TILOG_MERGE_RAWDATA_QUEUE_FULL_SIZE);	  // default memory of a single deliver cache
 
 
-	constexpr static size_t TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE= (16U << 20U);	// log size per file,it is not accurate,especially TILOG_GLOBAL_BUF_SIZE is bigger
+	constexpr static size_t TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE= (16U << 20U);	// log size per file,it is not accurate,especially TILOG_DELIVER_CACHE_DEFAULT_MEMORY_BYTES is bigger
 }	 // namespace tilogspace
 
 
@@ -1352,14 +1349,6 @@ namespace tilogspace
 namespace tilogspace
 {
 // clang-format off
-#define TILOG_AUTO_SINGLE_INSTANCE_DECLARE(CLASS_NAME, ...)                                                                                \
-	inline static CLASS_NAME* getInstance()                                                                                                \
-	{                                                                                                                                      \
-		static CLASS_NAME* obj = new CLASS_NAME(__VA_ARGS__);                                                                              \
-		return obj;                                                                                                                        \
-	};                                                                                                                                     \
-	inline static CLASS_NAME& getRInstance() { return *getInstance(); };
-
 #define TILOG_SINGLE_INSTANCE_DECLARE_OUTER(CLASS_NAME) CLASS_NAME* CLASS_NAME::s_instance;
 #define TILOG_SINGLE_INSTANCE_DECLARE(CLASS_NAME, ...)                                                                                     \
 	inline static CLASS_NAME* getInstance() { return CLASS_NAME::s_instance; };                                                            \
@@ -1535,13 +1524,6 @@ namespace tilogspace
 	constexpr size_t TILOG_INT64_MAX_CHAR_LEN = (20 + 1);
 	constexpr size_t TILOG_DOUBLE_MAX_CHAR_LEN = (25 + 1);
 	constexpr size_t TILOG_FLOAT_MAX_CHAR_LEN = (25 + 1);	  // TODO
-#if TILOG_IS_64BIT_OS
-	constexpr size_t TILOG_TID_T_MAX_CHAR_LEN = TILOG_UINT64_MAX_CHAR_LEN;
-	constexpr size_t TILOG_HEX_TID_T_MAX_CHAR_LEN = 16 + 1;
-#else
-	constexpr size_t TILOG_TID_T_MAX_CHAR_LEN = TILOG_UINT32_MAX_CHAR_LEN;
-	constexpr size_t TILOG_HEX_TID_T_MAX_CHAR_LEN = 8 + 1;
-#endif
 
 }	 // namespace tilogspace
 
