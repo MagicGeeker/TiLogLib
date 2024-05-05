@@ -1255,7 +1255,7 @@ namespace tilogspace
 
 
 		class TiLogCore;
-		using CoreThrdEntryFuncType = void (TiLogCore::*)();
+		using CoreThrdEntryFuncType = void (*)(void*);
 
 		enum CoreThrdStruBaseStatus
 		{
@@ -1287,7 +1287,8 @@ namespace tilogspace
 			MiniSpinMutex mMtxWait;			   // wait thread complete mutex
 			uint32_t mMayWaitingThrds{ 0 };	   // dirty thread num waiting thrd
 
-			std::atomic<bool> mDoing{ false };
+			std::atomic<bool> mDoing{ false };	  // not accurate,no need own mMtx
+			bool mNeedWoking{};					  // protected by mMtx
 		};
 
 		struct DeliverCallBack
@@ -1322,14 +1323,16 @@ namespace tilogspace
 
 		public:
 			const char* GetName() override { return "PROC"; };
-			CoreThrdEntryFuncType GetThrdEntryFunc() override { return &TiLogCore::Entry; };
-			bool IsBusy() override { return mDoing; };
+			CoreThrdEntryFuncType GetThrdEntryFunc() override
+			{
+				return [](void* core) { ((TiLogCore*)(core))->Entry(); };
+			};
+			bool IsBusy() override { return mNeedWoking; };
 
 			inline explicit TiLogCore(TiLogDaemon*d);
 			inline ~TiLogCore() final;
 
 		private:
-			inline void CreateCoreThread();
 
 			void Entry();
 
@@ -1360,7 +1363,7 @@ namespace tilogspace
 
 			struct MergeStru
 			{
-				VecLogCache mMergeCaches;						   // output
+				VecLogCache mMergeCaches;
 				MergeVecVecLogcahes mMergeLogVecVec;			   // input
 				VecLogCache mMergeSortVec{};					   // temp vector
 				VecLogCachePtrPriorQueue mThreadStruPriorQueue;	   // prior queue of ThreadStru cache
@@ -1368,13 +1371,13 @@ namespace tilogspace
 			} mMerge;
 			struct DeliverStru
 			{
-				VecLogCache mDeliverCache;	  // input
+				VecLogCache mDeliverCache;
 				atomic_uint64_t mDeliveredTimes{};
 				std::atomic<DeliverCallBack*> mCallback{ nullptr };
 				TiLogTime::origin_time_type mPreLogTime{};
 				alignas(32) char mlogprefix[TILOG_PREFIX_LOG_SIZE];
 				char* mctimestr;
-				IOBean mIoBean;	   // output
+				IOBean mIoBean;
 				SyncedIOBeanPool mIOBeanPool;
 				static_assert(sizeof(mlogprefix) == TILOG_PREFIX_LOG_SIZE, "fatal");
 				DeliverStru();
@@ -1387,7 +1390,7 @@ namespace tilogspace
 			} mSyncControler;
 			struct GCStru
 			{
-				VecLogCache mGCList;	// input
+				VecLogCache mGCList;
 				TiLogStreamHelper::TiLogStreamMemoryManagerCache cache;
 			} mGC;
 		};
@@ -1400,6 +1403,7 @@ namespace tilogspace
 		public:
 			explicit TiLogDaemon(TiLogEngine* e);
 			~TiLogDaemon();
+			std::thread CreateCoreThread(CoreThrdStruBase& thrd, void* p);
 			inline void PushLog(TiLogBean* pBean);
 
 			inline uint64_t GetPrintedLogs();
@@ -1462,7 +1466,6 @@ namespace tilogspace
 			atomic_bool mSyncing{};
 
 			ThreadStruQueue mThreadStruQueue;
-			std::thread mPollThread;
 			TiLogTaskQueue mTaskQueue;
 
 			struct
@@ -1483,14 +1486,17 @@ namespace tilogspace
 
 			struct PollStru : public CoreThrdStru
 			{
+				std::thread mThrd;
 				Vector<ThreadStru*> mDyingThreadStrus;
 				atomic<uint32_t> mPollPeriodMs = { TILOG_POLL_THREAD_MAX_SLEEP_MS };
 				TiLogTime s_log_last_time{ tilogtimespace::ELogTime::MAX };
 				uint64_t free_core_use_cnt = 0;
 				uint64_t nofree_core_use_cnt = 0;
 				const char* GetName() override { return "poll"; }
-				// CoreThrdEntryFuncType GetThrdEntryFunc() override { return &TiLogDaemon::thrdFuncPoll; }
-				CoreThrdEntryFuncType GetThrdEntryFunc() override { return nullptr; }
+				CoreThrdEntryFuncType GetThrdEntryFunc() override
+				{
+					return [](void* d) { ((TiLogDaemon*)(d))->thrdFuncPoll(); };
+				}
 				bool IsBusy() override { return mDoing; };
 				void SetPollPeriodMs(uint32_t ms)
 				{
@@ -2039,22 +2045,21 @@ namespace tilogspace
 			  mTiLogPrinterManager(&mTiLogEngine->tiLogPrinterManager), mTiLogMap(&TiLogEngines::getRInstance().tilogmap)
 		{
 			DEBUG_PRINTA("TiLogCore::TiLogCore %p\n", this);
-			CreateCoreThread();
+			mThread = mTiLogDaemon->CreateCoreThread(*this, this);
 		}
 
 		TiLogCore::~TiLogCore() { mThread.join(); }
 
-		inline void TiLogCore::CreateCoreThread()
+		std::thread TiLogDaemon::CreateCoreThread(CoreThrdStruBase& thrd, void* p)
 		{
-			auto& thrd = *this;
-			mThread = std::move(std::thread([this, &thrd] {
+			return std::thread([this, &thrd, p] {
 				char tname[16];
 				snprintf(tname, 16, "%s@%d", thrd.GetName(), (int)this->mTiLogEngine->mod);
 				SetThreadName((thrd_t)-1, tname);
 				auto f = thrd.GetThrdEntryFunc();
-				mStatus = RUN;
-				(this->*f)();
-			}));
+				thrd.mStatus = RUN;
+				f(p);
+			});
 		}
 
 		void TiLogCore::Entry()
@@ -2062,11 +2067,14 @@ namespace tilogspace
 			mTiLogDaemon->InitCoreThreadBeforeRun(GetName());
 			while (true)
 			{
-				if (mStatus == ON_FINAL_LOOP) { break; }
-				if (mStatus == PREPARE_FINAL_LOOP) { mStatus = ON_FINAL_LOOP; }
 				mDoing = false;
 				std::unique_lock<std::mutex> lk_merge(mMtx);
-				mCV.wait(lk_merge);
+				if (!mNeedWoking)
+				{
+					if (mStatus == ON_FINAL_LOOP) { break; }
+					if (mStatus == PREPARE_FINAL_LOOP) { mStatus = ON_FINAL_LOOP; }
+				}
+				mCV.wait(lk_merge, [this] { return mNeedWoking || mStatus >= PREPARE_FINAL_LOOP; });
 				mDoing = true;
 
 				{
@@ -2088,6 +2096,7 @@ namespace tilogspace
 				}
 				TiLogDaemon::InitMergeLogVecVec(mMerge.mMergeLogVecVec);
 				mTiLogDaemon->ChangeCoreSeq(this, TiLogCoreMini::SEQ_FREE);
+				mNeedWoking = false;
 			}
 			DEBUG_PRINTA("mMerge.mMergedSize %llu\n", (long long unsigned)mMerge.mMergedSize);
 			TiLogCore* core = nullptr;
@@ -2177,7 +2186,7 @@ namespace tilogspace
 				TiLogCoreMini cmini{ TiLogCoreMini::SEQ_FREE, core };
 				mScheduler.mCoreMap.emplace(cmini);
 			}
-			mPollThread = std::move(std::thread([this] { thrdFuncPoll(); }));
+			mPoll.mThrd = CreateCoreThread(mPoll, this);
 
 			mInited = true;
 			WaitPrepared("TiLogDaemon::TiLogDaemon waiting\n");
@@ -2190,7 +2199,7 @@ namespace tilogspace
 			mPoll.SetPollPeriodMs(TILOG_POLL_THREAD_SLEEP_MS_IF_TO_EXIT);
 			NotifyPoll();
 
-			mPollThread.join();
+			mPoll.mThrd.join();
 			for (auto c : mScheduler.mCoreArr)
 			{
 				delete c;
@@ -2744,12 +2753,14 @@ namespace tilogspace
 							currCore = mScheduler.mCoreMap.begin()->core;
 						}
 					}
-					synchronized(currCore->mMtx)
 					{
+						auto lk = GetCoreThrdLock(*currCore);
+						DEBUG_ASSERT(!currCore->mNeedWoking);
 						ChangeCoreSeq(currCore, mScheduler.mSeq);
 						mScheduler.mSeq++;
 						DEBUG_ASSERT(currCore->mMerge.mMergeLogVecVec.mIndex == 0);
 						currCore->mMerge.mMergeLogVecVec.swap(mMerge.mMergeLogVecVec);
+						currCore->mNeedWoking = true;
 					}
 					currCore->mCV.notify_one();
 					mMerge.mRawDatas.clear();
