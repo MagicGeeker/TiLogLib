@@ -148,7 +148,7 @@
 //#define TILOG_ALIGNED_OPERATOR_DELETE(ptr, alignment) ::operator delete(ptr,(std::align_val_t)alignment,std::nothrow)
 
 #define TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL FALSE //TRUE or FALSE,if false TiLog::SetLogLevel no effect
-#define TILOG_STRICT_ORDERED_LOG FALSE //TRUE or FALSE,if false some log may be unordered in log printer
+#define TILOG_STRICT_ORDERED_LOG TRUE //TRUE or FALSE,if false some log may be unordered in log printer
 #define TILOG_ERROR_FORMAT_STRING  " !!!ERR FMT "
 
 /**************************************************user-defined data structure**************************************************/
@@ -1484,9 +1484,16 @@ namespace tilogspace
 
 		void release(ObjectPtr p)
 		{
-			FeatType::recreate(p);
-			synchronized(mtx) { pool.emplace_back(p); }
-			cv.notify_one();
+			synchronized(mtx)
+			{
+				if (pool.size() >= SIZE)
+				{
+					mtx.unlock();
+					FeatType::Destroy(p);
+					return;
+				}
+				pool.emplace_back(p);
+			}
 		}
 
 		ObjectPtr acquire()
@@ -1494,10 +1501,15 @@ namespace tilogspace
 			ObjectPtr p;
 			synchronized_u(lk, mtx)
 			{
-				cv.wait(lk, [this] { return !pool.empty(); });
+				if (pool.empty())
+				{
+					lk.unlock();
+					return FeatType::create();
+				}
 				p = pool.back();
 				pool.pop_back();
 			}
+			FeatType::recreate(p);
 			return p;
 		}
 
@@ -1506,7 +1518,7 @@ namespace tilogspace
 		static_assert(SIZE > 0, "fatal error");
 
 		Vector<ObjectPtr> pool{ SIZE };
-		TILOG_MUTEXABLE_CLASS_MACRO_WITH_CV(typename FeatType::mutex_type, mtx, CondType, cv);
+		TILOG_MUTEXABLE_CLASS_MACRO(typename FeatType::mutex_type, mtx);
 	};
 
 

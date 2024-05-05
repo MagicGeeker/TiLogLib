@@ -1089,6 +1089,7 @@ namespace tilogspace
 
 		struct IOBean : public TiLogCoreString
 		{
+			TiLogCore* core{};
 			RangeUInt32 mFreeMemTimesCenti = { 80, 0, 100 };	  // free memory times in last 100 times(not exact)
 			Deque<uint32_t> mSizes = Deque<uint32_t>(10, TILOG_DELIVER_CACHE_DEFAULT_MEMORY_BYTES);
 			uint32_t mSizeSum{ 10 * TILOG_DELIVER_CACHE_DEFAULT_MEMORY_BYTES };
@@ -1350,6 +1351,8 @@ namespace tilogspace
 
 			inline void DeliverLogs();
 
+			inline void MayPushLog();
+
 		private:
 			TiLogDaemon* mTiLogDaemon;
 			TiLogEngine* mTiLogEngine;
@@ -1378,7 +1381,10 @@ namespace tilogspace
 				alignas(32) char mlogprefix[TILOG_PREFIX_LOG_SIZE];
 				char* mctimestr;
 				IOBean mIoBean;
+				IOBean* mIoBeanForPush;	   // output
 				SyncedIOBeanPool mIOBeanPool;
+				uint64_t mPushLogCount{};
+				uint64_t mPushLogBlockCount{};
 				static_assert(sizeof(mlogprefix) == TILOG_PREFIX_LOG_SIZE, "fatal");
 				DeliverStru();
 
@@ -1474,6 +1480,8 @@ namespace tilogspace
 				MultiSet<TiLogCoreMini> mCoreMap;
 				uint64_t mSeq{};
 				atomic<uint64_t> mCoreWaitCount{};
+
+				Map<uint64_t, IOBean*> mWaitPushLogs;
 				TILOG_MUTEXABLE_CLASS_MACRO_WITH_CV(OptimisticMutex, mtx, cv_type, cv)
 			} mScheduler;
 
@@ -2095,10 +2103,15 @@ namespace tilogspace
 					mGC.mGCList.clear();
 				}
 				TiLogDaemon::InitMergeLogVecVec(mMerge.mMergeLogVecVec);
+				MayPushLog();
 				mTiLogDaemon->ChangeCoreSeq(this, TiLogCoreMini::SEQ_FREE);
 				mNeedWoking = false;
 			}
-			DEBUG_PRINTA("mMerge.mMergedSize %llu\n", (long long unsigned)mMerge.mMergedSize);
+			using llu = long long unsigned;
+			DEBUG_PRINTA(
+				"mMerge.mMergedSize %llu mDeliver.mPushLogCount %llu mDeliver.mPushLogBlockCount %llu no-block rate %4.1f%%\n",
+				(llu)mMerge.mMergedSize, (llu)mDeliver.mPushLogCount, (llu)mDeliver.mPushLogBlockCount,
+				100.0 - 100.0 * mDeliver.mPushLogBlockCount / mDeliver.mPushLogCount);
 			TiLogCore* core = nullptr;
 			auto& schd = mTiLogDaemon->mScheduler;
 			synchronized(schd)
@@ -2654,9 +2667,51 @@ namespace tilogspace
 			return firstLogTime;
 		}
 
+		inline void TiLogCore::MayPushLog()
+		{
+			++mDeliver.mPushLogCount;
+#if !TILOG_STRICT_ORDERED_LOG
+			if (mDeliver.mIoBeanForPush) { pushLogsToPrinters(mDeliver.mIoBeanForPush); }
+#else
+			auto& schd = mTiLogDaemon->mScheduler;
+			synchronized(schd)
+			{
+				if (mDeliver.mIoBeanForPush == nullptr)
+				{
+					DEBUG_PRINTI("%llu no need push empty log\n", (unsigned long long)this->seq);
+					schd.mWaitPushLogs.erase(this->seq);	// mark log handled
+				} else
+				{
+					schd.mWaitPushLogs[this->seq] = mDeliver.mIoBeanForPush;
+				}
+				if (schd.mWaitPushLogs.empty()) { return; }
+				auto it = schd.mWaitPushLogs.begin();
+				if (it->first != this->seq)
+				{
+					++mDeliver.mPushLogBlockCount;
+					DEBUG_PRINTI("%llu cannot push log for ordered-logs\n", (unsigned long long)this->seq);
+					return;
+				}
+				// first log in mWaitPushLogs
+				for (; it != schd.mWaitPushLogs.end();)
+				{
+					IOBean* p = it->second;
+					if (p == nullptr)	 // next log do not complete
+					{
+						return;
+					} else
+					{
+						DEBUG_PRINTI("%llu help %llu push log\n", (unsigned long long)this->seq, (unsigned long long)it->first);
+						p->core->pushLogsToPrinters(p);
+						it = schd.mWaitPushLogs.erase(it);	  // mark log handled
+					}
+				}
+			}
+#endif
+		}
+
 		void TiLogCore::pushLogsToPrinters(IOBean* pIObean)
 		{
-			static_assert(TILOG_STRICT_ORDERED_LOG == FALSE, "strict ordered log not implement!");
 			mTiLogPrinterManager->pushLogsToPrinters({ pIObean, [this](IOBean* p) { mDeliver.mIOBeanPool.release(p); } });
 		}
 
@@ -2681,10 +2736,10 @@ namespace tilogspace
 
 		inline void TiLogCore::DeliverLogs()
 		{
+			mDeliver.mIoBeanForPush = nullptr;
 			if (mDeliver.mDeliverCache.empty()) { return; }
 			VecLogCache& c = mDeliver.mDeliverCache;
 			{
-				if (c.empty()) { return; }
 				mDeliver.mIoBean.clear();
 				mergeLogsToOneString(c);
 				FreeDeliverIoBeanMem();
@@ -2692,7 +2747,8 @@ namespace tilogspace
 				{
 					IOBean* t = mDeliver.mIOBeanPool.acquire();
 					std::swap(mDeliver.mIoBean, *t);
-					pushLogsToPrinters(t);
+					t->core = this;
+					mDeliver.mIoBeanForPush = t;
 				}
 			}
 		}
@@ -2752,6 +2808,7 @@ namespace tilogspace
 							++mPoll.nofree_core_use_cnt;
 							currCore = mScheduler.mCoreMap.begin()->core;
 						}
+						mScheduler.mWaitPushLogs.emplace(mScheduler.mSeq, nullptr);	   // mark log birth
 					}
 					{
 						auto lk = GetCoreThrdLock(*currCore);
