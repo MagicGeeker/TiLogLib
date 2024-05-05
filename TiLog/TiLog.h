@@ -221,6 +221,7 @@ namespace tilogspace
 	constexpr static uint32_t TILOG_POLL_THREAD_MIN_SLEEP_MS = 100;	// min poll period to ensure print every logs for every thread
 	constexpr static uint32_t TILOG_POLL_THREAD_SLEEP_MS_IF_EXIST_THREAD_DYING = 5;	// poll period if some user threads are dying
 	constexpr static uint32_t TILOG_POLL_THREAD_SLEEP_MS_IF_TO_EXIT = 1;	// poll period if some user threads are dying
+	constexpr static uint32_t TILOG_POLL_THREAD_SLEEP_MS_IF_SYNC = 2;	// poll period if sync or fsync
 	constexpr static uint32_t TILOG_POLL_MS_ADJUST_PERCENT_RATE = 75;	// range(0,100),a percent number to adjust poll time
 	constexpr static uint32_t TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MIN_CENTI = 120;	// range(0,200],a min percent number to adjust deliver cache capacity
 	constexpr static uint32_t TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MAX_CENTI = 150;	// range(0,200],a max percent number to adjust deliver cache capacity
@@ -2455,7 +2456,7 @@ namespace tilogspace
 		friend class internal::TiLogPrinterManager;
 	public:
 		TILOG_COMPLEXITY_FOR_THESE_FUNCTIONS(TILOG_TIME_COMPLEXITY_O(1), TILOG_SPACE_COMPLEXITY_O(1))
-		// printer must be static and always valid,so it can NOT be removed but can be disabled
+		// printer must be always valid,so it can NOT be removed but can be disabled
 		// async functions: MAY effect(overwrite) previous printerIds setting
 		void AsyncEnablePrinter(EPrinterID printer);
 		void AsyncDisablePrinter(EPrinterID printer);
@@ -2469,25 +2470,22 @@ namespace tilogspace
 
 	public:
 		TILOG_COMPLEXITY_FOR_THESE_FUNCTIONS(TILOG_TIME_COMPLEXITY_O(n), TILOG_SPACE_COMPLEXITY_O(n))
-
-		using callback_t = std::function<void()>;
-
-		// sync the cached log to printers's task queue,but NOT wait for IO
+		// sync the cached log(timestamp<=now) to printers's task queue,but NOT wait for IO
 		void Sync();
-		// sync the cached log to printers's task queue,and wait for IO
+		// sync the cached logtimestamp<=now) to printers's task queue,and wait for IO
 		void FSync();
 
-		// printer must be static and always valid,so it can NOT be removed but can be disabled
+		// printer must be always valid,so it can NOT be removed but can be disabled
 		// sync functions: NOT effect(overwrite) previous printerIds setting.
 		// Will call TiLog::Sync() function before set new printers
 		void EnablePrinter(EPrinterID printer);
 		void DisablePrinter(EPrinterID printer);
 		void SetPrinters(printer_ids_t printerIds);
-		void AfterSync(callback_t callback);
 
 	public:
 		TILOG_COMPLEXITY_FOR_THESE_FUNCTIONS(TILOG_TIME_COMPLEXITY_O(1), TILOG_SPACE_COMPLEXITY_O(1))
 		// return how many logs has been printed,NOT accurate
+		// async functions
 		uint64_t GetPrintedLogs();
 		// set printed log number=0
 		void ClearPrintedLogsNumber();
@@ -2496,7 +2494,7 @@ namespace tilogspace
 	public:
 		TILOG_COMPLEXITY_FOR_THESE_FUNCTIONS(TILOG_TIME_COMPLEXITY_O(1), TILOG_SPACE_COMPLEXITY_O(1))
 		// Set or get dynamic log level.If TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL is FALSE,SetLogLevel take no effect.
-
+		// async functions
 		void SetLogLevel(ELevel level);
 		ELevel GetLogLevel();
 	public:
@@ -3120,7 +3118,9 @@ namespace tilogspace
 	static_assert(
 		TILOG_POLL_THREAD_MAX_SLEEP_MS > TILOG_POLL_THREAD_MIN_SLEEP_MS
 			&& TILOG_POLL_THREAD_MIN_SLEEP_MS > TILOG_POLL_THREAD_SLEEP_MS_IF_EXIST_THREAD_DYING
+			&& TILOG_POLL_THREAD_MIN_SLEEP_MS > TILOG_POLL_THREAD_SLEEP_MS_IF_SYNC
 			&& TILOG_POLL_THREAD_SLEEP_MS_IF_EXIST_THREAD_DYING > TILOG_POLL_THREAD_SLEEP_MS_IF_TO_EXIT
+			&& TILOG_POLL_THREAD_SLEEP_MS_IF_SYNC > TILOG_POLL_THREAD_SLEEP_MS_IF_TO_EXIT
 			&& TILOG_POLL_THREAD_SLEEP_MS_IF_TO_EXIT > 0,
 		"fatal err!");
 	static_assert(TILOG_POLL_MS_ADJUST_PERCENT_RATE > 0 && TILOG_POLL_MS_ADJUST_PERCENT_RATE < 100, "fatal err!");

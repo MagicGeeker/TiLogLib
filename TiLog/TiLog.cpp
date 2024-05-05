@@ -1099,6 +1099,16 @@ namespace tilogspace
 		};
 		using IOBeanSharedPtr = std::shared_ptr<IOBean>;
 
+		struct IOBeanTracker
+		{
+			IOBean* bean;
+			enum
+			{
+				NO_HANDLED,
+				HANDLED
+			} status;
+		};
+
 		struct IOBeanPoolFeat : TiLogSyncedObjectPoolFeat<IOBean>
 		{
 			using mutex_type = OptimisticMutex;
@@ -1303,19 +1313,26 @@ namespace tilogspace
 		struct TiLogMap_t;
 		struct TiLogEngines;
 
+		enum core_seq_t : uint64_t
+		{
+			SEQ_INVALID = 0,
+			SEQ_BEIGN = 1,
+			SEQ_FREE = UINT64_MAX
+		};
+		inline core_seq_t& operator++(core_seq_t& s) { return (core_seq_t&)++(uint64_t&)s; }
+
 		struct TiLogCoreMini
 		{
-			constexpr static uint64_t SEQ_FREE = UINT64_MAX;
-			uint64_t seq;
+			core_seq_t seq;
 			TiLogCore* core;
 			TiLogCoreMini() : seq(SEQ_FREE), core(nullptr) {}
-			TiLogCoreMini(uint64_t seq, TiLogCore* core) : seq(seq), core(core) {}
+			TiLogCoreMini(core_seq_t seq, TiLogCore* core) : seq(seq), core(core) {}
 			bool operator<(const TiLogCoreMini& rhs) const
 			{
 				return this->seq < rhs.seq || (this->seq == rhs.seq && this->core < rhs.core);
 			}
 		};
-		constexpr uint64_t TiLogCoreMini::SEQ_FREE;
+
 
 		class TiLogCore final : public CoreThrdStru, public TiLogCoreMini
 		{
@@ -1416,9 +1433,7 @@ namespace tilogspace
 
 			inline void ClearPrintedLogsNumber();
 
-			using callback_t = TiLogModBase::callback_t;
-			inline void Sync() {};
-			inline void AfterDeliver(callback_t func) {};
+			inline void Sync();
 
 			inline void MarkThreadDying(ThreadStru* pStru);
 
@@ -1444,7 +1459,7 @@ namespace tilogspace
 
 			inline std::unique_lock<std::mutex> GetPollLock();
 
-			void ChangeCoreSeq(TiLogCore* core, uint64_t seq);
+			void ChangeCoreSeq(TiLogCore* core, core_seq_t seq);
 
 			void thrdFuncPoll();
 
@@ -1468,7 +1483,7 @@ namespace tilogspace
 			atomic_bool mInited{};
 
 			atomic_uint64_t mPrintedLogs{ 0 };
-
+			atomic<uint64_t> mCoreLoopCount{};
 			atomic_bool mSyncing{};
 
 			ThreadStruQueue mThreadStruQueue;
@@ -1478,10 +1493,11 @@ namespace tilogspace
 			{
 				std::array<TiLogCore*, TILOG_DAEMON_PROCESSER_NUM> mCoreArr;
 				MultiSet<TiLogCoreMini> mCoreMap;
-				uint64_t mSeq{};
+				core_seq_t mPollSeq{ SEQ_BEIGN };		// max seq of log has collected and commit to core
+				core_seq_t mHandledSeq{ SEQ_BEIGN };	// max seq of log has handled in TiLogCore
 				atomic<uint64_t> mCoreWaitCount{};
 
-				Map<uint64_t, IOBean*> mWaitPushLogs;
+				Map<core_seq_t, IOBeanTracker> mWaitPushLogs;
 				TILOG_MUTEXABLE_CLASS_MACRO_WITH_CV(OptimisticMutex, mtx, cv_type, cv)
 			} mScheduler;
 
@@ -1498,6 +1514,7 @@ namespace tilogspace
 				Vector<ThreadStru*> mDyingThreadStrus;
 				atomic<uint32_t> mPollPeriodMs = { TILOG_POLL_THREAD_MAX_SLEEP_MS };
 				TiLogTime s_log_last_time{ tilogtimespace::ELogTime::MAX };
+				SteadyTimePoint mLastPolltime{ SteadyTimePoint::min() };
 				uint64_t free_core_use_cnt = 0;
 				uint64_t nofree_core_use_cnt = 0;
 				const char* GetName() override { return "poll"; }
@@ -1592,7 +1609,7 @@ namespace tilogspace
 			friend class tilogspace::TiLogStream;
 
 		public:
-
+			
 			printer_ids_t GetPrinters();
 			bool IsPrinterActive(EPrinterID printer);
 
@@ -2049,7 +2066,7 @@ namespace tilogspace
 	{
 #ifdef __________________________________________________TiLogCore__________________________________________________
 		TiLogCore::TiLogCore(TiLogDaemon* d)
-			: TiLogCoreMini(TiLogCoreMini::SEQ_FREE, this), mTiLogDaemon(d), mTiLogEngine(d->mTiLogEngine),
+			: TiLogCoreMini(SEQ_FREE, this), mTiLogDaemon(d), mTiLogEngine(d->mTiLogEngine),
 			  mTiLogPrinterManager(&mTiLogEngine->tiLogPrinterManager), mTiLogMap(&TiLogEngines::getRInstance().tilogmap)
 		{
 			DEBUG_PRINTA("TiLogCore::TiLogCore %p\n", this);
@@ -2104,7 +2121,8 @@ namespace tilogspace
 				}
 				TiLogDaemon::InitMergeLogVecVec(mMerge.mMergeLogVecVec);
 				MayPushLog();
-				mTiLogDaemon->ChangeCoreSeq(this, TiLogCoreMini::SEQ_FREE);
+				mTiLogDaemon->ChangeCoreSeq(this, SEQ_FREE);
+				++mTiLogDaemon->mCoreLoopCount;
 				mNeedWoking = false;
 			}
 			using llu = long long unsigned;
@@ -2196,7 +2214,7 @@ namespace tilogspace
 			{
 				auto core = new TiLogCore(this);
 				mScheduler.mCoreArr[i] = core;
-				TiLogCoreMini cmini{ TiLogCoreMini::SEQ_FREE, core };
+				TiLogCoreMini cmini{ SEQ_FREE, core };
 				mScheduler.mCoreMap.emplace(cmini);
 			}
 			mPoll.mThrd = CreateCoreThread(mPoll, this);
@@ -2274,49 +2292,32 @@ namespace tilogspace
 			DEBUG_PRINTA("WaitPrepared: end\n");
 		}
 
-#if 0
 		inline void TiLogDaemon::Sync()
 		{
-			uint64_t counter = mDeliver.mDeliveredTimes;
-
-			while (mDeliver.mDeliveredTimes == counter)	   // make sure deliver at least once
+#if !TILOG_STRICT_ORDERED_LOG
+			uint64_t core_loop_count = mCoreLoopCount;
+			for (;;)
 			{
-				mMerge.mCV.notify_one();	// notify merge thread
-				// wait for deliver thread, maybe thrd complete at once after notify,so wait_for nanos and wake up to check again.
-				++mMerge.mMayWaitingThrds;
-				synchronized_u(lk_wait, mDeliver.mMtxWait) { mDeliver.mCvWait.wait_for(lk_wait, std::chrono::nanoseconds(500)); }
-				--mMerge.mMayWaitingThrds;
+				NotifyPoll();
+				if (core_loop_count + TILOG_DAEMON_PROCESSER_NUM < mCoreLoopCount) { return; }
+				mPoll.SetPollPeriodMs(TILOG_POLL_THREAD_SLEEP_MS_IF_SYNC);
+				std::this_thread::sleep_for(std::chrono::milliseconds(TILOG_POLL_THREAD_SLEEP_MS_IF_SYNC));
 			}
-		}
-
-		void TiLogCore::AfterDeliver(callback_t func)
-		{
-			struct CallBack : DeliverCallBack
+#else
+			core_seq_t seq;
+			synchronized(mScheduler) { seq = mScheduler.mPollSeq; }
+			for (;;)
 			{
-				TiLogCore* pcore;
-				callback_t func;
-				void onDeliverEnd() override
+				NotifyPoll();
+				synchronized(mScheduler)
 				{
-					func();
-					pcore->mDeliver.mCallback = nullptr;
-					delete this;
+					if (mScheduler.mHandledSeq > seq) { return; }
 				}
-			};
-			CallBack* c = new CallBack();
-			c->pcore = this;
-			c->func = std::move(func);
-
-			synchronized(mSyncControler.mSyncMtx)
-			{
-				mDeliver.mCallback = c;
-				Sync();
-				while (mDeliver.mCallback)
-				{
-					std::this_thread::yield();
-				}
+				mPoll.SetPollPeriodMs(TILOG_POLL_THREAD_SLEEP_MS_IF_SYNC);
+				std::this_thread::sleep_for(std::chrono::milliseconds(TILOG_POLL_THREAD_SLEEP_MS_IF_SYNC));
 			}
-		}
 #endif
+		}
 
 		void TiLogDaemon::PushLog(TiLogBean* pBean)
 		{
@@ -2676,14 +2677,8 @@ namespace tilogspace
 			auto& schd = mTiLogDaemon->mScheduler;
 			synchronized(schd)
 			{
-				if (mDeliver.mIoBeanForPush == nullptr)
-				{
-					DEBUG_PRINTI("%llu no need push empty log\n", (unsigned long long)this->seq);
-					schd.mWaitPushLogs.erase(this->seq);	// mark log handled
-				} else
-				{
-					schd.mWaitPushLogs[this->seq] = mDeliver.mIoBeanForPush;
-				}
+				if (mDeliver.mIoBeanForPush == nullptr) { DEBUG_PRINTI("%llu no need push empty log\n", (unsigned long long)this->seq); }
+				schd.mWaitPushLogs[this->seq] = { mDeliver.mIoBeanForPush, IOBeanTracker::HANDLED };
 				if (schd.mWaitPushLogs.empty()) { return; }
 				auto it = schd.mWaitPushLogs.begin();
 				if (it->first != this->seq)
@@ -2695,14 +2690,16 @@ namespace tilogspace
 				// first log in mWaitPushLogs
 				for (; it != schd.mWaitPushLogs.end();)
 				{
-					IOBean* p = it->second;
-					if (p == nullptr)	 // next log do not complete
+					IOBeanTracker tracker = it->second;
+					if (tracker.status==IOBeanTracker::NO_HANDLED)	 // next log do not complete
 					{
 						return;
 					} else
 					{
 						DEBUG_PRINTI("%llu help %llu push log\n", (unsigned long long)this->seq, (unsigned long long)it->first);
-						p->core->pushLogsToPrinters(p);
+						auto p = tracker.bean;
+						if (p) { p->core->pushLogsToPrinters(p); }
+						schd.mHandledSeq = it->first;
 						it = schd.mWaitPushLogs.erase(it);	  // mark log handled
 					}
 				}
@@ -2759,7 +2756,7 @@ namespace tilogspace
 		}
 
 		//core should be locked
-		void TiLogDaemon::ChangeCoreSeq(TiLogCore* core, uint64_t seq)
+		void TiLogDaemon::ChangeCoreSeq(TiLogCore* core, core_seq_t seq)
 		{
 			TiLogCoreMini cmini_old = *core;
 			core->seq = seq;
@@ -2774,7 +2771,7 @@ namespace tilogspace
 		void TiLogDaemon::thrdFuncPoll()
 		{
 			InitCoreThreadBeforeRun(mPoll.GetName());
-			SteadyTimePoint lastPoolTime{ SteadyTimePoint ::min() }, nowTime{};
+			SteadyTimePoint &lastPoolTime = mPoll.mLastPolltime, nowTime{};
 			for (;;)
 			{
 				if (mPoll.mStatus == ON_FINAL_LOOP) { break; }
@@ -2795,6 +2792,7 @@ namespace tilogspace
 					}
 					CollectRawDatas();
 					TiLogCore* currCore;
+					core_seq_t seq;
 					synchronized(mScheduler)
 					{
 						TiLogCoreMini free_core;
@@ -2808,17 +2806,18 @@ namespace tilogspace
 							++mPoll.nofree_core_use_cnt;
 							currCore = mScheduler.mCoreMap.begin()->core;
 						}
-						mScheduler.mWaitPushLogs.emplace(mScheduler.mSeq, nullptr);	   // mark log birth
+						seq = mScheduler.mPollSeq;
+						mScheduler.mWaitPushLogs.emplace(seq, IOBeanTracker{ nullptr, IOBeanTracker::NO_HANDLED });	   // mark log birth
 					}
 					{
 						auto lk = GetCoreThrdLock(*currCore);
 						DEBUG_ASSERT(!currCore->mNeedWoking);
-						ChangeCoreSeq(currCore, mScheduler.mSeq);
-						mScheduler.mSeq++;
+						ChangeCoreSeq(currCore, seq);
 						DEBUG_ASSERT(currCore->mMerge.mMergeLogVecVec.mIndex == 0);
 						currCore->mMerge.mMergeLogVecVec.swap(mMerge.mMergeLogVecVec);
 						currCore->mNeedWoking = true;
 					}
+					synchronized(mScheduler) { ++mScheduler.mPollSeq; }
 					currCore->mCV.notify_one();
 					mMerge.mRawDatas.clear();
 					if (mPoll.mMayWaitingThrds)
@@ -3059,19 +3058,20 @@ namespace tilogspace
 	bool TiLogModBase::IsPrinterActive(EPrinterID printer) { return engine->tiLogPrinterManager.IsPrinterActive(printer); }
 	void TiLogModBase::EnablePrinter(EPrinterID printer)
 	{
-		engine->tiLogDaemon.AfterDeliver([this, printer] { AsyncEnablePrinter(printer); });
+		Sync();
+		AsyncEnablePrinter(printer);
 	}
 	void TiLogModBase::DisablePrinter(EPrinterID printer)
 	{
-		engine->tiLogDaemon.AfterDeliver([this, printer] { AsyncEnablePrinter(printer); });
+		Sync();
+		AsyncEnablePrinter(printer);
 	}
 
 	void TiLogModBase::SetPrinters(printer_ids_t printerIds)
 	{
-		engine->tiLogDaemon.AfterDeliver([this, printerIds] { AsyncSetPrinters(printerIds); });
+		Sync();
+		AsyncSetPrinters(printerIds);
 	}
-
-	void TiLogModBase::AfterSync(callback_t callback) { engine->tiLogDaemon.AfterDeliver(callback); }
 
 	void TiLogModBase::SetLogLevel(ELevel level) { engine->tiLogPrinterManager.SetLogLevel(level); }
 	ELevel TiLogModBase::GetLogLevel() { return engine->tiLogPrinterManager.GetLogLevel(); }
