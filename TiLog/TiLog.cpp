@@ -119,6 +119,7 @@ using namespace tilogspace;
 namespace tilogspace
 {
 	ti_iostream_mtx_t* ti_iostream_mtx;
+	constexpr char TiLogStream::nullstreamc[];
 
 	namespace internal
 	{
@@ -1682,7 +1683,6 @@ namespace tilogspace
 			};
 			TiLogMap_t tilogmap;
 			mempoolspace::mempool mpool;
-			TiLogStream nullstream{ EPlaceHolder{},false };
 			
 			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE(TiLogEngines)
 
@@ -1695,7 +1695,6 @@ namespace tilogspace
 			}
 			~TiLogEngines()
 			{
-				nullstream.markNullStreamCanBeFreed();
 				engines.~engine_t();
 			}
 		};
@@ -3110,7 +3109,6 @@ namespace tilogspace
 		ctor_single_instance_printers();
 		InitClocks();
 		TiLogEngines::init();
-		this->nullstream = &TiLogEngines::getRInstance().nullstream;
 		TICLOG << "TiLog " << &TiLog::getRInstance() << " TiLogEngines " << TiLogEngines::getInstance() << " in thrd "
 			   << std::this_thread::get_id() << '\n';
 	}

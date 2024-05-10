@@ -1527,6 +1527,9 @@ namespace tilogspace
 	constexpr const char* const LOG_LEVELS[] = { "????????", "????????", "????????", "ALWAYS  ", "FATAL   ", "ERROR   ", "WARNING ",
 												 "INFO    ", "DEBUG   ", "VERBOSE ", "????????", "????????", "????????", "????????" };
 	constexpr size_t LOG_LEVELS_STRING_LEN = 8;
+	constexpr auto* SOURCE_LOCATION_PREFIX = LOG_LEVELS;
+	constexpr uint16_t SOURCE_LOCATION_PREFIX_SIZE = LOG_LEVELS_STRING_LEN;
+
 
 	// reserve +1 for '\0'
 	constexpr size_t TILOG_UINT16_MAX_CHAR_LEN = (5 + 1);
@@ -1550,8 +1553,9 @@ namespace tilogspace
 
 		const String* GetThreadIDString();
 
-		enum class ELogLevelFlag : char
+		enum ELogLevelFlag : char
 		{
+			NULL_STREAM = '\0',
 			A = 'A',
 			F = 'F',
 			E = 'E',
@@ -1559,9 +1563,6 @@ namespace tilogspace
 			I = 'I',
 			D = 'D',
 			V = 'V',
-			NULL_STREAM = 'x',
-			INVALID = 'y',
-			FREED = 'z'
 		};
 
 #ifndef NDEBUG
@@ -1812,8 +1813,14 @@ namespace tilogspace
 			{
 				size_type size;		   // exclude '\0'
 				size_type capacity;	   // exclude '\0',it means Core can save capacity + 1 chars include '\0'
-				char ex[SIZE_OF_EXTEND];
-				char buf[];
+				union
+				{
+					char ex[SIZE_OF_EXTEND]{};
+					ExtType ext;
+				};
+				// char buf[]; //It seems like there is an array here
+				const char* buf() const { return reinterpret_cast<const char*>(this + 1); }
+				char* buf() { return reinterpret_cast<char*>(this + 1); }
 			};
 			using core_class_type = Core;
 
@@ -1887,7 +1894,7 @@ namespace tilogspace
 			inline static TiLogStringView get_str_view_from_ext(const ExtType* ext)
 			{
 				Core* pCore = (Core*)((char*)ext - offsetof(Core, ex));
-				return TiLogStringView(pCore->buf, pCore->size);
+				return TiLogStringView(pCore->buf(), pCore->size);
 			}
 
 			inline static Core* get_core_from_ext(const ExtType* ext) { return (Core*)((char*)ext - offsetof(Core, ex)); }
@@ -1990,10 +1997,11 @@ namespace tilogspace
 			}
 			inline void free() { ((this_type)this)->do_free(); }
 			inline void do_free() { TiLogMemoryManager::tifree(this->pCore); }
-			inline char* pFront() { return pCore->buf; }
-			inline const char* pFront() const { return pCore->buf; }
-			inline const char* pEnd() const { return pCore->buf + pCore->size; }
-			inline char* pEnd() { return pCore->buf + pCore->size; }
+			inline char* pFront() { return buf(); }
+			inline const char* pFront() const { return buf(); }
+			inline const char* pEnd() const { return buf() + pCore->size; }
+			inline char* pEnd() { return buf() + pCore->size; }
+			inline char* buf() const { return pCore->buf(); }
 			inline TiLogStringExtend& inc_size_s(size_type sz) { return pCore->size += sz, ensureZero(); }
 
 		protected:
@@ -2019,7 +2027,7 @@ namespace tilogspace
 			// it is enough
 			using steady_flag_t = int64_t;
 
-			struct steady_flag_helper : TiLogObject
+			struct steady_flag_helper /*: TiLogObject*/
 			{
 				TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_MEMBER_DECLARE(steady_flag_helper, steady_flag_helper_buf)
 				TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_FUNC_IMPL(steady_flag_helper,steady_flag_helper_buf)
@@ -2034,7 +2042,7 @@ namespace tilogspace
 			};
 
 			// for customize timer，must be similar to BaseTimeImpl
-			TILOG_ABSTRACT class BaseTimeImpl : public TiLogObject
+			TILOG_ABSTRACT class BaseTimeImpl /* : public TiLogObject*/
 			{
 				/**
 			public:
@@ -2073,7 +2081,7 @@ namespace tilogspace
 			};
 
 			// help transform no-steady time to steady time
-			TILOG_ABSTRACT class NoSteadyTimeHelper : public BaseTimeImpl
+			TILOG_ABSTRACT class NoSteadyTimeHelper /*: public BaseTimeImpl*/
 			{
 			public:
 				using steady_flag_t = tilogtimespace::steady_flag_t;
@@ -2090,8 +2098,8 @@ namespace tilogspace
 			};
 
 			//Clock:  std::chrono::steady_clock  std::chrono::system_clock
-			template<typename Clock>
-			class UserModeClockT : public TiLogObject
+			template <typename Clock>
+			class UserModeClockT /*: public TiLogObject*/
 			{
 			public:
 				using TimePoint = typename Clock::time_point;
@@ -2145,7 +2153,7 @@ namespace tilogspace
 				TILOG_TIME_IMPL_TYPE == TILOG_INTERNAL_STD_STEADY_CLOCK, UserModeClockT<std::chrono::steady_clock>,
 				UserModeClockT<std::chrono::system_clock>>::type;
 
-			TILOG_ABSTRACT class SystemClockBase : BaseTimeImpl
+			TILOG_ABSTRACT class SystemClockBase /*: BaseTimeImpl*/
 			{
 			public:
 				using Clock =
@@ -2214,7 +2222,7 @@ namespace tilogspace
 				SystemClockBase::is_steady, NativeSteadySystemClockWrapper, NativeNoSteadySystemClockWrapper>::type;
 
 
-			class SteadyClockImpl : public BaseTimeImpl
+			class SteadyClockImpl /* : public BaseTimeImpl*/
 			{
 			public:
 				using Clock =
@@ -2350,7 +2358,7 @@ namespace tilogspace
 	{
 #ifdef H__________________________________________________TiLogBean__________________________________________________
 
-		class TiLogBean : public TiLogObject
+		class TiLogBean /* : public TiLogObject*/
 		{
 		public:
 			using SystemLock = std::chrono::system_clock;
@@ -2366,16 +2374,16 @@ namespace tilogspace
 		public:
 			DEBUG_CANARY_UINT32(flag1)
 			TiLogTime tiLogTime;
-			const char* source_location_str;
-			size_t source_location_size;
-			char level;
+			const char* source_location_str;  // like "ERROR a.cpp:102 foo()"
+			uint16_t source_location_size;
 			mod_id_t mod;
 
 			DEBUG_DECLARE(uint8_t tidlen)
 			DEBUG_CANARY_UINT64(flag3)
-			char datas[];	 //{tid}{userlog}
+			//char datas[];	 //{tid}{userlog}
 
 		public:
+			ELogLevelFlag level() const { return (ELogLevelFlag)source_location_str[0]; }
 			const TiLogTime& time() const { return tiLogTime; }
 
 			TiLogTime& time() { return tiLogTime; }
@@ -2387,9 +2395,9 @@ namespace tilogspace
 					DEBUG_ASSERT(p->source_location_str != nullptr);
 					for (auto c : LOG_PREFIX)
 					{
-						if (c == p->level) { return; }
+						if (c == p->level()) { return; }
 					}
-					DEBUG_ASSERT1(false, p->level);
+					DEBUG_ASSERT1(false, p->level());
 				};
 				DEBUG_RUN(f());
 			}
@@ -2511,13 +2519,9 @@ namespace tilogspace
 	{
 		friend struct internal::TiLogNiftyCounterIniter;
 
-	private:
-		TiLogStream* nullstream;
-
 	public:
 		static TiLogModBase& GetMoudleBaseRef(mod_id_t mod);
 
-		inline TiLogStream* GetNullStream() { return nullstream; }
 		TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_FUNC_IMPL(TiLog, tilogbuf)
 
 	private:
@@ -2604,7 +2608,7 @@ namespace internal
 		static void tifree(void* ptrs[], size_t sz, UnorderedMap<mempoolspace::objpool*, Vector<void*>>& frees);
 	};
 
-	struct TiLogStreamHelper : public TiLogObject
+	struct TiLogStreamHelper /*: public TiLogObject*/
 	{
 		using ExtType = TiLogBean;
 		using ObjectType = TiLogStream;
@@ -2645,26 +2649,19 @@ namespace internal
 		TiLogStream& operator=(const TiLogStream& rhs) = delete;
 
 	public:
-		// default constructor
-		explicit inline TiLogStream() : StringType(EPlaceHolder{}, TILOG_SINGLE_LOG_RESERVE_LEN)
-		{
-			ext()->level = (char)ELogLevelFlag::INVALID;
-		}
-		// move constructor
+		// default constructor is deleted
+		explicit inline TiLogStream() noexcept = delete;
+		// move constructor, after call, rhs will be a null stream and can NOT be used(any write operation to rhs will cause a segfault)
 		inline TiLogStream(TiLogStream&& rhs) noexcept : StringType(std::move(rhs)) { rhs.bindToNullStream(); }
-		// make a empty stream
-		inline explicit TiLogStream(EPlaceHolder) noexcept : StringType(EPlaceHolder{}) { bindToNullStream(); }
 
 		// make a valid stream
-		inline TiLogStream(mod_id_t mod, uint32_t lv, const char* source_location_str, size_t source_location_size)
-			: StringType(EPlaceHolder{})
+		inline TiLogStream(mod_id_t mod, const char* source_location_str, uint16_t source_location_size) : StringType(EPlaceHolder{})
 		{
 			create(TILOG_SINGLE_LOG_RESERVE_LEN);
 			TiLogBean& bean = *ext();
 			bean.mod = mod;
 			bean.source_location_str = source_location_str;
 			bean.source_location_size = source_location_size;
-			bean.level = tilogspace::LOG_PREFIX[lv];
 			const String* tidstr = tilogspace::internal::GetThreadIDString();
 			DEBUG_RUN(bean.tidlen = (uint8_t)(tidstr->size() - 1));
 			this->appends(*tidstr);
@@ -2673,7 +2670,7 @@ namespace internal
 		inline ~TiLogStream()
 		{
 			DEBUG_ASSERT(pCore != nullptr);
-			switch ((ELogLevelFlag)ext()->level)
+			switch (ext()->level())
 			{
 			default:
 				DEBUG_ASSERT(false);	// do assert on debug mode.no break.
@@ -2689,9 +2686,6 @@ namespace internal
 				// goto next case
 			case ELogLevelFlag::NULL_STREAM:
 				// no need set pCore = nullptr,do nothing and shortly call do_overwrited_super_destructor
-				break;
-			case ELogLevelFlag::INVALID:
-				StringType::default_destructor();
 				break;
 			}
 		}
@@ -2813,7 +2807,8 @@ namespace internal
 	protected:
 		inline TiLogStream& resetLogLevel(ELevel lv)
 		{
-			if (!isNullStream()) { this->ext()->level = LOG_PREFIX[lv]; }
+			ext()->source_location_str = SOURCE_LOCATION_PREFIX[lv];
+			ext()->source_location_size = SOURCE_LOCATION_PREFIX_SIZE;
 			return *this;
 		}
 
@@ -2848,13 +2843,13 @@ namespace internal
 			}
 			return *this;
 		}
-	public:	
-		// special constructor for nullstream
-		inline TiLogStream(EPlaceHolder, bool) : StringType(EPlaceHolder{}, TILOG_NO_USED_STREAM_LENGTH) { markAsNullStream(); }
-		inline bool isNullStream() { return ext()->level == (char)ELogLevelFlag::NULL_STREAM; }
-		inline void markAsNullStream() { ext()->level = (char)ELogLevelFlag::NULL_STREAM; }
-		inline void markNullStreamCanBeFreed(){ext()->level = (char)ELogLevelFlag::INVALID;}
-		inline void bindToNullStream() { this->pCore = TiLog::getRInstance().GetNullStream()->pCore; }
+
+	protected:
+		inline bool isNullStream() { return ext()->level() == ELogLevelFlag::NULL_STREAM; }
+		inline void bindToNullStream() { this->pCore = (Core*)(&nullstreamc); }
+		// An array filled with characters '\0', which can be forced cast to TiLogStream::Core, representing pCore of nullstream,
+		// nullstreamc is constexpr and readonly,so nullstream is readonly, any write operation to nullstream will cause a segfault
+		constexpr static char nullstreamc[sizeof(Core)]{};
 
 	private:
 		// force overwrite super destructor,do nothing
@@ -3040,14 +3035,14 @@ namespace internal
 	class TiLogStreamEx
 	{
 	public:
-		inline TiLogStreamEx(mod_id_t mod, uint32_t lv, tilogspace::internal::TiLogStringView source)
-			: should_log(tilogspace::should_log(mod, lv))
+		inline TiLogStreamEx(mod_id_t mod, tilogspace::internal::TiLogStringView source)
+			: should_log(tilogspace::should_log(mod, source[0]))
 		{
 			if (should_log)
 			{
 				const char* source_location_str = source.data();
-				size_t source_location_size = source.size();
-				new (s) TiLogStream(mod, lv, source_location_str, source_location_size);
+				uint16_t source_location_size = (uint16_t)source.size();
+				new (s) TiLogStream(mod, source_location_str, source_location_size);
 			}
 		};
 
@@ -3101,9 +3096,9 @@ namespace tilogspace
 		return SupportDynamicLevel(mod) ? (level <= TiLog::GetMoudleBaseRef(mod).GetLogLevel()) : (level <= GetDefaultLogLevel(mod));
 	}
 
-	TILOG_FORCEINLINE TiLogStream CreateNewTiLogStream(tilogspace::internal::TiLogStringView s, uint32_t level, mod_id_t MOD)
+	TILOG_FORCEINLINE TiLogStream CreateNewTiLogStream(tilogspace::internal::TiLogStringView src, mod_id_t MOD)
 	{
-		return { MOD, level, s.data(), s.size() };
+		return { MOD, src.data(), (uint16_t)src.size() };
 	}
 }	 // namespace tilogspace
 
@@ -3197,11 +3192,11 @@ namespace tilogspace
 
 //------------------------------------------define micro for user------------------------------------------//
 // force create a TiLogStream, regardless of what lv is
-#define TILOG_STREAM_CREATE_DLV(mod, lv) tilogspace::CreateNewTiLogStream(TILOG_INTERNAL_GET_SOURCE_LOCATION_DYNAMIC_LV(lv), lv, mod)
+#define TILOG_STREAM_CREATE_DLV(mod, lv) tilogspace::CreateNewTiLogStream(TILOG_INTERNAL_GET_SOURCE_LOCATION_DYNAMIC_LV(lv), mod)
 // same as TILOG_STREAM_CREATE_DLV, and use constexpr mod,lv (better performace)
-#define TILOG_STREAM_CREATE(mod, lv) tilogspace::CreateNewTiLogStream(TILOG_INTERNAL_GET_SOURCE_LOCATION(lv), lv, mod)
+#define TILOG_STREAM_CREATE(mod, lv) tilogspace::CreateNewTiLogStream(TILOG_INTERNAL_GET_SOURCE_LOCATION(lv), mod)
 // create a TiLogStreamEx
-#define TILOG_STREAMEX_CREATE(mod, lv) tilogspace::TiLogStreamEx(mod, lv, TILOG_INTERNAL_GET_SOURCE_LOCATION(lv))
+#define TILOG_STREAMEX_CREATE(mod, lv) tilogspace::TiLogStreamEx(mod, TILOG_INTERNAL_GET_SOURCE_LOCATION(lv))
 
 #define TICOUT (std::unique_lock<tilogspace::sync_ostream_mtx_t>(tilogspace::ti_iostream_mtx->ticout_mtx), std::cout)
 #define TICERR (std::unique_lock<tilogspace::sync_ostream_mtx_t>(tilogspace::ti_iostream_mtx->ticerr_mtx), std::cerr)
