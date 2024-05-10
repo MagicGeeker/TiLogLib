@@ -31,7 +31,6 @@ using namespace tilogspace;
 #define terminal_single_thread_long_string_log_test_____________________
 #define file_static_log_test_____________________
 #define terminal_multi_way_log_test_____________________
-#define terminal_log_show_test_____________________
 
 
 //__________________________________________________long time test__________________________________________________//
@@ -784,25 +783,21 @@ TEST_CASE("terminal_multi_way_log_test_____________________")
 		Student st0;
 		TILOGI.print("st0: {}\n\n", st0);
 	}
-}
-#endif
 
-#ifdef terminal_log_show_test_____________________
-TEST_CASE("terminal_log_show_test_____________________")
-{
-	TEST_CASE_COUT << "terminal_log_show_test_____________________\n";
-	TILOG_CURRENT_MODULE.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
-	TILOGI << "line ?";
-#line 66666
-	TILOGI << "line 66666";
-#line 999999
-	TILOGI << "line 999999";
-#line 1000000
-	TILOGI << "line 1000000";
-#line 16777215
-	TILOGI << "line 16,777,215";
-#line 2147483647
-	TILOGI << "line INT32_MAX 2147483647";
+	{
+		TIDLOGI.print("hello {}, my name is {},age {},height {}\n", "world", "KJ", 20, 175.585);
+		TIDLOGI.print("hello {}, my name is {}\n", std::string("KJ"), std::string("OMG"));
+		TIDLOGI.print("hello {0}, my name is {1}\n", std::string("C"), std::string("C++"));
+		TIDLOGI.print("hello {1}, my name is {0}\n", std::string("C"), std::string("C++"));
+		TIDLOGI.print(
+			"hello {10}, my name is {2},id {0}\n", -707, std::string("C"), std::string("C++"), 0, 0, 0, 0, 0, 0, 0, -8080, 0, 0, 0, 0);
+		TIDLOGI.print("hello {1}, my name is {{}}\n", std::string("C"), std::string("C++"));
+		TIDLOGI.print("hello {1}, my name is {}\n", std::string("C"), std::string("C++"));
+		TIDLOGI.print("hello {}, my name is {1}\n", std::string("C"), std::string("C++"));
+		TIDLOGI.print("hello {}, my name is {3}\n", std::string("C"), std::string("C++"));
+
+		TIDLOGI.print("hello {{, my name is {}\n\n", std::string("C"), std::string("C++"));
+	}
 }
 #endif
 
