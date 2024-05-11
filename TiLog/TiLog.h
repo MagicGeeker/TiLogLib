@@ -3130,8 +3130,38 @@ namespace tilogspace
 	static_assert(TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE > 0, "fatal err!");
 }	 // namespace tilogspace
 
+namespace tilogspace
+{
+	namespace internal
+	{
+		template <size_t LV>
+		constexpr inline static_string<LOG_LEVELS_STRING_LEN, LITERAL> tilog_level()
+		{
+			return static_string<LOG_LEVELS_STRING_LEN, LITERAL>(LOG_LEVELS[LV], nullptr);
+		}
 
-// clang-format off
+		template <size_t LV, size_t N, int T>
+		constexpr inline static_string<LOG_LEVELS_STRING_LEN + N, CONCAT> tiLog_level_source(const static_string<N, T>& src_loc)
+		{
+			return string_concat(tilog_level<LV>(), src_loc);
+		}
+
+		template <size_t N, int T>
+		constexpr inline std::array<static_string<LOG_LEVELS_STRING_LEN + N, CONCAT>, MAX>
+		tiLog_level_sources(const static_string<N, T>& src_loc)
+		{
+			return std::array<static_string<LOG_LEVELS_STRING_LEN + N, CONCAT>, MAX>{
+				string_concat(tilog_level<ALWAYS - 3>(), src_loc), string_concat(tilog_level<ALWAYS - 2>(), src_loc),
+				string_concat(tilog_level<ALWAYS - 1>(), src_loc), string_concat(tilog_level<ALWAYS>(), src_loc),
+				string_concat(tilog_level<FATAL>(), src_loc),	   string_concat(tilog_level<ERROR>(), src_loc),
+				string_concat(tilog_level<WARN>(), src_loc),	   string_concat(tilog_level<INFO>(), src_loc),
+				string_concat(tilog_level<DEBUG>(), src_loc),	   string_concat(tilog_level<VERBOSE>(), src_loc)
+			};
+		}
+	}	 // namespace internal
+}	 // namespace tilogspace
+
+// clang-formsat off
 #define LINE_STRING0(l) #l
 #define LINE_STRING(l) LINE_STRING0(l)
 
@@ -3149,54 +3179,44 @@ namespace tilogspace
 #define FUNCTION_DETAIL0 __func__
 #endif
 
-#define LEVEL_DETAIL(constexpr_lv) tilogspace::internal::static_string<tilogspace::LOG_LEVELS_STRING_LEN,tilogspace::internal::LITERAL>(tilogspace::LOG_LEVELS[constexpr_lv],nullptr)
 #define FILE_LINE_DETAIL tilogspace::internal::string_literal(__FILE__ ":" LINE_STRING(__LINE__) " ")
 #define FUNCTION_DETAIL tilogspace::internal::static_string<tilogspace::internal::find(FUNCTION_DETAIL0, ':'),tilogspace::internal::LITERAL>(FUNCTION_DETAIL0,nullptr)
 
 
 #if TILOG_IS_WITH_FILE_LINE_INFO == TRUE && TILOG_IS_WITH_FUNCTION_NAME == TRUE
-#define TILOG_INTERNAL_GET_SOURCE_LOCATION_STRING(constexpr_lv)                                                                            \
-	tilogspace::internal::string_concat(LEVEL_DETAIL(constexpr_lv), FILE_LINE_DETAIL, FUNCTION_DETAIL)
+#define TILOG_INTERNAL_GET_SOURCE_LOCATION_STRING tilogspace::internal::string_concat(FILE_LINE_DETAIL, FUNCTION_DETAIL)
 #endif
 #if TILOG_IS_WITH_FILE_LINE_INFO == FALSE && TILOG_IS_WITH_FUNCTION_NAME == TRUE
-#define TILOG_INTERNAL_GET_SOURCE_LOCATION_STRING(constexpr_lv)                                                                            \
-	tilogspace::internal::string_concat(LEVEL_DETAIL(constexpr_lv), FUNCTION_DETAIL)
+#define TILOG_INTERNAL_GET_SOURCE_LOCATION_STRING FUNCTION_DETAIL
 #endif
 #if TILOG_IS_WITH_FILE_LINE_INFO == TRUE && TILOG_IS_WITH_FUNCTION_NAME == FALSE
-#define TILOG_INTERNAL_GET_SOURCE_LOCATION_STRING(constexpr_lv)                                                                            \
-	tilogspace::internal::string_concat(LEVEL_DETAIL(constexpr_lv), FILE_LINE_DETAIL)
+#define TILOG_INTERNAL_GET_SOURCE_LOCATION_STRING FILE_LINE_DETAIL
 #endif
 #if TILOG_IS_WITH_FILE_LINE_INFO == FALSE && TILOG_IS_WITH_FUNCTION_NAME == FALSE
-#define TILOG_INTERNAL_GET_SOURCE_LOCATION_STRING(constexpr_lv) LEVEL_DETAIL(constexpr_lv)
+#define TILOG_INTERNAL_GET_SOURCE_LOCATION_STRING tilogspace::internal::string_literal("")
 #endif
 
-#define TILOG_INTERNAL_GET_SOURCE_LOCATION(constexpr_lv)                                                                                   \
+#define TILOG_GET_LEVEL_SOURCE_LOCATION(lv)                                                                                                \
 	[] {                                                                                                                                   \
-		constexpr static auto source{ TILOG_INTERNAL_GET_SOURCE_LOCATION_STRING(constexpr_lv) };                                           \
-		tilogspace::internal::TiLogStringView sv(source.data(), source.size());                                                            \
-		return sv;                                                                                                                         \
+		constexpr static auto source = tilogspace::internal::tiLog_level_source<lv>(TILOG_INTERNAL_GET_SOURCE_LOCATION_STRING);            \
+		return tilogspace::internal::TiLogStringView(source.data(), source.size());                                                        \
 	}()
 
-#define TILOG_INTERNAL_GET_SOURCE_LOCATION_DYNAMIC_LV(lv)                                                                                  \
-	std::array<tilogspace::internal::TiLogStringView, 10>{ TILOG_INTERNAL_GET_SOURCE_LOCATION(tilogspace::ELevel::ALWAYS - 3),             \
-														   TILOG_INTERNAL_GET_SOURCE_LOCATION(tilogspace::ELevel::ALWAYS - 2),             \
-														   TILOG_INTERNAL_GET_SOURCE_LOCATION(tilogspace::ELevel::ALWAYS - 1),             \
-														   TILOG_INTERNAL_GET_SOURCE_LOCATION(tilogspace::ELevel::ALWAYS),                 \
-														   TILOG_INTERNAL_GET_SOURCE_LOCATION(tilogspace::ELevel::FATAL),                  \
-														   TILOG_INTERNAL_GET_SOURCE_LOCATION(tilogspace::ELevel::ERROR),                  \
-														   TILOG_INTERNAL_GET_SOURCE_LOCATION(tilogspace::ELevel::WARN),                   \
-														   TILOG_INTERNAL_GET_SOURCE_LOCATION(tilogspace::ELevel::INFO),                   \
-														   TILOG_INTERNAL_GET_SOURCE_LOCATION(tilogspace::ELevel::DEBUG),                  \
-														   TILOG_INTERNAL_GET_SOURCE_LOCATION(tilogspace::ELevel::VERBOSE) }[lv]
+#define TILOG_GET_LEVEL_SOURCE_LOCATION_DLV(lv)                                                                                            \
+	[] {                                                                                                                                   \
+		constexpr static auto sources = tilogspace::internal::tiLog_level_sources(TILOG_INTERNAL_GET_SOURCE_LOCATION_STRING);              \
+		return tilogspace::internal::TiLogStringView(sources[lv].data(), sources[lv].size());                                              \
+	}()
+
 // clang-format on
 
 //------------------------------------------define micro for user------------------------------------------//
 // force create a TiLogStream, regardless of what lv is
-#define TILOG_STREAM_CREATE_DLV(mod, lv) tilogspace::CreateNewTiLogStream(TILOG_INTERNAL_GET_SOURCE_LOCATION_DYNAMIC_LV(lv), mod)
+#define TILOG_STREAM_CREATE_DLV(mod, lv) tilogspace::CreateNewTiLogStream(TILOG_GET_LEVEL_SOURCE_LOCATION_DLV(lv), mod)
 // same as TILOG_STREAM_CREATE_DLV, and use constexpr mod,lv (better performace)
-#define TILOG_STREAM_CREATE(mod, lv) tilogspace::CreateNewTiLogStream(TILOG_INTERNAL_GET_SOURCE_LOCATION(lv), mod)
+#define TILOG_STREAM_CREATE(mod, lv) tilogspace::CreateNewTiLogStream(TILOG_GET_LEVEL_SOURCE_LOCATION(lv), mod)
 // create a TiLogStreamEx
-#define TILOG_STREAMEX_CREATE(mod, lv) tilogspace::TiLogStreamEx(mod, TILOG_INTERNAL_GET_SOURCE_LOCATION(lv))
+#define TILOG_STREAMEX_CREATE(mod, lv) tilogspace::TiLogStreamEx(mod, TILOG_GET_LEVEL_SOURCE_LOCATION(lv))
 
 #define TICOUT (std::unique_lock<tilogspace::sync_ostream_mtx_t>(tilogspace::ti_iostream_mtx->ticout_mtx), std::cout)
 #define TICERR (std::unique_lock<tilogspace::sync_ostream_mtx_t>(tilogspace::ti_iostream_mtx->ticerr_mtx), std::cerr)
