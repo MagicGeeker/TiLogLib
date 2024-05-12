@@ -4,6 +4,7 @@ cmake-build-relwithdebinfo/*
 cmake-build-debug-clang
 cmake-build-debug-visual-studio
 build
+.cache
 .idea
 .vs
 .vscode
