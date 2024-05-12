@@ -10,7 +10,6 @@
 #include <atomic>
 #include <functional>
 #include <thread>
-#include <condition_variable>
 #include <type_traits>
 #include <iostream>
 #include <algorithm>
@@ -189,7 +188,7 @@ namespace tilogspace
 	using OptimisticMutex = SpinMutex<>;
 
 	using size_type = std::conditional<TILOG_IS_64BIT_OS, size_t, uint32_t>::type;	   // internal string max capacity type
-}
+} // namespace tilogspace
 /**************************************************ENUMS AND CONSTEXPRS FOR USER**************************************************/
 namespace tilogspace
 {
@@ -214,8 +213,6 @@ namespace tilogspace
 	// interval of user mode clock sync with kernel(microseconds),should be smaller than timestamp print accuracy
 	constexpr static uint32_t TILOG_USER_MODE_CLOCK_UPDATE_US = TILOG_IS_WITH_MILLISECONDS ? 300 : 300000;
 
-	constexpr static uint32_t TILOG_NO_USED_STREAM_LENGTH = 64;	// no used stream length
-
 	constexpr static uint32_t TILOG_DAEMON_PROCESSER_NUM = 4;	// tilog daemon processer num
 	constexpr static uint32_t TILOG_POLL_THREAD_MAX_SLEEP_MS = 500;	// max poll period to ensure print every logs for every thread
 	constexpr static uint32_t TILOG_POLL_THREAD_MIN_SLEEP_MS = 100;	// min poll period to ensure print every logs for every thread
@@ -228,9 +225,7 @@ namespace tilogspace
 
 	constexpr static size_t TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE = ((size_t)1 << 8U);			 // single thread cache queue max length
 	
-	constexpr static size_t TILOG_DELIVER_QUEUE_SIZE = ((size_t)4);	// deliver queue max length
 	constexpr static size_t TILOG_IO_STRING_DATA_POOL_SIZE = ((size_t)4);	// io string data max szie
-	constexpr static size_t TILOG_GARBAGE_COLLECTION_QUEUE_RATE = ((size_t)4);	// (garbage collection queue length)/(global cache queue max length)
 	constexpr static size_t TILOG_SINGLE_LOG_RESERVE_LEN = 60 + 40;	// reserve size for every log(include sizeof TiLogBean)
 	constexpr static size_t TILOG_SINGLE_LOG_AVERAGE_LEN = 120; // single log averge printable log(include field in TiLogBean)
 	constexpr static size_t TILOG_THREAD_ID_MAX_LEN = SIZE_MAX;	// tid max len,SIZE_MAX means no limit,in popular system limit is TILOG_UINT64_MAX_CHAR_LEN
@@ -501,7 +496,7 @@ namespace tilogspace
 	class TiLogAlignedObject : public TiLogAlignedMemMgr<T>
 	{
 	};
-}
+}  // namespace tilogspace
 
 
 namespace tilogspace
@@ -1343,7 +1338,7 @@ namespace tilogspace
 			local_mempool::xfree(frees);
 		}
 	};
-}
+}  // namespace mempoolspace
 }	 // namespace tilogspace
 
 
@@ -2542,12 +2537,6 @@ namespace tilogspace
 		} tiLogNiftyCounterIniter;
 	}	 // namespace internal
 	
-
-	namespace internal
-	{
-		struct TiLogStreamHelper;
-	}
-
 	namespace internal
 	{
 		template <typename T>
@@ -2992,7 +2981,7 @@ namespace internal
 							break;
 						} else if (idx == 0)
 						{
-							if (!(pos2 == pos + 2 && fmt[pos + 1] == '0')) { break; }
+							if (pos2 != pos + 2 || fmt[pos + 1] != '0') { break; }
 							// "{0}"
 						}
 						if (i >= sz)

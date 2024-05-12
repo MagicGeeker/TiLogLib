@@ -1,4 +1,4 @@
-
+#include <condition_variable>
 #include <functional>
 #include <stdlib.h>
 #include <assert.h>
@@ -187,19 +187,6 @@ namespace tiloghelperspace
 	{
 		static atomic_uint32_t s_internalLogFlag(0);
 		return s_internalLogFlag;
-	}
-	inline static uint32_t FastRand()
-	{
-		static const uint32_t M = 2147483647L;	  // 2^31-1
-		static const uint64_t A = 16385;		  // 2^14+1
-		static uint32_t _seed = 1;				  // it is not thread safe,not I think it is no problem
-
-		// Computing _seed * A % M.
-		uint64_t p = _seed * A;
-		_seed = static_cast<uint32_t>((p >> 31) + (p & M));
-		if (_seed > M) _seed -= M;
-
-		return _seed;
 	}
 
 	static FILE* getInternalFilePtr()
@@ -985,7 +972,7 @@ namespace tilogspace
 			std::mutex thrdExistMtx;
 			std::condition_variable thrdExistCV;
 
-			explicit ThreadStru(TiLogDaemon* daemon, size_t cacheSize)
+			explicit ThreadStru(TiLogDaemon* daemon)
 				: pDaemon(daemon), qCache(), spinMtx(), lpool(get_local_mempool()), tid(GetThreadIDString()), thrdExistMtx(), thrdExistCV()
 			{
 				DEBUG_PRINTI("ThreadStru ator pDaemon %p this %p tid [%p %s]\n", pDaemon, this, tid, tid->c_str());
@@ -1013,46 +1000,6 @@ namespace tilogspace
 			void free_local_mempool(mempoolspace::local_mempool* lpool);
 		};
 
-		template <typename Container, size_t CAPACITY = 4>
-		struct ContainerList : public TiLogObject
-		{
-			static_assert(CAPACITY >= 1, "fatal error");
-			using iterator = typename List<Container>::iterator;
-			using const_iterator = typename List<Container>::const_iterator;
-
-			explicit ContainerList()
-			{
-				mList.resize(CAPACITY);
-				it_next = mList.begin();
-			}
-			bool swap_insert(Container& v)
-			{
-				DEBUG_ASSERT2(it_next != mList.end(), CAPACITY, size());
-				std::swap(*it_next, v);
-				++it_next;
-				return it_next == mList.end();
-			}
-
-			size_t size() { return std::distance(mList.begin(), it_next); }
-
-			void clear() { it_next = mList.begin(); }
-			bool empty() { return it_next == mList.begin(); }
-			bool full() { return it_next == mList.end(); }
-			iterator begin() { return mList.begin(); };
-			iterator end() { return it_next; }
-			const_iterator begin() const { return mList.begin(); };
-			const_iterator end() const { return it_next; }
-			void swap(ContainerList& rhs)
-			{
-				std::swap(this->mList, rhs.mList);
-				std::swap(this->it_next, rhs.it_next);
-			}
-
-		protected:
-			List<Container> mList;
-			iterator it_next;
-		};
-
 		class TiLogCore;
 
 		struct MergeRawDatasHashMapFeat : TiLogConcurrentHashMapDefaultFeat<const String*, VecLogCache>
@@ -1078,14 +1025,9 @@ namespace tilogspace
 		};
 
 		using VecVecLogCache = Vector<VecLogCache>;
-		struct MergeVecVecLogcahes : public TiLogObject, public VecVecLogCache
+		struct MergeVecVecLogcaches : public TiLogObject, public VecVecLogCache
 		{
 			uint32_t mIndex{};
-		};
-
-
-		struct DeliverList : public ContainerList<VecLogCache, TILOG_DELIVER_QUEUE_SIZE>
-		{
 		};
 
 		struct IOBean : public TiLogCoreString
@@ -1118,29 +1060,6 @@ namespace tilogspace
 		};
 
 		using SyncedIOBeanPool = TiLogSyncedObjectPool<IOBean, IOBeanPoolFeat>;
-
-		struct GCList : public ContainerList<VecLogCache, TILOG_GARBAGE_COLLECTION_QUEUE_RATE>
-		{
-			void gc()
-			{
-				unsigned sz = 0;
-				for (auto it = mList.begin(); it != it_next; ++it)
-				{
-					auto& v = *it;
-					sz += (unsigned)v.size();
-//					for (TiLogBean* pBean : v)
-//					{
-//						TiLogStreamHelper::DestroyPushedTiLogBean(pBean);
-//					}
-					TiLogStreamHelper::DestroyPushedTiLogBean(v,cache);
-				}
-				clear();
-				DEBUG_PRINTI("gc: %u logs\n", sz);
-				gcsize += sz;
-			}
-			uint64_t gcsize{ 0 };
-			TiLogStreamHelper::TiLogStreamMemoryManagerCache cache;
-		};
 
 		struct ThreadStruQueue : public TiLogObject, public std::mutex
 		{
@@ -1257,14 +1176,6 @@ namespace tilogspace
 		class TiLogTaskQueue : public TiLogTaskQueueBasic<OptimisticMutex>
 		{
 		};
-
-		struct TiLogTaskQueueFeat : TiLogObjectPoolFeat
-		{
-			void operator()(TiLogTaskQueue& q) {}
-		};
-
-		using TiLogThreadPool = TiLogObjectPool<TiLogTaskQueue, TiLogTaskQueueFeat>;
-
 
 		class TiLogCore;
 		using CoreThrdEntryFuncType = void (*)(void*);
@@ -1385,7 +1296,7 @@ namespace tilogspace
 			struct MergeStru
 			{
 				VecLogCache mMergeCaches;
-				MergeVecVecLogcahes mMergeLogVecVec;			   // input
+				MergeVecVecLogcaches mMergeLogVecVec;			   // input
 				VecLogCache mMergeSortVec{};					   // temp vector
 				VecLogCachePtrPriorQueue mThreadStruPriorQueue;	   // prior queue of ThreadStru cache
 				uint64_t mMergedSize = 0;
@@ -1446,7 +1357,7 @@ namespace tilogspace
 
 			void MergeThreadStruQueueToSet(List<ThreadStru*>& thread_queue, TiLogBean& bean);
 
-			static void InitMergeLogVecVec(MergeVecVecLogcahes& vv, size_t needMergeSortReserveSize = SIZE_MAX);
+			static void InitMergeLogVecVec(MergeVecVecLogcaches& vv, size_t needMergeSortReserveSize = SIZE_MAX);
 			void CollectRawDatas();
 
 			bool Prepared();
@@ -1506,7 +1417,7 @@ namespace tilogspace
 			struct MergeStru
 			{
 				MergeRawDatas mRawDatas;				// input
-				MergeVecVecLogcahes mMergeLogVecVec;	// output
+				MergeVecVecLogcaches mMergeLogVecVec;	// output
 			} mMerge;
 
 			struct PollStru : public CoreThrdStru
@@ -1678,7 +1589,7 @@ namespace tilogspace
 			using engine_t = std::array<TiLogEngine, TILOG_MODULE_SPECS_SIZE>;
 			union
 			{
-				void* pe{};
+				char engines_buf[1]{};
 				engine_t engines;
 			};
 			TiLogMap_t tilogmap;
@@ -1688,7 +1599,7 @@ namespace tilogspace
 
 			TiLogEngines()
 			{
-				for (int i = 0; i < engines.size(); i++)
+				for (size_t i = 0; i < engines.size(); i++)
 				{
 					new (&engines[i]) TiLogEngine(TILOG_ACTIVE_MODULE_SPECS[i].mod);
 				}
@@ -2169,7 +2080,7 @@ namespace tilogspace
 #endif
 
 			auto f = [&, pDstQueue] {
-				ThreadStru* pStru = new ThreadStru(this, TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE);
+				ThreadStru* pStru = new ThreadStru(this);
 				DEBUG_ASSERT(pStru != nullptr);
 				DEBUG_ASSERT(pStru->tid != nullptr);
 
@@ -2418,7 +2329,7 @@ namespace tilogspace
 			}
 		}
 
-		void TiLogDaemon::InitMergeLogVecVec(MergeVecVecLogcahes& vv, size_t needMergeSortReserveSize)
+		void TiLogDaemon::InitMergeLogVecVec(MergeVecVecLogcaches& vv, size_t needMergeSortReserveSize)
 		{
 			if (needMergeSortReserveSize != SIZE_MAX) { vv.resize(needMergeSortReserveSize); }
 			for (VecLogCache& vecLogCache : vv)
@@ -2609,7 +2520,6 @@ namespace tilogspace
 			auto preSize = logs.size();
 			auto souce_location_size = bean.source_location_size;
 			auto beanSVSize = logsv.size();
-			using llu = long long unsigned;
 			size_t L2 = (souce_location_size + beanSVSize);
 			size_t append_size = L2 + TILOG_RESERVE_LEN_L1;
 			size_t reserveSize = preSize + append_size;
