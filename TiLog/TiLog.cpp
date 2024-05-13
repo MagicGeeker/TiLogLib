@@ -119,7 +119,6 @@ using namespace tilogspace;
 namespace tilogspace
 {
 	ti_iostream_mtx_t* ti_iostream_mtx;
-	constexpr char TiLogStream::nullstreamc[];
 
 	namespace internal
 	{

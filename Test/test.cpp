@@ -35,7 +35,7 @@ using namespace tilogspace;
 
 //__________________________________________________long time test__________________________________________________//
 //#define terminal_multi_thread_poll__log_test_____________________
-#define none_multi_thread_memory_leak_stress_test_____________________
+//#define none_multi_thread_memory_leak_stress_test_____________________
 //#define none_multi_thread_set_printer_test_____________________
 
 
@@ -48,7 +48,7 @@ using namespace tilogspace;
 
 
 //__________________________________________________special test__________________________________________________//
-//#define special_log_test_____________________
+#define terminal_streamex_test_____________________
 //#define tilog_string_test_____________________  //enable if define in header
 //#define file_multi_thread_close_print_benchmark_test_____________________
 //#define file_multi_thread_print_level_test_____________________
@@ -833,13 +833,12 @@ TEST_CASE("user_module_test_____________________")
 }
 #endif
 
-#ifdef special_log_test_____________________
-TEST_CASE("special_log_test_____________________")
+#ifdef terminal_streamex_test_____________________
+TEST_CASE("terminal_streamex_test_____________________")
 {
-	static_assert(TILOG_CURRENT_MODULE_SPEC.supportDynamicLogLevel, "enable it to test");
 	TILOG_CURRENT_MODULE.SetLogLevel(ELevel::WARN);
 	TILOG_CURRENT_MODULE.FSync();
-	TICOUT << "special_log_test_____________________\n";
+	TICOUT << "terminal_streamex_test_____________________\n";
 	TILOG_CURRENT_MODULE.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
 	{
 		auto tilog001 = TILOG_STREAMEX_CREATE(TILOG_CURRENT_MODULE_ID, tilogspace::WARN);
