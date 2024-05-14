@@ -21,6 +21,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#undef ERROR
 #elif defined(TILOG_OS_POSIX)
 #include <sys/prctl.h>
 #include <fcntl.h>
@@ -39,50 +40,16 @@
 
 #define __________________________________________________TiLog__________________________________________________
 
-#define TILOG_INTERNAL_LEVEL_CLOSE 2
-#define TILOG_INTERNAL_LEVEL_ALWAYS 3
-#define TILOG_INTERNAL_LEVEL_FATAL 4
-#define TILOG_INTERNAL_LEVEL_ERROR 5
-#define TILOG_INTERNAL_LEVEL_WARN 6
-#define TILOG_INTERNAL_LEVEL_INFO 7
-#define TILOG_INTERNAL_LEVEL_DEBUG 8
-#define TILOG_INTERNAL_LEVEL_VERBOSE 9
-#define TILOG_INTERNAL_LEVEL_MAX 10
-//#define TILOG_ENABLE_PRINT_ON_RELEASE
+#define TILOG_INNO_STREAM_CREATE(lv) TiLogStreamInner(TILOG_GET_LEVEL_SOURCE_LOCATION(lv))
+#define TIINNOLOG(constexpr_lv) should_log(constexpr_lv) && TILOG_INNO_STREAM_CREATE(constexpr_lv)
 
-#define TILOG_INTERNAL_LOG_MAX_LEN 200
-#define TILOG_INTERNAL_LOG_FILE_PATH "tilogs.txt"
-
-#define TILOG_INTERNAL_LOG_LEVEL TILOG_INTERNAL_LEVEL_INFO
-
-#define TILOG_INTERNAL_PRINT_STEADY_FLAG FALSE
-
-#if defined(NDEBUG) && !defined(TILOG_ENABLE_PRINT_ON_RELEASE)
-#define DEBUG_PRINT(lv, fmt, ...)
-#else
-#define DEBUG_PRINT(lv, ...)                                                                                                               \
-	do                                                                                                                                     \
-	{                                                                                                                                      \
-		if_constexpr(lv <= TILOG_INTERNAL_LOG_LEVEL)                                                                                        \
-		{                                                                                                                                  \
-			char _s_log_[TILOG_INTERNAL_LOG_MAX_LEN];                                                                                      \
-			int _s_len = sprintf(_s_log_, " %u ", tiloghelperspace::GetInternalLogFlag()++);                                               \
-			int _limit_len_with_zero = TILOG_INTERNAL_LOG_MAX_LEN - _s_len;                                                                \
-			int _suppose_len = snprintf(_s_log_ + _s_len, _limit_len_with_zero, __VA_ARGS__);                                              \
-			FILE* _pFile = getInternalFilePtr();                                                                                           \
-			if (_pFile != NULL)                                                                                                            \
-			{ fwrite(_s_log_, sizeof(char), (size_t)_s_len + std::min(_suppose_len, _limit_len_with_zero - 1), _pFile); }                  \
-		}                                                                                                                                  \
-	} while (0)
-#endif
-
-#define DEBUG_PRINTA(...) DEBUG_PRINT(TILOG_INTERNAL_LEVEL_ALWAYS, __VA_ARGS__)
-#define DEBUG_PRINTF(...) DEBUG_PRINT(TILOG_INTERNAL_LEVEL_FATAL, __VA_ARGS__)
-#define DEBUG_PRINTE(...) DEBUG_PRINT(TILOG_INTERNAL_LEVEL_ERROR, __VA_ARGS__)
-#define DEBUG_PRINTW(...) DEBUG_PRINT(TILOG_INTERNAL_LEVEL_WARN, __VA_ARGS__)
-#define DEBUG_PRINTI(...) DEBUG_PRINT(TILOG_INTERNAL_LEVEL_INFO, __VA_ARGS__)
-#define DEBUG_PRINTD(...) DEBUG_PRINT(TILOG_INTERNAL_LEVEL_DEBUG, __VA_ARGS__)
-#define DEBUG_PRINTV(...) DEBUG_PRINT(TILOG_INTERNAL_LEVEL_VERBOSE, __VA_ARGS__)
+#define DEBUG_PRINTA(...) TIINNOLOG(ALWAYS).Stream()->printf(__VA_ARGS__)
+#define DEBUG_PRINTF(...) TIINNOLOG(FATAL).Stream()->printf(__VA_ARGS__)
+#define DEBUG_PRINTE(...) TIINNOLOG(ERROR).Stream()->printf(__VA_ARGS__)
+#define DEBUG_PRINTW(...) TIINNOLOG(WARNING).Stream()->printf(__VA_ARGS__)
+#define DEBUG_PRINTI(...) TIINNOLOG(INFO).Stream()->printf(__VA_ARGS__)
+#define DEBUG_PRINTD(...) TIINNOLOG(DEBUG).Stream()->printf(__VA_ARGS__)
+#define DEBUG_PRINTV(...) TIINNOLOG(VERBOSE).Stream()->printf(__VA_ARGS__)
 
 
 
@@ -115,6 +82,7 @@ using TiLogTime = tilogspace::internal::TiLogBean::TiLogTime;
 
 using namespace std;
 using namespace tilogspace;
+using namespace tilogspace::internal;
 
 namespace tilogspace
 {
@@ -180,34 +148,51 @@ namespace tilogspace
 #endif
 }	 // namespace tilogspace
 
+
+namespace tilogspace
+{
+	namespace internal
+	{
+		constexpr static size_t TILOG_INNO_LOG_QUEUE_FULL_SIZE = (size_t)(1024);
+		constexpr static size_t TILOG_INNO_LOG_QUEUE_NEARLY_FULL_SIZE = (size_t)(TILOG_INNO_LOG_QUEUE_FULL_SIZE * 0.75);
+		constexpr static char TILOG_INTERNAL_LOG_FILE_PATH[] = "a:/tilogs.txt";
+		constexpr static ELevel TILOG_INTERNAL_LOG_LEVEL = INFO;
+
+		TILOG_FORCEINLINE constexpr bool should_log(ELevel level) { return level <= TILOG_INTERNAL_LOG_LEVEL; }
+		struct TiLogStreamInner
+		{
+			inline TiLogStreamInner(tilogspace::internal::TiLogStringView source)
+			{
+				new (&stream) TiLogStream(ETiLogModule(-1), source.data(), (uint16_t)source.size());
+			}
+			~TiLogStreamInner();
+			inline TiLogStream* Stream() noexcept { return &stream; }
+			union
+			{
+				uint8_t buf[1];
+				TiLogStream stream;
+			};
+		};
+
+		struct TiLogInnerLogMgrImpl;
+		struct TiLogInnerLogMgr
+		{
+			TiLogInnerLogMgr();
+			~TiLogInnerLogMgr();
+			void PushLog(TiLogBean* pBean);
+			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_FUNC_IMPL(TiLogInnerLogMgr, instance)
+			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_MEMBER_DECLARE(TiLogInnerLogMgr, instance)
+		private:
+			TiLogInnerLogMgrImpl& Impl();
+			alignas(32) char data[1024];
+		};
+		TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_OUTSIDE(TiLogInnerLogMgr, instance)
+	}	 // namespace internal
+
+}	 // namespace tilogspace
+
 namespace tiloghelperspace
 {
-	inline static atomic_uint32_t& GetInternalLogFlag()
-	{
-		static atomic_uint32_t s_internalLogFlag(0);
-		return s_internalLogFlag;
-	}
-
-	static FILE* getInternalFilePtr()
-	{
-		static FILE* s_pInternalFile = []() -> FILE* {
-			constexpr size_t len_folder = TILOG_STRING_LEN_OF_CHAR_ARRAY(TILOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER);
-			constexpr size_t len_file = TILOG_STRING_LEN_OF_CHAR_ARRAY(TILOG_INTERNAL_LOG_FILE_PATH);
-			constexpr size_t len_s = len_folder + len_file;
-			char s[1 + len_s] = TILOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER;
-			memcpy(s + len_folder, TILOG_INTERNAL_LOG_FILE_PATH, len_file);
-			s[len_s] = '\0';
-			FILE* p = fopen(s, "a");
-			if (p)
-			{
-				setbuf(p, nullptr);	   // set no buf
-				char s2[] = "\n\n\ncreate new internal log\n";
-				fwrite(s2, sizeof(char), TILOG_STRING_LEN_OF_CHAR_ARRAY(s2), p);
-			}
-			return p;
-		}();
-		return s_pInternalFile;
-	}
 
 	static void transformTimeStrToFileName(char* filename, const char* timeStr, size_t size)
 	{
@@ -351,7 +336,6 @@ namespace tilogspace
 			os << std::hex << (std::this_thread::get_id());
 #endif
 			String id = os.str();
-			DEBUG_PRINTI("GetNewThreadIDString, tid %s ,cap %llu\n", id.c_str(), (long long unsigned)id.capacity());
 			if_constexpr(TILOG_THREAD_ID_MAX_LEN != SIZE_MAX)
 			{
 				if (id.size() > TILOG_THREAD_ID_MAX_LEN) { id.resize(TILOG_THREAD_ID_MAX_LEN); }
@@ -646,6 +630,12 @@ namespace tilogspace
 				this->pFirst = rhs.pFirst;
 				this->pEnd = rhs.pEnd;
 				rhs.pMem = nullptr;
+			}
+
+			PodCircularQueue& operator=(PodCircularQueue rhs) noexcept
+			{
+				std::swap(*this, rhs);
+				return *this;
 			}
 
 			~PodCircularQueue() { tifree(pMem); }
@@ -1213,6 +1203,22 @@ namespace tilogspace
 			bool mNeedWoking{};					  // protected by mMtx
 		};
 
+		struct DeliverStru
+		{
+			VecLogCache mDeliverCache;
+			atomic_uint64_t mDeliveredTimes{};
+			TiLogTime::origin_time_type mPreLogTime{};
+			alignas(32) char mlogprefix[TILOG_PREFIX_LOG_SIZE];
+			char* mctimestr;
+			IOBean mIoBean;
+			IOBean* mIoBeanForPush;	   // output
+			SyncedIOBeanPool mIOBeanPool;
+			uint64_t mPushLogCount{};
+			uint64_t mPushLogBlockCount{};
+			static_assert(sizeof(mlogprefix) == TILOG_PREFIX_LOG_SIZE, "fatal");
+			DeliverStru();
+		} ;
+
 		struct DeliverCallBack
 		{
 			virtual ~DeliverCallBack() = default;
@@ -1265,8 +1271,6 @@ namespace tilogspace
 
 			void Entry();
 
-			inline TiLogStringView AppendToMergeCacheByMetaData(const TiLogBean& bean);
-
 			void MergeSortForGlobalQueue();
 
 			void CountSortForGlobalQueue();
@@ -1300,23 +1304,7 @@ namespace tilogspace
 				VecLogCachePtrPriorQueue mThreadStruPriorQueue;	   // prior queue of ThreadStru cache
 				uint64_t mMergedSize = 0;
 			} mMerge;
-			struct DeliverStru
-			{
-				VecLogCache mDeliverCache;
-				atomic_uint64_t mDeliveredTimes{};
-				std::atomic<DeliverCallBack*> mCallback{ nullptr };
-				TiLogTime::origin_time_type mPreLogTime{};
-				alignas(32) char mlogprefix[TILOG_PREFIX_LOG_SIZE];
-				char* mctimestr;
-				IOBean mIoBean;
-				IOBean* mIoBeanForPush;	   // output
-				SyncedIOBeanPool mIOBeanPool;
-				uint64_t mPushLogCount{};
-				uint64_t mPushLogBlockCount{};
-				static_assert(sizeof(mlogprefix) == TILOG_PREFIX_LOG_SIZE, "fatal");
-				DeliverStru();
-
-			} mDeliver;
+			DeliverStru mDeliver;
 
 			struct SyncControler : public TiLogObject
 			{
@@ -1457,7 +1445,7 @@ namespace tilogspace
 		// clang-format on
 
 
-		TiLogCore::DeliverStru::DeliverStru()
+		DeliverStru::DeliverStru()
 		{
 #if TILOG_IS_WITH_MILLISECONDS
 			memcpy(mlogprefix, "\n   [2022-06-06  19:25:10.763] #", sizeof(mlogprefix));
@@ -1584,29 +1572,20 @@ namespace tilogspace
 			{
 				constexpr static uint32_t CONCURRENT = TILOG_MAY_MAX_RUNNING_THREAD_NUM;
 			};
-			TiLogConcurrentHashMap<const String*, uint32_t, ThreadIdStrRefCountFeat> threadIdStrRefCount;
 			using engine_t = std::array<TiLogEngine, TILOG_MODULE_SPECS_SIZE>;
+
+			mempoolspace::mempool mpool;
+			TiLogMap_t tilogmap;
+			TiLogConcurrentHashMap<const String*, uint32_t, ThreadIdStrRefCountFeat> threadIdStrRefCount;
 			union
 			{
 				char engines_buf[1]{};
 				engine_t engines;
 			};
-			TiLogMap_t tilogmap;
-			mempoolspace::mempool mpool;
-			
-			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE(TiLogEngines)
 
-			TiLogEngines()
-			{
-				for (size_t i = 0; i < engines.size(); i++)
-				{
-					new (&engines[i]) TiLogEngine(TILOG_ACTIVE_MODULE_SPECS[i].mod);
-				}
-			}
-			~TiLogEngines()
-			{
-				engines.~engine_t();
-			}
+			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE(TiLogEngines)
+			TiLogEngines();
+			~TiLogEngines();
 		};
 
 		void TiLogPrinterData::init()
@@ -2019,8 +1998,6 @@ namespace tilogspace
 				{
 					DeliverLogs();
 					++mDeliver.mDeliveredTimes;
-					DeliverCallBack* callBack = mDeliver.mCallback;
-					if (callBack) { callBack->onDeliverEnd(); }
 					mDeliver.mDeliverCache.swap(mGC.mGCList);
 					mDeliver.mDeliverCache.clear();
 				}
@@ -2512,7 +2489,7 @@ namespace tilogspace
 		}
 		inline std::unique_lock<std::mutex> TiLogDaemon::GetPollLock() { return GetCoreThrdLock(mPoll); }
 
-		inline TiLogStringView TiLogCore::AppendToMergeCacheByMetaData(const TiLogBean& bean)
+		inline TiLogStringView AppendToMergeCacheByMetaData(DeliverStru& mDeliver, const TiLogBean& bean)
 		{
 			TiLogStringView logsv = TiLogStreamHelper::str_view(&bean);
 			auto& logs = mDeliver.mIoBean;
@@ -2567,7 +2544,7 @@ namespace tilogspace
 				DEBUG_RUN(TiLogBean::check(pBean));
 				TiLogBean& bean = *pBean;
 
-				TiLogStringView&& log = AppendToMergeCacheByMetaData(bean);
+				TiLogStringView&& log = AppendToMergeCacheByMetaData(mDeliver, bean);
 			}
 			mPrintedLogs += deliverCache.size();
 			DEBUG_PRINTI("End of mergeLogsToOneString,string size= %llu\n", (long long unsigned)mDeliver.mIoBean.size());
@@ -2890,7 +2867,107 @@ namespace tilogspace
 
 	}	 // namespace internal
 }	 // namespace tilogspace
-using namespace tilogspace::internal;
+
+
+namespace tilogspace
+{
+	namespace internal
+	{
+		TiLogStreamInner::~TiLogStreamInner()
+		{
+			TiLogInnerLogMgr::getRInstance().PushLog(stream.ext());
+			stream.pCore = nullptr;
+		}
+
+		struct TiLogInnerLogMgrImpl
+		{
+			PodCircularQueue<TiLogBean*, TILOG_INNO_LOG_QUEUE_FULL_SIZE> mCaches;
+			TiLogFile mFile;
+			enum
+			{
+				RUN,
+				TO_STOP,
+				STOP
+			} stat{ RUN };
+			bool mNeedWoking{};
+			thread logthrd;
+			TILOG_MUTEXABLE_CLASS_MACRO_WITH_CV(OptimisticMutex, mtx, cv_type, cv);
+
+			TiLogInnerLogMgrImpl() : logthrd(&TiLogInnerLogMgrImpl::InnoLoger, this) {}
+			~TiLogInnerLogMgrImpl()
+			{
+				stat = TO_STOP;
+				cv.notify_one();
+				logthrd.join();
+			}
+
+			void InnoLoger()
+			{
+				SetThreadName((thrd_t)-1, "InnoLoger");
+				mFile.open(TILOG_INTERNAL_LOG_FILE_PATH, "a");
+				DeliverStru mDeliver;
+				Vector<TiLogBean*> to_free;
+				TiLogStreamHelper::TiLogStreamMemoryManagerCache cache;
+				while (1)
+				{
+					unique_lock<OptimisticMutex> lk(mtx);
+					if (stat == TO_STOP) { break; }
+					cv.wait_for(lk, chrono::milliseconds(100));
+
+					for (auto it = mCaches.first_sub_queue_begin(); it != mCaches.first_sub_queue_end(); ++it)
+					{
+						TiLogBean* pBean = *it;
+						AppendToMergeCacheByMetaData(mDeliver, *pBean);
+						to_free.emplace_back(pBean);
+					}
+					for (auto it = mCaches.second_sub_queue_begin(); it != mCaches.second_sub_queue_end(); ++it)
+					{
+						TiLogBean* pBean = *it;
+						AppendToMergeCacheByMetaData(mDeliver, *pBean);
+						to_free.emplace_back(pBean);
+					}
+					TiLogStreamHelper::DestroyPushedTiLogBean(to_free, cache);
+					to_free.clear();
+					mCaches.clear();
+
+					TiLogStringView sv{ mDeliver.mIoBean.data(), mDeliver.mIoBean.size() };
+					mFile.write(sv);
+					mDeliver.mIoBean.clear();
+				}
+				stat = STOP;
+			}
+
+			void PushLog(TiLogBean* pBean)
+			{
+				std::unique_lock<OptimisticMutex> lk(mtx);
+				new (&pBean->tiLogTime) TiLogTime(EPlaceHolder{});
+				if (mCaches.size() >= TILOG_INNO_LOG_QUEUE_NEARLY_FULL_SIZE)
+				{
+					do
+					{
+						lk.unlock();
+						cv.notify_one();
+						this_thread::yield();
+						lk.lock();
+					}while (mCaches.size() == TILOG_INNO_LOG_QUEUE_FULL_SIZE);
+				}
+				mCaches.emplace_back(pBean);
+			}
+		};
+
+		TiLogInnerLogMgr::TiLogInnerLogMgr()
+		{
+			static_assert(sizeof(TiLogInnerLogMgrImpl) <= sizeof(data), "fatal,placement new will over size");
+			static_assert(alignof(TiLogInnerLogMgrImpl) <= alignof(TiLogInnerLogMgr), "fatal,align not enough");
+			new (data) TiLogInnerLogMgrImpl();
+		}
+
+		TiLogInnerLogMgr::~TiLogInnerLogMgr() { Impl().~TiLogInnerLogMgrImpl(); }
+		TiLogInnerLogMgrImpl& TiLogInnerLogMgr::Impl() { return *(TiLogInnerLogMgrImpl*)&data; }
+		void TiLogInnerLogMgr::PushLog(TiLogBean* pBean) { Impl().PushLog(pBean); }
+	}	 // namespace internal
+}	 // namespace tilogspace
+
 
 namespace tilogspace
 {
@@ -3009,27 +3086,35 @@ namespace tilogspace
 	}	 // namespace internal
 
 	TiLogModBase& TiLog::GetMoudleBaseRef(mod_id_t mod) { return TiLogEngines::getRInstance().engines[mod].tiLogModBase; }
-	TiLog::TiLog()
+	TiLogEngines::TiLogEngines()
 	{
-		// TODO only happens in mingw64,Windows,maybe a mingw64 bug? see DEBUG_PRINTA("test printf lf %lf\n",1.0)
-		DEBUG_PRINTA("fix dtoa deadlock in (s)printf for mingw64 %f %f", 1.0f, 1.0);
 		ctor_iostream_mtx();
 		atexit([] { dtor_iostream_mtx(); });
+		TiLogInnerLogMgr::init();
+		// TODO only happens in mingw64,Windows,maybe a mingw64 bug? see DEBUG_PRINTA("test printf lf %lf\n",1.0)
+		DEBUG_PRINTA("fix dtoa deadlock in (s)printf for mingw64 %f %f", 1.0f, 1.0);
 		ctor_single_instance_printers();
 		InitClocks();
-		TiLogEngines::init();
+
+		for (size_t i = 0; i < engines.size(); i++)
+		{
+			new (&engines[i]) TiLogEngine(TILOG_ACTIVE_MODULE_SPECS[i].mod);
+		}
 		TICLOG << "TiLog " << &TiLog::getRInstance() << " TiLogEngines " << TiLogEngines::getInstance() << " in thrd "
 			   << std::this_thread::get_id() << '\n';
 	}
-
-	TiLog::~TiLog()
+	TiLogEngines::~TiLogEngines()
 	{
-		TICLOG << "~TiLog " << &TiLog::getRInstance() << " TiLogEngines " << TiLogEngines::getInstance() << " in thrd "
-			   << std::this_thread::get_id() << '\n';
-		TiLogEngines::uninit();
+		engines.~engine_t();
 		UnInitClocks();
 		dtor_single_instance_printers();
+		TiLogInnerLogMgr::uninit();
+		TICLOG << "~TiLog " << &TiLog::getRInstance() << " TiLogEngines " << TiLogEngines::getInstance() << " in thrd "
+			   << std::this_thread::get_id() << '\n';
 	}
+
+	TiLog::TiLog() { TiLogEngines::init(); }
+	TiLog::~TiLog() { TiLogEngines::uninit(); }
 }	 // namespace tilogspace
 
 

@@ -135,8 +135,6 @@
 #define TILOG_IS_WITH_FUNCTION_NAME TRUE  // TRUE or FALSE,if false no function name in print
 #define TILOG_IS_WITH_FILE_LINE_INFO FALSE  // TRUE or FALSE,if false no file and line in print
 
-#define TILOG_DEFAULT_FILE_PRINTER_OUTPUT_FOLDER "a:/" // define the default file printer output path,MUST be an ANSI string and end with /
-
 //define global memory manage functions
 #define TILOG_MALLOC_FUNCTION(size) malloc(size)
 #define TILOG_CALLOC_FUNCTION(num_elements, size_of_element) calloc(num_elements, size_of_element)
@@ -2392,7 +2390,7 @@ namespace tilogspace
 
 			DEBUG_DECLARE(uint8_t tidlen)
 			DEBUG_CANARY_UINT64(flag3)
-			//char datas[];	 //{tid}{userlog}
+			DEBUG_DECLARE(char datas[])	   //{tid}{userlog}
 
 		public:
 			ELogLevelFlag level() const { return (ELogLevelFlag)source_location_str[0]; }
@@ -2605,6 +2603,9 @@ namespace tilogspace
 
 namespace internal
 {
+	struct TiLogStreamInner;
+	struct TiLogInnerLogMgrImpl;
+
 	struct TiLogStreamMemoryManager
 	{
 		static void* timalloc(size_t sz);
@@ -2641,6 +2642,9 @@ namespace internal
 		friend class TILOG_INTERNAL_STRING_TYPE;
 		friend struct tilogspace::internal::TiLogStreamHelper;
 		friend class TiLogStreamEx;
+		friend struct tilogspace::internal::TiLogStreamInner;
+		friend struct tilogspace::internal::TiLogInnerLogMgrImpl;
+
 	protected:
 		using StringType = TILOG_INTERNAL_STRING_TYPE;
 		using TiLogStringView = tilogspace::internal::TiLogStringView;
