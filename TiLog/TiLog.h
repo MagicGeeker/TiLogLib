@@ -1674,11 +1674,33 @@ namespace tilogspace
 		}
 
 		// Search the str for the first occurrence of c
-		// return index in str(finded) or Len-1(not find)
+		// return index in str(finded) or -1(not find)
 		template <std::size_t memsize>
-		constexpr size_t find(const char (&str)[memsize], char c, size_t pos = 0)
+		constexpr int find(const char (&str)[memsize], char c, size_t pos = 0)
 		{
-			return pos >= memsize ? (memsize - 1) : (str[pos] == c ? pos : find(str, c, pos + 1));
+			return pos >= memsize ? -1 : (str[pos] == c ? pos : find(str, c, pos + 1));
+		}
+
+		// Search the str for the last occurrence of c
+		// return index in str(finded) or Len-1(not find)
+		constexpr int rfind(const char* str, size_t memsize, char c, size_t pos)
+		{
+			return pos == 0 ? (str[0] == c ? 0 : -1) : (str[pos] == c ? pos : rfind(str, memsize, c, pos - 1));
+		}
+		constexpr int rfind(const char* str, size_t memsize, char c) { return rfind(str, memsize, c, memsize - 1); }
+
+		constexpr bool is_prefix(const char* str, const char* prefix)
+		{
+			return prefix[0] == '\0'
+				? true
+				: (str[0] == '\0' ? (str[0] == prefix[0]) : (str[0] != prefix[0] ? false : is_prefix(str + 1, prefix + 1)));
+		}
+
+		// Search the str for the first occurrence of substr
+		// return index in str(finded) or -1(not find)
+		constexpr int find(const char* str, const char* substr, int pos = 0)
+		{
+			return substr[0] == '\0' ? 0 : ((str[0] == '\0') ? -1 : (is_prefix(str, substr) ? pos : find(str + 1, substr, 1 + pos)));
 		}
 
 
@@ -1686,40 +1708,19 @@ namespace tilogspace
 		{
 			const char* m_front;
 			const char* m_end;
-			DEBUG_DECLARE(size_t max_size;)
 
 		public:
-			TiLogStringView() : m_front(nullptr), m_end(nullptr) { DEBUG_RUN(max_size = 0); }
-			TiLogStringView(const char* front, const char* ed)
-			{
-				DEBUG_ASSERT(front != nullptr);
-				DEBUG_ASSERT2(ed >= front, (uintptr_t)front, (uintptr_t)ed);
-				m_front = front;
-				m_end = ed;
-				DEBUG_RUN(max_size = m_end - m_front;);
-			}
-
-			TiLogStringView(const char* front, size_t sz)
-			{
-				DEBUG_ASSERT(front != nullptr);
-				m_front = front;
-				m_end = front + sz;
-				DEBUG_RUN(max_size = sz);
-			}
+			constexpr TiLogStringView() : m_front(nullptr), m_end(nullptr) {}
+			constexpr TiLogStringView(const char* front, size_t sz) : m_front(front), m_end(front + sz) {}
 			template <size_t N>
-			constexpr inline TiLogStringView(const char (&s)[N])
-				: DEBUG_INITER(m_front(s), m_end(s + N - 1), max_size(m_end - m_front)) RELEASE_INITER(m_front(s), m_end(s + N - 1))
+			constexpr inline TiLogStringView(const char (&s)[N]) : m_front(s), m_end(s + N - 1)
 			{
 			}
 			constexpr inline const char* data() const { return m_front; }
 
 			constexpr inline size_t size() const { return m_end - m_front; }
 
-			void resize(size_t sz)
-			{
-				DEBUG_ASSERT(sz <= max_size);
-				m_end = m_front + sz;
-			}
+			void resize(size_t sz) { m_end = m_front + sz; }
 
 			inline size_t find(char c, size_t idx) const
 			{
@@ -3146,6 +3147,44 @@ namespace tilogspace
 			return static_string<LOG_LEVELS_STRING_LEN, LITERAL>(LOG_LEVELS[LV], nullptr);
 		}
 
+		constexpr size_t tilog_funcl(const char* func, size_t memsize, int m)
+		{
+			return m != -1 ? (m + 1 >= (int)memsize ? m : m + 1) : rfind(func, memsize, ' ');
+		}
+		constexpr size_t tilog_funcl(const char* func, size_t memsize) { return tilog_funcl(func, memsize, rfind(func, memsize, ':')); }
+
+		template <std::size_t memsize>
+		constexpr int tilog_funcr(const char (&func)[memsize])
+		{
+			return find(func, "::<lambda") != -1 ? find(func, "::<lambda") : find(func, "::(anony");
+		}
+
+		template <std::size_t memsize>
+		constexpr TiLogStringView tilog_func(const char (&func)[memsize], int l, int r)
+		{
+			return r == -1 ? TiLogStringView(func) : l == -1 ? TiLogStringView(func, r) : TiLogStringView(func + l, r - l);
+		}
+
+		template <std::size_t memsize>
+		constexpr TiLogStringView tilog_func(const char (&func)[memsize], int r)
+		{
+			return tilog_func(func, tilog_funcl(func, r), r);
+		}
+
+		template <std::size_t memsize>
+		constexpr TiLogStringView tilog_func(const char (&func)[memsize])
+		{
+			// msvc
+			// auto __cdecl xxx::A::{ctor}::<lambda_1>::operator ()(void) const
+			// auto __cdecl f::<lambda_1>::operator ()(void) const
+			// auto __cdecl xxx::A::f::<lambda_1>::operator ()(void) const
+			// clang
+			// auto xxx::A::A()::(anonymous class)::operator()() const
+			// auto f()::(anonymous class)::operator()() const
+			// auto xxx::A::f(int)::(anonymous class)::operator()() const
+			return tilog_func(func, tilog_funcr(func));
+		}
+
 		template <ELevel LV, size_t N, int T>
 		constexpr inline static_string<LOG_LEVELS_STRING_LEN + N, CONCAT> tiLog_level_source(const static_string<N, T>& src_loc)
 		{
@@ -3167,7 +3206,7 @@ namespace tilogspace
 	}	 // namespace internal
 }	 // namespace tilogspace
 
-// clang-formsat off
+// clang-format off
 #define LINE_STRING0(l) #l
 #define LINE_STRING(l) LINE_STRING0(l)
 
@@ -3186,8 +3225,9 @@ namespace tilogspace
 #endif
 
 #define FILE_LINE_DETAIL tilogspace::internal::string_literal(__FILE__ ":" LINE_STRING(__LINE__) " ")
-#define FUNCTION_DETAIL tilogspace::internal::static_string<tilogspace::internal::find(FUNCTION_DETAIL0, ':'),tilogspace::internal::LITERAL>(FUNCTION_DETAIL0,nullptr)
-
+#define FUNCTION_DETAIL                                                                                                                    \
+	tilogspace::internal::static_string<tilogspace::internal::tilog_func(FUNCTION_DETAIL0).size(), tilogspace::internal::LITERAL>(         \
+		tilogspace::internal::tilog_func(FUNCTION_DETAIL0).data(), nullptr)
 
 #if TILOG_IS_WITH_FILE_LINE_INFO == TRUE && TILOG_IS_WITH_FUNCTION_NAME == TRUE
 #define TILOG_INTERNAL_GET_SOURCE_LOCATION_STRING tilogspace::internal::string_concat(FILE_LINE_DETAIL, FUNCTION_DETAIL)

@@ -2489,7 +2489,7 @@ namespace tilogspace
 		}
 		inline std::unique_lock<std::mutex> TiLogDaemon::GetPollLock() { return GetCoreThrdLock(mPoll); }
 
-		inline TiLogStringView AppendToMergeCacheByMetaData(DeliverStru& mDeliver, const TiLogBean& bean)
+		inline void AppendToMergeCacheByMetaData(DeliverStru& mDeliver, const TiLogBean& bean)
 		{
 			TiLogStringView logsv = TiLogStreamHelper::str_view(&bean);
 			auto& logs = mDeliver.mIoBean;
@@ -2531,7 +2531,6 @@ namespace tilogspace
 													   // clang-format on
 			DEBUG_DECLARE(auto newSize = logs.size();)
 			DEBUG_ASSERT4(preSize + append_size == newSize, preSize, append_size, reserveSize, newSize);
-			return TiLogStringView(&logs[preSize], logs.end());
 		}
 
 		TiLogTime TiLogCore::mergeLogsToOneString(VecLogCache& deliverCache)
@@ -2544,7 +2543,7 @@ namespace tilogspace
 				DEBUG_RUN(TiLogBean::check(pBean));
 				TiLogBean& bean = *pBean;
 
-				TiLogStringView&& log = AppendToMergeCacheByMetaData(mDeliver, bean);
+				AppendToMergeCacheByMetaData(mDeliver, bean);
 			}
 			mPrintedLogs += deliverCache.size();
 			DEBUG_PRINTI("End of mergeLogsToOneString,string size= %llu\n", (long long unsigned)mDeliver.mIoBean.size());
