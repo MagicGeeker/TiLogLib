@@ -1057,7 +1057,6 @@ namespace tilogspace
 			List<ThreadStru*> waitMergeQueue;		 // thread is dead, but some logs have not merge to global print string
 			List<ThreadStru*> toDelQueue;			 // thread is dead and no logs exist,need to delete by gc thread
 
-			List<ThreadStru*> coreThrdQueue;	   // queue for internal threads
 			atomic<uint64_t> handledUserThreadCnt{};
 			atomic<uint64_t> diedUserThreadCnt{};
 		};
@@ -1350,11 +1349,7 @@ namespace tilogspace
 			bool Prepared();
 			void WaitPrepared(TiLogStringView msg);
 
-
-			void FreeMemory();
-			static void DestroyThreadStrus(List<ThreadStru*>& listStru);
-
-			inline ThreadStru* GetThreadStru(List<ThreadStru*>* pDstQueue = nullptr);
+			inline ThreadStru* GetThreadStru();
 
 			inline std::unique_lock<std::mutex> GetPollLock();
 
@@ -1574,6 +1569,7 @@ namespace tilogspace
 			};
 			using engine_t = std::array<TiLogEngine, TILOG_MODULE_SPECS_SIZE>;
 
+			const String* mainThrdId = GetThreadIDString();
 			mempoolspace::mempool mpool;
 			TiLogMap_t tilogmap;
 			TiLogConcurrentHashMap<const String*, uint32_t, ThreadIdStrRefCountFeat> threadIdStrRefCount;
@@ -1948,7 +1944,7 @@ namespace tilogspace
 			ThreadStru* pThreadStru{ nullptr };
 		};
 
-	}	 // namespace internal
+		}	 // namespace internal
 
 	namespace internal
 	{
@@ -2046,7 +2042,7 @@ namespace tilogspace
 		}
 
 		//get unique ThreadStru* by TiLogCore* and thread id
-		ThreadStru* TiLogDaemon::GetThreadStru(List<ThreadStru*>* pDstQueue)
+		ThreadStru* TiLogDaemon::GetThreadStru()
 		{
 			static thread_local ThreadStru* strus[TILOG_MODULE_SPECS_SIZE]{};
 #ifndef TILOG_COMPILER_MINGW
@@ -2054,7 +2050,7 @@ namespace tilogspace
 			// see https://sourceforge.net/p/mingw-w64/bugs/893/
 			static thread_local ThreadExitWatcher watchers[TILOG_MODULE_SPECS_SIZE]{};
 #endif
-
+			auto pDstQueue= &mThreadStruQueue.availQueue;
 			auto f = [&, pDstQueue] {
 				ThreadStru* pStru = new ThreadStru(this);
 				DEBUG_ASSERT(pStru != nullptr);
@@ -2122,39 +2118,12 @@ namespace tilogspace
 				delete c;
 			}
 			mTiLogPrinterManager->DestroyPrinters();	   // make sure printers output all logs and free to SyncedIOBeanPool
-			// TiLogCore::getRInstance().FreeMemory(); // TODO DestroyThreadStrus cause deadlock???
 			DEBUG_PRINTI(
 				"engine %p mod %u tilogcore %p handledUserThreadCnt %llu diedUserThreadCnt %llu\n", this->mTiLogEngine,
 				(unsigned)this->mTiLogEngine->mod, this, (unsigned long long)mThreadStruQueue.handledUserThreadCnt,
 				(unsigned long long)mThreadStruQueue.diedUserThreadCnt);
 			DEBUG_PRINTI("TiLogCore %p exit\n", this);
 			this->mMagicNumber = MAGIC_NUMBER_DEAD;
-		}
-
-		void TiLogDaemon::FreeMemory()
-		{
-			DEBUG_PRINTA("FreeMemory begin\n");
-			DestroyThreadStrus(mThreadStruQueue.coreThrdQueue);
-			DEBUG_PRINTA("FreeMemory exit\n");
-		}
-
-		void TiLogDaemon::DestroyThreadStrus(List<ThreadStru*>& listStru)
-		{
-			for (auto it = listStru.begin(); !listStru.empty();)
-			{
-				ThreadStru& threadStru = *(*it);
-				std::mutex& mtx = threadStru.thrdExistMtx;
-
-				while (true)
-				{
-					mtx.lock();	   // wait for  thread end, unlock by notify_all_at_thread_exit
-					mtx.unlock();
-					DEBUG_PRINTV("listStru %p delete internal thrd %s\n", &listStru,threadStru.tid->c_str());
-					delete &threadStru;								 // delete current thread stru
-					it = listStru.erase(it);	 // move to next
-					break;
-				}
-			}
 		}
 
 		bool TiLogDaemon::Prepared()
@@ -2208,7 +2177,7 @@ namespace tilogspace
 		void TiLogDaemon::PushLog(TiLogBean* pBean)
 		{
 			DEBUG_ASSERT(mMagicNumber == MAGIC_NUMBER);			// assert TiLogCore inited
-			ThreadStru& stru = *GetThreadStru(&mThreadStruQueue.availQueue);
+			ThreadStru& stru = *GetThreadStru();
 			unique_lock<ThreadLocalSpinMutex> lk_local(stru.spinMtx);
 			bool isLocalFull = LocalCircularQueuePushBack(stru, pBean);
 			// init log time after stru is inited and push to local queue,to make sure log can be print ordered
@@ -2829,7 +2798,6 @@ namespace tilogspace
 			{
 				this_thread::yield();
 			}
-			GetThreadStru(&mThreadStruQueue.coreThrdQueue);
 			return;
 		}
 
@@ -3089,6 +3057,7 @@ namespace tilogspace
 	{
 		ctor_iostream_mtx();
 		atexit([] { dtor_iostream_mtx(); });
+		IncTidStrRefCnt(this->mainThrdId);	  // main thread thread_local varibles(tid,mempoool...) keep available
 		TiLogInnerLogMgr::init();
 		// TODO only happens in mingw64,Windows,maybe a mingw64 bug? see DEBUG_PRINTA("test printf lf %lf\n",1.0)
 		DEBUG_PRINTA("fix dtoa deadlock in (s)printf for mingw64 %f %f", 1.0f, 1.0);

@@ -10,6 +10,7 @@
 #include <atomic>
 #include <functional>
 #include <thread>
+#include <mutex>
 #include <type_traits>
 #include <iostream>
 #include <algorithm>
