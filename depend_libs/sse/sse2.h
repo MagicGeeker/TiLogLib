@@ -193,7 +193,7 @@ inline uint32_t u32toa_sse2(uint32_t value, char* buf) {
         buffer+=8;
         *buffer = '\0';
     }
-	return buffer-buf;
+	return (uint32_t)(buffer - buf);
 }
 
 inline uint32_t i32toa_sse2(int32_t value, char* buffer) {
@@ -338,7 +338,7 @@ inline uint32_t u64toa_sse2(uint64_t value, char* buf) {
         *buffer='\0';
     }
 
-	return buffer-buf;
+	return (uint32_t)(buffer - buf);
 }
 
 inline uint32_t i64toa_sse2(int64_t value, char* buffer) {

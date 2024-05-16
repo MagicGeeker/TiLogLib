@@ -98,7 +98,7 @@ namespace funcspace
 			TILOG_CURRENT_MODULE.Sync();
 		}
 		constexpr uint64_t loops = TestLoopType::GET_SINGLE_THREAD_LOOPS();
-		constexpr int32_t threads = TestLoopType::THREADS();
+		constexpr int32_t threads = (int32_t)TestLoopType::THREADS();
 
 		SimpleTimer s1m(TestLoopType::PRINT_TOTAL_TIME());
 
@@ -195,7 +195,7 @@ static void ComplexCalFunc(uint64_t x)
 	char buf2[64] = { 0 };
 	for (int i = 0; i <= N; i++)
 	{
-		for (int j = 0; j < sizeof(buf1); j++)
+		for (uint32_t j = 0; j < (uint32_t)sizeof(buf1); j++)
 		{
 			*(volatile char*)(buf2 + j) = *(volatile char*)(buf1 + j);
 		}

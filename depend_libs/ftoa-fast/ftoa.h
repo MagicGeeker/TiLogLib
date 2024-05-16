@@ -150,8 +150,8 @@ inline unsigned int ftoa(char *s, float f, int *_K)
     D_lower++;
 
     delta = (D_upper - D_lower);
-    p1 = D_upper >> -ve;
-    p2 = D_upper & one;
+    p1 = (unsigned char)(D_upper >> -ve);
+    p2 = (unsigned char)(D_upper & one);
 
     digit = p1 / 10;
     if (digit) {
@@ -165,7 +165,7 @@ inline unsigned int ftoa(char *s, float f, int *_K)
         s[len++] = '.';
     do {
         p2 *= 10;
-        s[len++] = 0x30 + (p2 >> -ve);
+        s[len++] = (char)(0x30 + (p2 >> -ve));
         p2 &= one;
         delta *= 10;
     } while (p2 > delta);

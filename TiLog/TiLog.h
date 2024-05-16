@@ -399,6 +399,13 @@ namespace tilogspace
 		sync_ostream_mtx_t ticlog_mtx;
 	};
 	extern ti_iostream_mtx_t* ti_iostream_mtx;
+	struct lock_proxy_t
+	{
+		lock_proxy_t(sync_ostream_mtx_t& m, std::ostream& t) : lgd(m), tp(t) {}
+		std::ostream& operator*() { return tp; }
+		std::unique_lock<sync_ostream_mtx_t> lgd;
+		std::ostream& tp;
+	};
 }	 // namespace tilogspace
 
 namespace tilogspace
@@ -648,9 +655,9 @@ namespace tilogspace
 
 		void init() { val = UINT64_MAX; }
 
-		bool bitget(int index) { return (bool)((uint64_t(1) << index) & val); }
-		void bitset1(int index) { val = ((uint64_t(1) << index) | val); }
-		void bitset0(int index)
+		bool bitget(uint32_t index) { return (bool)((uint64_t(1) << index) & val); }
+		void bitset1(uint32_t index) { val = ((uint64_t(1) << index) | val); }
+		void bitset0(uint32_t index)
 		{
 			uint64_t t = ((uint64_t(1) << index));
 			t = ~t;
@@ -736,10 +743,10 @@ namespace tilogspace
 			memset(units, 0x0, sizeof(units));
 			bit1_cnt = 0;
 		}
-		void bitset1(int index)
+		void bitset1(uint32_t index)
 		{
-			int idx_L2 = index / 64;
-			int idx_raw = index % 64;
+			uint32_t idx_L2 = index / 64;
+			uint32_t idx_raw = index % 64;
 
 			bit_unit_t& unitL2 = units[idx_L2];
 
@@ -751,10 +758,10 @@ namespace tilogspace
 	struct objpool_spec
 	{
 		constexpr static bool is_for_multithread = true;
-		constexpr static char invalid_char = 0xcc;
+		constexpr static uint8_t invalid_char = 0xcc;
 	};
 
-	using pool_id_t = int;
+	using pool_id_t = uint32_t;
 	struct objpool;
 	struct local_mempool;
 
@@ -824,7 +831,7 @@ namespace tilogspace
 		wmap1dmtx_t wmap1dmtx;
 
 		local_mempool* local_mempool_ptr{ nullptr };
-		pool_id_t id{ -1 };
+		pool_id_t id{ std::numeric_limits<pool_id_t>::max() };
 		void* blk_start{ nullptr };
 		void* blk_end{ nullptr };	 // exclude
 		uint32_t blk_sizeof{ 0 };
@@ -903,7 +910,7 @@ namespace tilogspace
 
 		void put(void* ptr)
 		{
-			uint32_t n = ((uint8_t*)ptr - (uint8_t*)blk_start) / blk_sizeof;
+			uint32_t n = (uint32_t)((uint8_t*)ptr - (uint8_t*)blk_start) / blk_sizeof;
 			DEBUG_ASSERT(n < blk_init_cnt);
 			DEBUG_ASSERT3(((uint8_t*)ptr - (uint8_t*)blk_start) % blk_sizeof == 0, ptr, blk_sizeof, blk_sizeof);
 			DEBUG_RUN(memset(ptr, invalid_char, blk_sizeof));
@@ -912,7 +919,7 @@ namespace tilogspace
 		}
 		void put_nolock(void* ptr)
 		{
-			uint32_t n = ((uint8_t*)ptr - (uint8_t*)blk_start) / blk_sizeof;
+			uint32_t n = (uint32_t)((uint8_t*)ptr - (uint8_t*)blk_start) / blk_sizeof;
 			DEBUG_ASSERT(n < blk_init_cnt);
 			DEBUG_ASSERT3(((uint8_t*)ptr - (uint8_t*)blk_start) % blk_sizeof == 0, ptr, blk_sizeof, blk_sizeof);
 			DEBUG_RUN(memset(ptr, invalid_char, blk_sizeof));
@@ -920,7 +927,7 @@ namespace tilogspace
 		}
 		void put_local_nolock(void* ptr)
 		{
-			uint32_t n = ((uint8_t*)ptr - (uint8_t*)blk_start) / blk_sizeof;
+			uint32_t n = (uint32_t)((uint8_t*)ptr - (uint8_t*)blk_start) / blk_sizeof;
 			DEBUG_ASSERT(n < blk_init_cnt);
 			DEBUG_ASSERT3(((uint8_t*)ptr - (uint8_t*)blk_start) % blk_sizeof == 0, ptr, blk_sizeof, blk_sizeof);
 			DEBUG_RUN(memset(ptr, invalid_char, blk_sizeof));
@@ -928,7 +935,7 @@ namespace tilogspace
 		}
 		void set_mini_meta_nolock(void* ptr)
 		{
-			uint32_t n = ((uint8_t*)ptr - (uint8_t*)blk_start) / blk_sizeof;
+			uint32_t n = (uint32_t)((uint8_t*)ptr - (uint8_t*)blk_start) / blk_sizeof;
 			bool b = smap2d.try_bitset0(n);
 			DEBUG_ASSERT(b);
 		}
@@ -1031,7 +1038,7 @@ namespace tilogspace
 				DEBUG_ASSERT2(memblks[i].blkcnt % memblks[i].blkcnt_base == 0, memblks[i].blkcnt, memblks[i].blkcnt_base);
 				DEBUG_ASSERT2(blksizeof * blkcnt % ALIGN_OF_MINI_OBJPOOL == 0, blksizeof, blkcnt);
 				objpool& opool = obj_pools_raw[i];
-				opool.init(this, id + i, p, blksizeof, blkcnt);
+				opool.init(this, (pool_id_t)(id + i), p, blksizeof, blkcnt);
 				if (opool.blk_init_cnt != 0)
 				{
 					pool_edges[pool_edges_sorted_size++] = objpool_edge_t{ opool.blk_start, &opool };
@@ -1177,7 +1184,7 @@ namespace tilogspace
 				} else if (vec_local_pool.size() <= TILOG_LOCAL_MEMPOOL_MAX_NUM)
 				{
 					local_mempool* p = new local_mempool(next_id);
-					next_id += local_mempool::obj_pools_cnt();
+					next_id += (pool_id_t)local_mempool::obj_pools_cnt();
 					free_local_pool.push(p);
 					vec_local_pool.push_back(p);
 					{
@@ -1677,18 +1684,18 @@ namespace tilogspace
 		// Search the str for the first occurrence of c
 		// return index in str(finded) or -1(not find)
 		template <std::size_t memsize>
-		constexpr int find(const char (&str)[memsize], char c, size_t pos = 0)
+		constexpr int find(const char (&str)[memsize], char c, int pos = 0)
 		{
 			return pos >= memsize ? -1 : (str[pos] == c ? pos : find(str, c, pos + 1));
 		}
 
 		// Search the str for the last occurrence of c
-		// return index in str(finded) or Len-1(not find)
-		constexpr int rfind(const char* str, size_t memsize, char c, size_t pos)
+		// return index in str(finded) or -1(not find)
+		constexpr int rfind(const char* str, size_t memsize, char c, int pos)
 		{
 			return pos == 0 ? (str[0] == c ? 0 : -1) : (str[pos] == c ? pos : rfind(str, memsize, c, pos - 1));
 		}
-		constexpr int rfind(const char* str, size_t memsize, char c) { return rfind(str, memsize, c, memsize - 1); }
+		constexpr int rfind(const char* str, size_t memsize, char c) { return rfind(str, memsize, c, (int)memsize - 1); }
 
 		constexpr bool is_prefix(const char* str, const char* prefix)
 		{
@@ -2199,6 +2206,7 @@ namespace tilogspace
 
 				inline steady_flag_t compare(const NativeSteadySystemClockWrapper& r) const { return (chronoTime - r.chronoTime).count(); }
 
+				inline NativeSteadySystemClockWrapper(const NativeSteadySystemClockWrapper& t) = default;
 				inline NativeSteadySystemClockWrapper& operator=(const NativeSteadySystemClockWrapper& t) = default;
 
 				inline steady_flag_t toSteadyFlag() const { return chronoTime.time_since_epoch().count(); }
@@ -2221,6 +2229,7 @@ namespace tilogspace
 					chronoTime = t;
 				}
 
+				inline NativeNoSteadySystemClockWrapper(const NativeNoSteadySystemClockWrapper& t) = default;
 				inline NativeNoSteadySystemClockWrapper& operator=(const NativeNoSteadySystemClockWrapper& t) = default;
 
 				inline static NativeNoSteadySystemClockWrapper now() { return { Clock::now(), steady_flag_helper::now() }; }
@@ -2260,6 +2269,7 @@ namespace tilogspace
 
 				inline SteadyClockImpl(TimePoint t) { chronoTime = t; }
 
+				inline SteadyClockImpl(const SteadyClockImpl& t) = default;
 				inline SteadyClockImpl& operator=(const SteadyClockImpl& t) = default;
 
 				inline bool operator<(const SteadyClockImpl& rhs) const { return chronoTime < rhs.chronoTime; }
@@ -2342,6 +2352,7 @@ namespace tilogspace
 
 				inline size_t hash() const { return impl.hash(); }
 
+				inline ITiLogTime(const ITiLogTime& rhs) = default;
 				inline ITiLogTime& operator=(const ITiLogTime& rhs) = default;
 
 				inline tilog_steady_flag_t toSteadyFlag() const { return impl.toSteadyFlag(); }
@@ -2775,14 +2786,14 @@ namespace internal
 			if_constexpr(sizeof(uintptr_t) == sizeof(uint64_t))
 			{
 				request_new_size(16);
-				internal::uint64tohex(pEnd(), (uintptr_t)ptr);
+				internal::uint64tohex(pEnd(), (uint64_t)(uintptr_t)ptr);
 				inc_size_s(16);
 				return *this;
 			}
 			else if_constexpr(sizeof(uintptr_t) == sizeof(uint32_t))
 			{
 				request_new_size(8);
-				internal::uint32tohex(pEnd(), (uintptr_t)ptr);
+				internal::uint32tohex(pEnd(), (uint32_t)(uintptr_t)ptr);
 				inc_size_s(8);
 				return *this;
 			}
@@ -2907,13 +2918,13 @@ namespace internal
 		};
 
 		template <std::size_t I = 0, typename FuncT, typename... Tp>
-		inline typename std::enable_if<I == sizeof...(Tp), void>::type for_index(int, std::tuple<Tp...>&, FuncT, TiLogStream&)
+		inline typename std::enable_if<I == sizeof...(Tp), void>::type for_index(size_t, std::tuple<Tp...>&, FuncT, TiLogStream&)
 		{
 		}
 
 		template <std::size_t I = 0, typename FuncT, typename... Tp>
 			inline typename std::enable_if
-			< I<sizeof...(Tp), void>::type for_index(int index, std::tuple<Tp...>& t, FuncT f,TiLogStream& s)
+			< I<sizeof...(Tp), void>::type for_index(size_t index, std::tuple<Tp...>& t, FuncT f,TiLogStream& s)
 		{
 			if (index == 0)
 				f(s, std::get<I>(t));
@@ -3007,7 +3018,7 @@ namespace internal
 							return;
 						}
 						outs.append(fmt.begin() + start, fmt.begin() + pos);
-						for_index(idx, args, Functor(), outs);
+						for_index((size_t)idx, args, Functor(), outs);
 						start = pos2 + 1 /* length of "{123}" */;
 						manIndex = true;
 						continue;
@@ -3148,11 +3159,11 @@ namespace tilogspace
 			return static_string<LOG_LEVELS_STRING_LEN, LITERAL>(LOG_LEVELS[LV], nullptr);
 		}
 
-		constexpr size_t tilog_funcl(const char* func, size_t memsize, int m)
+		constexpr int tilog_funcl(const char* func, size_t memsize, int m)
 		{
 			return m != -1 ? (m + 1 >= (int)memsize ? m : m + 1) : rfind(func, memsize, ' ');
 		}
-		constexpr size_t tilog_funcl(const char* func, size_t memsize) { return tilog_funcl(func, memsize, rfind(func, memsize, ':')); }
+		constexpr int tilog_funcl(const char* func, size_t memsize) { return tilog_funcl(func, memsize, rfind(func, memsize, ':')); }
 
 		template <std::size_t memsize>
 		constexpr int tilog_funcr(const char (&func)[memsize])
@@ -3265,9 +3276,9 @@ namespace tilogspace
 // create a TiLogStreamEx
 #define TILOG_STREAMEX_CREATE(mod, lv) tilogspace::CreateNewTiLogStreamEx(TILOG_GET_LEVEL_SOURCE_LOCATION(lv), mod)
 
-#define TICOUT (std::unique_lock<tilogspace::sync_ostream_mtx_t>(tilogspace::ti_iostream_mtx->ticout_mtx), std::cout)
-#define TICERR (std::unique_lock<tilogspace::sync_ostream_mtx_t>(tilogspace::ti_iostream_mtx->ticerr_mtx), std::cerr)
-#define TICLOG (std::unique_lock<tilogspace::sync_ostream_mtx_t>(tilogspace::ti_iostream_mtx->ticlog_mtx), std::clog)
+#define TICOUT (*tilogspace::lock_proxy_t(tilogspace::ti_iostream_mtx->ticout_mtx,std::cout))
+#define TICERR (*tilogspace::lock_proxy_t(tilogspace::ti_iostream_mtx->ticerr_mtx,std::cerr))
+#define TICLOG (*tilogspace::lock_proxy_t(tilogspace::ti_iostream_mtx->ticlog_mtx,std::clog))
 
 #define TILOGA TILOG(TILOG_CURRENT_MODULE_ID, tilogspace::ELevel::ALWAYS)
 #define TILOGF TILOG(TILOG_CURRENT_MODULE_ID, tilogspace::ELevel::FATAL)
