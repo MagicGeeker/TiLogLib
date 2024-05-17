@@ -298,23 +298,6 @@ namespace tiloghelperspace
 		return (uint32_t)sizeof...(Args);
 	}
 
-	struct RangeUInt32
-	{
-		RangeUInt32(uint32_t val, uint32_t minv = 0, uint32_t maxv = UINT32_MAX)
-		{
-			this->val = val;
-			this->minv = minv;
-			this->maxv = maxv;
-		}
-		RangeUInt32& operator+=(uint32_t v) { return val += v, val = (val > maxv ? maxv : val), *this; }
-		RangeUInt32& operator-=(uint32_t v) { return val -= v, val = (val < minv ? minv : val), *this; }
-		bool between(uint32_t L, uint32_t R) { return L <= val && val <= R; }
-		// operator uint32_t() { return val; }
-		uint32_t val;
-		uint32_t minv;
-		uint32_t maxv;
-	};
-
 }	 // namespace tiloghelperspace
 
 using namespace tiloghelperspace;
@@ -451,7 +434,7 @@ namespace tilogspace
 
 			inline void reserve_exact(size_t size)
 			{
-				ensureCap(2 + size / 2);
+				do_realloc(size);
 				ensureZero();
 			}
 
@@ -465,15 +448,14 @@ namespace tilogspace
 				ensureZero();
 			}
 
-			inline void shrink_to_fit(size_t minCap = DEFAULT_CAPACITY, size_t maxCap = DEFAULT_CAPACITY)
+			inline int64_t shrink_to_fit(size_t target)
 			{
-				DEBUG_ASSERT2(minCap <= maxCap, minCap, maxCap);
-				if (minCap <= capacity() && capacity() <= maxCap) { return; }
+				if (target < size() || capacity() <= 3 * size() / 2 + DEFAULT_CAPACITY) { return -capacity(); }
 				TiLogString tmp;
-				minCap = std::max(size(), minCap);
-				tmp.reserve_exact(minCap);
+				tmp.reserve_exact(3 * target / 2);
 				tmp.append(this->data(), this->size());
 				this->swap(tmp);
+				return capacity();
 			}
 
 			// force set size
@@ -705,6 +687,18 @@ namespace tilogspace
 				if (pEnd == pMemEnd) { pEnd = pMem; }
 				*pEnd = t;
 				pEnd++;
+			}
+
+			void pop_front()
+			{
+				DEBUG_ASSERT(!empty());
+				if (pFirst >= pMemEnd - 1)
+				{
+					pFirst = pMem;
+				} else
+				{
+					pFirst++;
+				}
 			}
 
 			// exclude _to
@@ -1022,9 +1016,6 @@ namespace tilogspace
 		struct IOBean : public TiLogCoreString
 		{
 			TiLogCore* core{};
-			RangeUInt32 mFreeMemTimesCenti = { 80, 0, 100 };	  // free memory times in last 100 times(not exact)
-			Deque<uint32_t> mSizes = Deque<uint32_t>(10, TILOG_DELIVER_CACHE_DEFAULT_MEMORY_BYTES);
-			uint32_t mSizeSum{ 10 * TILOG_DELIVER_CACHE_DEFAULT_MEMORY_BYTES };
 			TiLogTime mTime;
 			using TiLogCoreString::TiLogCoreString;
 			using TiLogCoreString::operator=;
@@ -1048,7 +1039,20 @@ namespace tilogspace
 			inline static void recreate(IOBean* p) { p->clear(); }
 		};
 
-		using SyncedIOBeanPool = TiLogSyncedObjectPool<IOBean, IOBeanPoolFeat>;
+		struct SyncedIOBeanPool : TiLogSyncedObjectPool<IOBean, IOBeanPoolFeat>
+		{
+			template <typename R>
+			void for_each(R&& runnable)
+			{
+				synchronized(mtx)
+				{
+					for (auto p : pool)
+					{
+						runnable(p);
+					}
+				}
+			}
+		};
 
 		struct ThreadStruQueue : public TiLogObject, public std::mutex
 		{
@@ -1214,6 +1218,10 @@ namespace tilogspace
 			SyncedIOBeanPool mIOBeanPool;
 			uint64_t mPushLogCount{};
 			uint64_t mPushLogBlockCount{};
+			PodCircularQueue<size_t, 16> mIoBeanSizes;
+			size_t mIoBeanSizeSum{};
+			std::chrono::steady_clock::time_point mLastShrink{ std::chrono::steady_clock::now() };
+			uint64_t mShrinkCount{};
 			static_assert(sizeof(mlogprefix) == TILOG_PREFIX_LOG_SIZE, "fatal");
 			DeliverStru();
 		} ;
@@ -1278,7 +1286,7 @@ namespace tilogspace
 
 			void pushLogsToPrinters(IOBean* pIObean);
 
-			inline void FreeDeliverIoBeanMem();
+			inline void ShrinkDeliverIoBeanMem();
 
 			inline void DeliverLogs();
 
@@ -1954,6 +1962,10 @@ namespace tilogspace
 			  mTiLogPrinterManager(&mTiLogEngine->tiLogPrinterManager), mTiLogMap(&TiLogEngines::getRInstance().tilogmap)
 		{
 			DEBUG_PRINTA("TiLogCore::TiLogCore %p\n", this);
+			for (size_t i = 0; i < mDeliver.mIoBeanSizes.capacity(); i++)
+			{
+				mDeliver.mIoBeanSizes.emplace_back(0);
+			}
 			mThread = mTiLogDaemon->CreateCoreThread(*this, this);
 		}
 
@@ -1993,6 +2005,7 @@ namespace tilogspace
 				}
 				{
 					DeliverLogs();
+					ShrinkDeliverIoBeanMem();
 					++mDeliver.mDeliveredTimes;
 					mDeliver.mDeliverCache.swap(mGC.mGCList);
 					mDeliver.mDeliverCache.clear();
@@ -2009,9 +2022,11 @@ namespace tilogspace
 			}
 			using llu = long long unsigned;
 			DEBUG_PRINTA(
-				"mMerge.mMergedSize %llu mDeliver.mPushLogCount %llu mDeliver.mPushLogBlockCount %llu no-block rate %4.1f%%\n",
-				(llu)mMerge.mMergedSize, (llu)mDeliver.mPushLogCount, (llu)mDeliver.mPushLogBlockCount,
-				100.0 - 100.0 * mDeliver.mPushLogBlockCount / mDeliver.mPushLogCount);
+				"mMerge.mMergedSize %llu mDeliver{ mPushLogCount %llu mPushLogBlockCount %llu mShrinkCount %llu no-block "
+				"rate %4.1f%% no-shrink rate %4.1f%% }\n",
+				(llu)mMerge.mMergedSize, (llu)mDeliver.mPushLogCount, (llu)mDeliver.mPushLogBlockCount, (llu)mDeliver.mShrinkCount,
+				100.0 - 100.0 * mDeliver.mPushLogBlockCount / mDeliver.mPushLogCount,
+				100.0 - 100.0 * mDeliver.mShrinkCount / mDeliver.mPushLogCount);
 			TiLogCore* core = nullptr;
 			auto& schd = mTiLogDaemon->mScheduler;
 			synchronized(schd)
@@ -2565,23 +2580,31 @@ namespace tilogspace
 			mTiLogPrinterManager->pushLogsToPrinters({ pIObean, [this](IOBean* p) { mDeliver.mIOBeanPool.release(p); } });
 		}
 
-		void TiLogCore::FreeDeliverIoBeanMem()
+		void TiLogCore::ShrinkDeliverIoBeanMem()
 		{
-			mDeliver.mIoBean.mSizeSum -= mDeliver.mIoBean.mSizes.front();
-			mDeliver.mIoBean.mSizeSum += mDeliver.mIoBean.size();
-			mDeliver.mIoBean.mSizes.pop_front();
-			mDeliver.mIoBean.mSizes.push_back(mDeliver.mIoBean.size());
+			size_t currSize = mDeliver.mIoBeanForPush == nullptr ? 0 : mDeliver.mIoBeanForPush->size();
+			DEBUG_ASSERT(mDeliver.mIoBeanSizes.full());
+			size_t oldestSize = mDeliver.mIoBeanSizes.front();
+			mDeliver.mIoBeanSizes.pop_front();
+			mDeliver.mIoBeanSizes.emplace_back(currSize);
+			mDeliver.mIoBeanSizeSum = mDeliver.mIoBeanSizeSum + currSize - oldestSize;
+			double avgSize = (double)mDeliver.mIoBeanSizeSum / mDeliver.mIoBeanSizes.capacity();
+			// DEBUG_PRINTA("test printf lf %lf\n",1.0);  //may deadlock in mingw64/Windows
+			auto nt = std::chrono::steady_clock::now();
+			if (mDeliver.mLastShrink + std::chrono::milliseconds(TILOG_DELIVER_CACHE_CAPACITY_ADJUST_LEAST_MS) > nt) { return; }
+			mDeliver.mLastShrink = nt;
 
-			auto& centi = mDeliver.mIoBean.mFreeMemTimesCenti;
-			auto& vec = mDeliver.mIoBean;
-			size_t newCap = mDeliver.mIoBean.mSizeSum / 10;
-			DEBUG_PRINTD("mFreeMemTimesCenti:%u \n", centi.val);
-			//DEBUG_PRINTA("test printf lf %lf\n",1.0);  //may deadlock in mingw64/Windows
-
-			vec.shrink_to_fit(
-				newCap * TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MIN_CENTI / 100, newCap * TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MAX_CENTI / 100);
-			vec.capacity() > TILOG_DELIVER_CACHE_DEFAULT_MEMORY_BYTES ? centi += 1 : centi -= 1;
-			if (!centi.between(10, 90) || centi.between(40, 60)) { return; }
+			auto shrink_mem_func = [&](IOBean* pBean) {
+				size_t oldCap = pBean->capacity();
+				int64_t newCap = pBean->shrink_to_fit((size_t)avgSize);
+				DEBUG_PRINTI(
+					"shrink %p currSize %llu avgSize %.2lf oldCap %llu newCap %lld\n", pBean, (long long unsigned)currSize, avgSize,
+					(long long unsigned)oldCap, (long long)newCap);
+				mDeliver.mShrinkCount += (newCap > 0 ? 1 : 0);
+			};
+			if (mDeliver.mIoBeanForPush != nullptr) { shrink_mem_func(mDeliver.mIoBeanForPush); }
+			shrink_mem_func(&mDeliver.mIoBean);
+			mDeliver.mIOBeanPool.for_each(shrink_mem_func);
 		}
 
 		inline void TiLogCore::DeliverLogs()
@@ -2592,7 +2615,6 @@ namespace tilogspace
 			{
 				mDeliver.mIoBean.clear();
 				mergeLogsToOneString(c);
-				FreeDeliverIoBeanMem();
 				if (!mDeliver.mIoBean.empty())
 				{
 					IOBean* t = mDeliver.mIOBeanPool.acquire();

@@ -222,8 +222,7 @@ namespace tilogspace
 	constexpr static uint32_t TILOG_POLL_THREAD_SLEEP_MS_IF_TO_EXIT = 1;	// poll period if some user threads are dying
 	constexpr static uint32_t TILOG_POLL_THREAD_SLEEP_MS_IF_SYNC = 2;	// poll period if sync or fsync
 	constexpr static uint32_t TILOG_POLL_MS_ADJUST_PERCENT_RATE = 75;	// range(0,100),a percent number to adjust poll time
-	constexpr static uint32_t TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MIN_CENTI = 120;	// range(0,200],a min percent number to adjust deliver cache capacity
-	constexpr static uint32_t TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MAX_CENTI = 150;	// range(0,200],a max percent number to adjust deliver cache capacity
+	constexpr static uint32_t TILOG_DELIVER_CACHE_CAPACITY_ADJUST_LEAST_MS = 500;	// range(0,) adjust deliver cache capacity least internal
 
 	constexpr static size_t TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE = ((size_t)1 << 8U);			 // single thread cache queue max length
 	
@@ -3138,9 +3137,6 @@ namespace tilogspace
 			&& TILOG_POLL_THREAD_SLEEP_MS_IF_TO_EXIT > 0,
 		"fatal err!");
 	static_assert(TILOG_POLL_MS_ADJUST_PERCENT_RATE > 0 && TILOG_POLL_MS_ADJUST_PERCENT_RATE < 100, "fatal err!");
-	static_assert(0 < TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MIN_CENTI, "fatal err!");
-	static_assert(TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MIN_CENTI <= TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MAX_CENTI, "fatal err!");
-	static_assert(TILOG_DELIVER_CACHE_CAPACITY_ADJUST_MAX_CENTI <= 200, "fatal err!");
 	static_assert(TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE > 0, "fatal err!");
 	static_assert(TILOG_SINGLE_LOG_RESERVE_LEN > 0, "fatal err!");
 	static_assert(TILOG_MERGE_RAWDATA_QUEUE_NEARLY_FULL_SIZE >= 1, "fatal error!too small");
