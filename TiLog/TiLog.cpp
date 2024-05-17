@@ -3080,11 +3080,11 @@ namespace tilogspace
 		ctor_iostream_mtx();
 		atexit([] { dtor_iostream_mtx(); });
 		IncTidStrRefCnt(this->mainThrdId);	  // main thread thread_local varibles(tid,mempoool...) keep available
+		InitClocks();
 		TiLogInnerLogMgr::init();
 		// TODO only happens in mingw64,Windows,maybe a mingw64 bug? see DEBUG_PRINTA("test printf lf %lf\n",1.0)
 		DEBUG_PRINTA("fix dtoa deadlock in (s)printf for mingw64 %f %f", 1.0f, 1.0);
 		ctor_single_instance_printers();
-		InitClocks();
 
 		for (size_t i = 0; i < engines.size(); i++)
 		{
@@ -3096,9 +3096,9 @@ namespace tilogspace
 	TiLogEngines::~TiLogEngines()
 	{
 		engines.~engine_t();
-		UnInitClocks();
 		dtor_single_instance_printers();
 		TiLogInnerLogMgr::uninit();
+		UnInitClocks();
 		TICLOG << "~TiLog " << &TiLog::getRInstance() << " TiLogEngines " << TiLogEngines::getInstance() << " in thrd "
 			   << std::this_thread::get_id() << '\n';
 	}
