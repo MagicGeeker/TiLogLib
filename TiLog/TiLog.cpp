@@ -86,8 +86,7 @@ using namespace tilogspace::internal;
 
 namespace tilogspace
 {
-	ti_iostream_mtx_t* ti_iostream_mtx;
-
+	TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_OUTSIDE(ti_iostream_mtx_t,instance)
 	namespace internal
 	{
 		namespace tilogtimespace
@@ -450,7 +449,7 @@ namespace tilogspace
 
 			inline int64_t shrink_to_fit(size_t target)
 			{
-				if (target < size() || capacity() <= 3 * size() / 2 + DEFAULT_CAPACITY) { return -capacity(); }
+				if (target < size() || capacity() <= 3 * size() / 2 + DEFAULT_CAPACITY) { return -(int64_t)capacity(); }
 				TiLogString tmp;
 				tmp.reserve_exact(3 * target / 2);
 				tmp.append(this->data(), this->size());
@@ -780,11 +779,9 @@ namespace tilogspace
 		{
 			using Hash = std::hash<K>;
 			using mutex_type = std::mutex;
-			using clear_func_t = void (*)(V*);
 
 			constexpr static uint32_t CONCURRENT = 8;
 			constexpr static uint32_t BUCKET_SIZE = 8;
-			constexpr static clear_func_t CLEAR_FUNC = nullptr;
 		};
 
 		template <typename K, typename V, typename Feat = TiLogConcurrentHashMapDefaultFeat<K, V>>
@@ -794,12 +791,9 @@ namespace tilogspace
 			using KImpl = typename std::remove_const<K>::type;
 			using Hash = typename Feat::Hash;
 			using mutex_type = typename Feat::mutex_type;
-			using clear_func_t = typename Feat::clear_func_t;
-
 
 			constexpr static uint32_t CONCURRENT = Feat::CONCURRENT;
 			constexpr static uint32_t BUCKET_SIZE = Feat::BUCKET_SIZE;
-			constexpr static clear_func_t CLEAR_K_FUNC = Feat::CLEAR_FUNC;
 
 			struct Bucket : public Map<KImpl,V>
 			{
@@ -987,6 +981,7 @@ namespace tilogspace
 
 		struct MergeRawDatasHashMapFeat : TiLogConcurrentHashMapDefaultFeat<const String*, VecLogCache>
 		{
+			using mutex_type = OptimisticMutex;
 			constexpr static uint32_t CONCURRENT = TILOG_MAY_MAX_RUNNING_THREAD_NUM;
 		};
 		
@@ -1226,12 +1221,6 @@ namespace tilogspace
 			DeliverStru();
 		} ;
 
-		struct DeliverCallBack
-		{
-			virtual ~DeliverCallBack() = default;
-			virtual void onDeliverEnd() = 0;
-		};
-
 		using VecLogCachePtrPriorQueue = PriorQueue<VecLogCachePtr, Vector<VecLogCachePtr>, VecLogCachePtrLesser>;
 
 		struct TiLogMap_t;
@@ -1299,8 +1288,6 @@ namespace tilogspace
 			TiLogMap_t* mTiLogMap;
 			atomic_uint64_t mPrintedLogs{ 0 };
 
-			atomic_bool mSyncing{};
-
 			std::thread mThread;
 
 			struct MergeStru
@@ -1313,10 +1300,6 @@ namespace tilogspace
 			} mMerge;
 			DeliverStru mDeliver;
 
-			struct SyncControler : public TiLogObject
-			{
-				std::mutex mSyncMtx;
-			} mSyncControler;
 			struct GCStru
 			{
 				VecLogCache mGCList;
@@ -1386,7 +1369,6 @@ namespace tilogspace
 
 			atomic_uint64_t mPrintedLogs{ 0 };
 			atomic<uint64_t> mCoreLoopCount{};
-			atomic_bool mSyncing{};
 
 			ThreadStruQueue mThreadStruQueue;
 			TiLogTaskQueue mTaskQueue;
@@ -2981,13 +2963,6 @@ namespace tilogspace
 			tilogspace::internal::tilogtimespace::steady_flag_helper::uninit();
 		}
 
-		static void ctor_iostream_mtx() { ti_iostream_mtx = new ti_iostream_mtx_t(); }
-		static void dtor_iostream_mtx()
-		{
-			delete ti_iostream_mtx;
-			ti_iostream_mtx = nullptr;
-		}
-
 		static void ctor_single_instance_printers()
 		{
 			TiLogNonePrinter::init();
@@ -3077,8 +3052,8 @@ namespace tilogspace
 	TiLogModBase& TiLog::GetMoudleBaseRef(mod_id_t mod) { return TiLogEngines::getRInstance().engines[mod].tiLogModBase; }
 	TiLogEngines::TiLogEngines()
 	{
-		ctor_iostream_mtx();
-		atexit([] { dtor_iostream_mtx(); });
+		ti_iostream_mtx_t::init();
+		atexit([] { ti_iostream_mtx_t::uninit(); });
 		IncTidStrRefCnt(this->mainThrdId);	  // main thread thread_local varibles(tid,mempoool...) keep available
 		InitClocks();
 		TiLogInnerLogMgr::init();

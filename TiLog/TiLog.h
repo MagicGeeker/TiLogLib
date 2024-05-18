@@ -246,7 +246,7 @@ namespace tilogspace
 		* (TILOG_AVERAGE_CONCURRENT_THREAD_NUM + TILOG_MERGE_RAWDATA_QUEUE_FULL_SIZE);	  // default memory of a single deliver cache
 
 
-	constexpr static size_t TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE= (16U << 20U);	// log size per file,it is not accurate,especially TILOG_DELIVER_CACHE_DEFAULT_MEMORY_BYTES is bigger
+	constexpr static size_t TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE= (32U << 20U);	// log size per file,it is not accurate,especially TILOG_DELIVER_CACHE_DEFAULT_MEMORY_BYTES is bigger
 }	 // namespace tilogspace
 
 
@@ -369,7 +369,7 @@ namespace tilogspace
 	public:
 		inline void lock()
 		{
-			for (uint32_t n = 0; mLockedFlag.test_and_set();)
+			for (uint32_t n = 0; mLockedFlag.test_and_set(std::memory_order_acquire);)
 			{
 				if (++n < NRetry) { continue; }
 				if_constexpr(Nanosec == size_t(-1)) { std::this_thread::yield(); }
@@ -379,7 +379,7 @@ namespace tilogspace
 
 		inline bool try_lock()
 		{
-			for (uint32_t n = 0; mLockedFlag.test_and_set();)
+			for (uint32_t n = 0; mLockedFlag.test_and_set(std::memory_order_acquire);)
 			{
 				if (++n < NRetry) { continue; }
 				return false;
@@ -387,24 +387,10 @@ namespace tilogspace
 			return true;
 		}
 
-		inline void unlock() { mLockedFlag.clear(); }
+		inline void unlock() { mLockedFlag.clear(std::memory_order_release); }
 	};
 
-	using sync_ostream_mtx_t = OptimisticMutex;
-	struct ti_iostream_mtx_t
-	{
-		sync_ostream_mtx_t ticout_mtx;
-		sync_ostream_mtx_t ticerr_mtx;
-		sync_ostream_mtx_t ticlog_mtx;
-	};
-	extern ti_iostream_mtx_t* ti_iostream_mtx;
-	struct lock_proxy_t
-	{
-		lock_proxy_t(sync_ostream_mtx_t& m, std::ostream& t) : lgd(m), tp(t) {}
-		std::ostream& operator*() { return tp; }
-		std::unique_lock<sync_ostream_mtx_t> lgd;
-		std::ostream& tp;
-	};
+	
 }	 // namespace tilogspace
 
 namespace tilogspace
@@ -1350,8 +1336,6 @@ namespace tilogspace
 }	 // namespace tilogspace
 
 
-namespace tilogspace
-{
 // clang-format off
 #define TILOG_SINGLE_INSTANCE_DECLARE_OUTER(CLASS_NAME) CLASS_NAME* CLASS_NAME::s_instance;
 #define TILOG_SINGLE_INSTANCE_DECLARE(CLASS_NAME, ...)                                                                                     \
@@ -1397,6 +1381,27 @@ namespace tilogspace
 	alignas(alignof(CLASS_NAME)) uint8_t CLASS_NAME::instance[sizeof(CLASS_NAME)];
 
 // clang-format on
+
+namespace tilogspace
+{
+	using sync_ostream_mtx_t = OptimisticMutex;
+	struct ti_iostream_mtx_t
+	{
+		sync_ostream_mtx_t ticout_mtx;
+		sync_ostream_mtx_t ticerr_mtx;
+		sync_ostream_mtx_t ticlog_mtx;
+		TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_FUNC_IMPL(ti_iostream_mtx_t, instance)
+	private:
+		TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_MEMBER_DECLARE(ti_iostream_mtx_t, instance)
+	};
+
+	struct lock_proxy_t
+	{
+		lock_proxy_t(sync_ostream_mtx_t& m, std::ostream& t) : lgd(m), tp(t) {}
+		std::ostream& operator*() { return tp; }
+		std::unique_lock<sync_ostream_mtx_t> lgd;
+		std::ostream& tp;
+	};
 
 	struct TiLogObjectPoolFeat
 	{
@@ -2130,13 +2135,14 @@ namespace tilogspace
 						while (!toExit)
 						{
 							TimePoint tp = Clock::now();
-							if (Clock::is_steady || s_now.load() < tp)
-							{
 #ifdef TILOG_IS_WITH_MILLISECONDS
-								s_now = std::chrono::time_point_cast<std::chrono::milliseconds>(tp);
+							tp = std::chrono::time_point_cast<std::chrono::milliseconds>(tp);
 #else
-								s_now = std::chrono::time_point_cast<std::chrono::seconds>(tp);
+							tp = std::chrono::time_point_cast<std::chrono::seconds>(tp);
 #endif
+							if (Clock::is_steady || s_now.load(std::memory_order_relaxed) < tp)
+							{
+								s_now.store(tp, std::memory_order_relaxed);
 							}
 							std::this_thread::sleep_for(std::chrono::microseconds(TILOG_USER_MODE_CLOCK_UPDATE_US));
 						}
@@ -2151,7 +2157,7 @@ namespace tilogspace
 					toExit = true;
 					if (th.joinable()) { th.join(); }
 				}
-				static TimePoint now() noexcept { return getRInstance().s_now.load(); };
+				TILOG_FORCEINLINE static TimePoint now() noexcept { return getRInstance().s_now.load(std::memory_order_relaxed); };
 				TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_FUNC_IMPL(UserModeClockT<Clock>, instance)
 				static time_t to_time_t(const TimePoint& point) { return (Clock::to_time_t(point)); }
 
@@ -3272,9 +3278,9 @@ namespace tilogspace
 // create a TiLogStreamEx
 #define TILOG_STREAMEX_CREATE(mod, lv) tilogspace::CreateNewTiLogStreamEx(TILOG_GET_LEVEL_SOURCE_LOCATION(lv), mod)
 
-#define TICOUT (*tilogspace::lock_proxy_t(tilogspace::ti_iostream_mtx->ticout_mtx,std::cout))
-#define TICERR (*tilogspace::lock_proxy_t(tilogspace::ti_iostream_mtx->ticerr_mtx,std::cerr))
-#define TICLOG (*tilogspace::lock_proxy_t(tilogspace::ti_iostream_mtx->ticlog_mtx,std::clog))
+#define TICOUT (*tilogspace::lock_proxy_t(tilogspace::ti_iostream_mtx_t::getInstance()->ticout_mtx,std::cout))
+#define TICERR (*tilogspace::lock_proxy_t(tilogspace::ti_iostream_mtx_t::getInstance()->ticerr_mtx,std::cerr))
+#define TICLOG (*tilogspace::lock_proxy_t(tilogspace::ti_iostream_mtx_t::getInstance()->ticlog_mtx,std::clog))
 
 #define TILOGA TILOG(TILOG_CURRENT_MODULE_ID, tilogspace::ELevel::ALWAYS)
 #define TILOGF TILOG(TILOG_CURRENT_MODULE_ID, tilogspace::ELevel::FATAL)
