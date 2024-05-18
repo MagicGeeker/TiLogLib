@@ -3170,13 +3170,13 @@ namespace tilogspace
 		template <std::size_t memsize>
 		constexpr TiLogStringView tilog_func(const char (&func)[memsize], int l, int r)
 		{
-			return r == -1 ? TiLogStringView(func) : l == -1 ? TiLogStringView(func, r) : TiLogStringView(func + l, r - l);
+			return l == -1 ? TiLogStringView(func, r) : TiLogStringView(func + l, r - l);
 		}
 
 		template <std::size_t memsize>
 		constexpr TiLogStringView tilog_func(const char (&func)[memsize], int r)
 		{
-			return tilog_func(func, tilog_funcl(func, r), r);
+			return r == -1 ? TiLogStringView(func) : tilog_func(func, tilog_funcl(func, r), r);
 		}
 
 		template <std::size_t memsize>
