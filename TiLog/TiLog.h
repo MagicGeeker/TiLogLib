@@ -1844,7 +1844,6 @@ namespace tilogspace
 				const char* buf() const { return reinterpret_cast<const char*>(this + 1); }
 				char* buf() { return reinterpret_cast<char*>(this + 1); }
 			};
-			using core_class_type = Core;
 
 		protected:
 			Core* pCore;
@@ -2030,7 +2029,7 @@ namespace tilogspace
 			constexpr static size_type DEFAULT_CAPACITY = 32;
 		};
 #undef thiz
-
+		
 	}	 // namespace internal
 
 
@@ -2445,7 +2444,37 @@ namespace tilogspace
 		struct TiLogNiftyCounterIniter;
 		struct TiLogEngine;
 		struct TiLogEngines;
+
+		struct TiLogStreamMemoryManager
+		{
+			static void* timalloc(size_t sz);
+			static void* ticalloc(size_t num_ele, size_t sz_ele);
+			static void* tireallocal(void* p, size_t sz);
+			static void tifree(void* p);
+			static void tifree(void* ptrs[], size_t sz, UnorderedMap<mempoolspace::objpool*, Vector<void*>>& frees);
+		};
+
+		struct TiLogStreamHelper /*: public TiLogObject*/
+		{
+			using ExtType = TiLogBean;
+			using ObjectType = TiLogStream;
+			struct TiLogStreamMemoryManagerCache
+			{
+				Vector<void*> cache0;
+				UnorderedMap<mempoolspace::objpool*, Vector<void*>> cache1;
+			};
+
+			inline static TiLogStringView str_view(const TiLogBean* p);
+			inline static void DestroyPushedTiLogBean(const Vector<TiLogBean*>& to_free, TiLogStreamMemoryManagerCache& cache);
+			template <typename... Args>
+			static void mini_format_impl(TiLogStream& outs, TiLogStringView fmt, std::tuple<Args...>&& args);
+			template <typename... Args>
+			static void mini_format_append(TiLogStream& outs, TiLogStringView fmt, Args&&... args);
+		};
+		using TiLogCompactString = TiLogStringExtend<tilogspace::internal::TiLogStreamHelper>::Core;
 	}	 // namespace internal
+
+
 	TILOG_ABSTRACT class TiLogPrinter : public TiLogObject
 	{
 		friend class internal::TiLogPrinterManager;
@@ -2535,6 +2564,7 @@ namespace tilogspace
 	public:
 		// usually only use internally
 		void PushLog(internal::TiLogBean* pBean);
+		void PushLog(internal::TiLogCompactString* str);
 
 	protected:
 		internal::TiLogEngine* engine{};
@@ -2618,39 +2648,11 @@ namespace tilogspace
 	TILOG_FORCEINLINE constexpr bool should_log(sub_sys_t subsys, ELevel level);
 	class TiLogStreamEx;
 
-namespace internal
-{
-	struct TiLogStreamInner;
-	struct TiLogInnerLogMgrImpl;
-
-	struct TiLogStreamMemoryManager
+	namespace internal
 	{
-		static void* timalloc(size_t sz);
-		static void* ticalloc(size_t num_ele, size_t sz_ele);
-		static void* tireallocal(void* p, size_t sz);
-		static void tifree(void* p);
-		static void tifree(void* ptrs[], size_t sz, UnorderedMap<mempoolspace::objpool*, Vector<void*>>& frees);
-	};
-
-	struct TiLogStreamHelper /*: public TiLogObject*/
-	{
-		using ExtType = TiLogBean;
-		using ObjectType = TiLogStream;
-		using memmgr_type = TiLogStreamMemoryManager;
-		struct TiLogStreamMemoryManagerCache
-		{
-			Vector<void*> cache0;
-			UnorderedMap<mempoolspace::objpool*, Vector<void*>> cache1;
-		};
-
-		inline static TiLogStringView str_view(const TiLogBean* p);
-		inline static void DestroyPushedTiLogBean(const Vector<TiLogBean*>& to_free, TiLogStreamMemoryManagerCache& cache);
-		template <typename... Args>
-		static void mini_format_impl(TiLogStream& outs, TiLogStringView fmt, std::tuple<Args...>&& args);
-		template <typename... Args>
-		static void mini_format_append(TiLogStream& outs, TiLogStringView fmt, Args&&... args);
-	};
-}	 // namespace internal
+		struct TiLogStreamInner;
+		struct TiLogInnerLogMgrImpl;
+	}	 // namespace internal
 
 #define TILOG_INTERNAL_STRING_TYPE                                                                                                         \
 	tilogspace::internal::TiLogStringExtend<tilogspace::internal::TiLogStreamHelper>
@@ -2908,7 +2910,7 @@ namespace internal
 			}
 			if (!cache.cache0.empty())
 			{
-				TiLogStreamHelper::memmgr_type::tifree(&cache.cache0.front(), cache.cache0.size(), cache.cache1);
+				TiLogStreamMemoryManager::tifree(&cache.cache0.front(), cache.cache0.size(), cache.cache1);
 			}
 		}
 
