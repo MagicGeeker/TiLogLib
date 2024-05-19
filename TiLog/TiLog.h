@@ -1841,6 +1841,7 @@ namespace tilogspace
 					ExtType ext;
 				};
 				// char buf[]; //It seems like there is an array here
+				Core() {}
 				const char* buf() const { return reinterpret_cast<const char*>(this + 1); }
 				char* buf() { return reinterpret_cast<char*>(this + 1); }
 			};
@@ -1910,15 +1911,6 @@ namespace tilogspace
 
 		protected:
 			inline constexpr static size_type size_head() { return (size_type)sizeof(Core); }
-
-		public:
-			inline static TiLogStringView get_str_view_from_ext(const ExtType* ext)
-			{
-				Core* pCore = (Core*)((char*)ext - offsetof(Core, ex));
-				return TiLogStringView(pCore->buf(), pCore->size);
-			}
-
-			inline static Core* get_core_from_ext(const ExtType* ext) { return (Core*)((char*)ext - offsetof(Core, ex)); }
 
 		public:
 			inline void reserve(size_type capacity) { ensureCap(capacity), ensureZero(); }
@@ -2458,20 +2450,21 @@ namespace tilogspace
 		{
 			using ExtType = TiLogBean;
 			using ObjectType = TiLogStream;
+			using TiLogCompactString = TiLogStringExtend<tilogspace::internal::TiLogStreamHelper>::Core;
+
 			struct TiLogStreamMemoryManagerCache
 			{
 				Vector<void*> cache0;
 				UnorderedMap<mempoolspace::objpool*, Vector<void*>> cache1;
 			};
 
-			inline static TiLogStringView str_view(const TiLogBean* p);
-			inline static void DestroyPushedTiLogBean(const Vector<TiLogBean*>& to_free, TiLogStreamMemoryManagerCache& cache);
+			inline static void DestroyTiLogCompactString(const Vector<TiLogCompactString*>& to_free, TiLogStreamMemoryManagerCache& cache);
 			template <typename... Args>
 			static void mini_format_impl(TiLogStream& outs, TiLogStringView fmt, std::tuple<Args...>&& args);
 			template <typename... Args>
 			static void mini_format_append(TiLogStream& outs, TiLogStringView fmt, Args&&... args);
 		};
-		using TiLogCompactString = TiLogStringExtend<tilogspace::internal::TiLogStreamHelper>::Core;
+		using TiLogCompactString = TiLogStreamHelper::TiLogCompactString;
 	}	 // namespace internal
 
 
@@ -2703,7 +2696,7 @@ namespace tilogspace
 		{
 			DEBUG_ASSERT(pCore != nullptr);
 			DEBUG_RUN(TiLogBean::check(this->ext()));
-			TiLog::GetSubSystemRef(ext()->subsys).PushLog(this->ext());
+			TiLog::GetSubSystemRef(ext()->subsys).PushLog(this->pCore);
 		}
 
 	public:
@@ -2898,15 +2891,13 @@ namespace tilogspace
 	namespace internal
 	{
 
-		TiLogStringView TiLogStreamHelper::str_view(const TiLogBean* p) { return TiLogStream::get_str_view_from_ext(p); }
-		void TiLogStreamHelper::DestroyPushedTiLogBean(const Vector<TiLogBean*>& to_free, TiLogStreamMemoryManagerCache& cache)
+		void TiLogStreamHelper::DestroyTiLogCompactString(const Vector<TiLogCompactString*>& to_free, TiLogStreamMemoryManagerCache& cache)
 		{
 			cache.cache0.clear();
 			for (auto p : to_free)
 			{
-				TiLogBean::check(p);
-				auto ptr = TiLogStream::get_core_from_ext(p);
-				cache.cache0.emplace_back(ptr);
+				TiLogBean::check(&p->ext);
+				cache.cache0.emplace_back(p);
 			}
 			if (!cache.cache0.empty())
 			{

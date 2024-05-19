@@ -178,7 +178,7 @@ namespace tilogspace
 		{
 			TiLogInnerLogMgr();
 			~TiLogInnerLogMgr();
-			void PushLog(TiLogBean* pBean);
+			void PushLog(TiLogCompactString* str);
 			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_FUNC_IMPL(TiLogInnerLogMgr, instance)
 			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_MEMBER_DECLARE(TiLogInnerLogMgr, instance)
 		private:
@@ -916,14 +916,14 @@ namespace tilogspace
 		};
 
 
-		using CrcQueueLogCache = PodCircularQueue<TiLogBean*, TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE - 1>;
+		using CrcQueueLogCache = PodCircularQueue<TiLogCompactString*, TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE - 1>;
 		using TiLogCoreString = TiLogString;
 
 		using ThreadLocalSpinMutex = OptimisticMutex;
 
-		struct VecLogCache : public Vector<TiLogBean*>
+		struct VecLogCache : public Vector<TiLogCompactString*>
 		{
-			using Vector<TiLogBean*>::Vector;
+			using Vector<TiLogCompactString*>::Vector;
 			void shrink_to_fit(size_t minCap)
 			{
 				VecLogCache tmp;
@@ -1061,9 +1061,9 @@ namespace tilogspace
 		};
 
 
-		struct TiLogBeanPtrComp
+		struct TiLogCompactStringPtrComp
 		{
-			bool operator()(const TiLogBean* const lhs, const TiLogBean* const rhs) const { return lhs->tiLogTime < rhs->tiLogTime; }
+			bool operator()(const TiLogCompactString* l, const TiLogCompactString* r) const { return l->ext.time() < r->ext.time(); }
 		};
 
 		struct VecLogCachePtrLesser
@@ -1316,7 +1316,7 @@ namespace tilogspace
 			explicit TiLogDaemon(TiLogEngine* e);
 			~TiLogDaemon();
 			std::thread CreateCoreThread(CoreThrdStruBase& thrd, void* p);
-			inline void PushLog(TiLogBean* pBean);
+			inline void PushLog(TiLogCompactString* pBean);
 
 			inline uint64_t GetPrintedLogs();
 
@@ -1328,11 +1328,11 @@ namespace tilogspace
 
 
 		private:
-			static inline bool LocalCircularQueuePushBack(ThreadStru& stru, TiLogBean* obj);
+			static inline bool LocalCircularQueuePushBack(ThreadStru& stru, TiLogCompactString* obj);
 
 			inline void MoveLocalCacheToGlobal(ThreadStru& bean);
 
-			void MergeThreadStruQueueToSet(List<ThreadStru*>& thread_queue, TiLogBean& bean);
+			void MergeThreadStruQueueToSet(List<ThreadStru*>& thread_queue, TiLogCompactString& bean);
 
 			static void InitMergeLogVecVec(MergeVecVecLogcaches& vv, size_t needMergeSortReserveSize = SIZE_MAX);
 			void CollectRawDatas();
@@ -1993,7 +1993,7 @@ namespace tilogspace
 					mDeliver.mDeliverCache.clear();
 				}
 				{
-					TiLogStreamHelper::DestroyPushedTiLogBean(mGC.mGCList, mGC.cache);
+					TiLogStreamHelper::DestroyTiLogCompactString(mGC.mGCList, mGC.cache);
 					mGC.mGCList.clear();
 				}
 				TiLogDaemon::InitMergeLogVecVec(mMerge.mMergeLogVecVec);
@@ -2023,7 +2023,7 @@ namespace tilogspace
 			return;
 		}
 
-		inline bool TiLogDaemon::LocalCircularQueuePushBack(ThreadStru& stru, TiLogBean* obj)
+		inline bool TiLogDaemon::LocalCircularQueuePushBack(ThreadStru& stru, TiLogCompactString* obj)
 		{
 			stru.qCache.emplace_back(obj);
 			return stru.qCache.full();
@@ -2171,14 +2171,14 @@ namespace tilogspace
 #endif
 		}
 
-		void TiLogDaemon::PushLog(TiLogBean* pBean)
+		void TiLogDaemon::PushLog(TiLogCompactString* pBean)
 		{
 			DEBUG_ASSERT(mMagicNumber == MAGIC_NUMBER);			// assert TiLogCore inited
 			ThreadStru& stru = *GetThreadStru();
 			unique_lock<ThreadLocalSpinMutex> lk_local(stru.spinMtx);
 			bool isLocalFull = LocalCircularQueuePushBack(stru, pBean);
 			// init log time after stru is inited and push to local queue,to make sure log can be print ordered
-			new (&pBean->tiLogTime) TiLogBean::TiLogTime(EPlaceHolder{});
+			new (&pBean->ext.tiLogTime) TiLogTime(EPlaceHolder{});
 
 			if (isLocalFull)
 			{
@@ -2197,19 +2197,19 @@ namespace tilogspace
 
 		void static CheckVecLogCacheOrdered(VecLogCache& v)
 		{
-			if (!std::is_sorted(v.begin(), v.end(), TiLogBeanPtrComp()))
+			if (!std::is_sorted(v.begin(), v.end(), TiLogCompactStringPtrComp()))
 			{
 				std::ostringstream os;
 				for (uint32_t index = 0; index != v.size(); index++)
 				{
-					os << v[index]->time().toSteadyFlag() << " ";
+					os << v[index]->ext.time().toSteadyFlag() << " ";
 					if (index % 6 == 0) { os << "\n"; }
 				}
 				DEBUG_ASSERT1(false, os.str());
 			}
 		}
 
-		void TiLogDaemon::MergeThreadStruQueueToSet(List<ThreadStru*>& thread_queue, TiLogBean& bean)
+		void TiLogDaemon::MergeThreadStruQueueToSet(List<ThreadStru*>& thread_queue, TiLogCompactString& bean)
 		{
 			using ThreadSpinLock = std::unique_lock<ThreadLocalSpinMutex>;
 			unsigned may_size = (unsigned)mMerge.mRawDatas.may_size();
@@ -2224,7 +2224,7 @@ namespace tilogspace
 					DEBUG_ASSERT(it_sub_beg <= it_sub_end);
 					size_t size = it_sub_end - it_sub_beg;
 					if (size == 0) { return it_sub_end; }
-					auto it_sub = std::upper_bound(it_sub_beg, it_sub_end, &bean, TiLogBeanPtrComp());
+					auto it_sub = std::upper_bound(it_sub_beg, it_sub_end, &bean, TiLogCompactStringPtrComp());
 					return it_sub;
 				};
 
@@ -2238,12 +2238,12 @@ namespace tilogspace
 				DEBUG_PRINTD("v %p size pre: %u\n", &v, (unsigned)vsizepre);
 
 				if (qCachePreSize == 0) { goto loopend; }
-				if (bean.time() < (**qCache.first_sub_queue_begin()).time()) { goto loopend; }
+				if (bean.ext.time() < (**qCache.first_sub_queue_begin()).ext.time()) { goto loopend; }
 
 				
 				if (!qCache.normalized())
 				{
-					if (bean.time() < (**qCache.second_sub_queue_begin()).time()) { goto one_sub; }
+					if (bean.ext.time() < (**qCache.second_sub_queue_begin()).ext.time()) { goto one_sub; }
 					// bean.time() >= ( **qCache.second_sub_queue_begin() ).time()
 					// so bean.time() >= all first sub queue time
 					{
@@ -2285,8 +2285,8 @@ namespace tilogspace
 		{
 			DEBUG_PRINTD("Begin of CollectRawDatas\n");
 			size_t init_size = 0;
-			TiLogBean referenceBean;
-			referenceBean.time() = mPoll.s_log_last_time = TiLogTime::now();	// referenceBean's time is the biggest up to now
+			TiLogCompactString referenceBean;
+			referenceBean.ext.time() = mPoll.s_log_last_time = TiLogTime::now();	// referenceBean's time is the biggest up to now
 
 			synchronized(mThreadStruQueue)
 			{
@@ -2319,7 +2319,7 @@ namespace tilogspace
 				VecLogCachePtr it_sec_vec = s.top();
 				s.pop();
 				v.resize(it_fst_vec->size() + it_sec_vec->size());
-				std::merge(it_fst_vec->begin(), it_fst_vec->end(), it_sec_vec->begin(), it_sec_vec->end(), v.begin(), TiLogBeanPtrComp());
+				std::merge(it_fst_vec->begin(), it_fst_vec->end(), it_sec_vec->begin(), it_sec_vec->end(), v.begin(), TiLogCompactStringPtrComp());
 
 				std::swap(*it_sec_vec, v);
 				s.emplace(it_sec_vec);
@@ -2455,20 +2455,20 @@ namespace tilogspace
 		}
 		inline std::unique_lock<std::mutex> TiLogDaemon::GetPollLock() { return GetCoreThrdLock(mPoll); }
 
-		inline void AppendToMergeCacheByMetaData(DeliverStru& mDeliver, const TiLogBean& bean)
+		inline void AppendToMergeCacheByMetaData(DeliverStru& mDeliver, const TiLogCompactString& bean)
 		{
-			TiLogStringView logsv = TiLogStreamHelper::str_view(&bean);
+			TiLogStringView logsv {bean.buf(),bean.size};
 			auto& logs = mDeliver.mIoBean;
 			auto preSize = logs.size();
-			auto souce_location_size = bean.source_location_size;
+			auto source_location_size = bean.ext.source_location_size;
 			auto beanSVSize = logsv.size();
-			size_t L2 = (souce_location_size + beanSVSize);
+			size_t L2 = (source_location_size + beanSVSize);
 			size_t append_size = L2 + TILOG_RESERVE_LEN_L1;
 			size_t reserveSize = preSize + append_size;
 			logs.reserve(reserveSize);
 
 
-			TiLogTime::origin_time_type oriTime = bean.time().get_origin_time();
+			TiLogTime::origin_time_type oriTime = bean.ext.time().get_origin_time();
 			if (oriTime == mDeliver.mPreLogTime)
 			{
 				// time is equal to pre,no need to update
@@ -2483,7 +2483,7 @@ namespace tilogspace
 #endif
 			}
 			logs.writend(mDeliver.mlogprefix, sizeof(mDeliver.mlogprefix));
-			logs.writend(bean.source_location_str,bean.source_location_size);
+			logs.writend(bean.ext.source_location_str,source_location_size);
 			logs.writend(logsv.data(), beanSVSize);			 //-----logsv.size()
 													   // clang-format off
 			// |----mlogprefix(32or24)----------|------------source_location----------------------------|--logsv(tid|usedata)-----|
@@ -2504,16 +2504,16 @@ namespace tilogspace
 			DEBUG_ASSERT(!deliverCache.empty());
 
 			DEBUG_PRINTI("mergeLogsToOneString,transform deliverCache to string\n");
-			for (TiLogBean* pBean : deliverCache)
+			for (TiLogCompactString* pBean : deliverCache)
 			{
-				DEBUG_RUN(TiLogBean::check(pBean));
-				TiLogBean& bean = *pBean;
+				DEBUG_RUN(TiLogBean::check(&pBean->ext));
+				TiLogCompactString& bean = *pBean;
 
 				AppendToMergeCacheByMetaData(mDeliver, bean);
 			}
 			mPrintedLogs += deliverCache.size();
 			DEBUG_PRINTI("End of mergeLogsToOneString,string size= %llu\n", (long long unsigned)mDeliver.mIoBean.size());
-			TiLogTime firstLogTime = deliverCache[0]->time();
+			TiLogTime firstLogTime = deliverCache[0]->ext.time();
 			mDeliver.mIoBean.mTime = firstLogTime;
 			return firstLogTime;
 		}
@@ -2846,13 +2846,13 @@ namespace tilogspace
 	{
 		TiLogStreamInner::~TiLogStreamInner()
 		{
-			TiLogInnerLogMgr::getRInstance().PushLog(stream.ext());
+			TiLogInnerLogMgr::getRInstance().PushLog(stream.pCore);
 			stream.pCore = nullptr;
 		}
 
 		struct TiLogInnerLogMgrImpl
 		{
-			PodCircularQueue<TiLogBean*, TILOG_INNO_LOG_QUEUE_FULL_SIZE> mCaches;
+			PodCircularQueue<TiLogCompactString*, TILOG_INNO_LOG_QUEUE_FULL_SIZE> mCaches;
 			TiLogFile mFile;
 			enum
 			{
@@ -2877,7 +2877,7 @@ namespace tilogspace
 				SetThreadName((thrd_t)-1, "InnoLoger");
 				mFile.open(TILOG_INTERNAL_LOG_FILE_PATH, "a");
 				DeliverStru mDeliver;
-				Vector<TiLogBean*> to_free;
+				Vector<TiLogCompactString*> to_free;
 				TiLogStreamHelper::TiLogStreamMemoryManagerCache cache;
 				while (1)
 				{
@@ -2887,17 +2887,17 @@ namespace tilogspace
 
 					for (auto it = mCaches.first_sub_queue_begin(); it != mCaches.first_sub_queue_end(); ++it)
 					{
-						TiLogBean* pBean = *it;
+						TiLogCompactString* pBean = *it;
 						AppendToMergeCacheByMetaData(mDeliver, *pBean);
 						to_free.emplace_back(pBean);
 					}
 					for (auto it = mCaches.second_sub_queue_begin(); it != mCaches.second_sub_queue_end(); ++it)
 					{
-						TiLogBean* pBean = *it;
+						TiLogCompactString* pBean = *it;
 						AppendToMergeCacheByMetaData(mDeliver, *pBean);
 						to_free.emplace_back(pBean);
 					}
-					TiLogStreamHelper::DestroyPushedTiLogBean(to_free, cache);
+					TiLogStreamHelper::DestroyTiLogCompactString(to_free, cache);
 					to_free.clear();
 					mCaches.clear();
 
@@ -2908,10 +2908,10 @@ namespace tilogspace
 				stat = STOP;
 			}
 
-			void PushLog(TiLogBean* pBean)
+			void PushLog(TiLogCompactString* pBean)
 			{
 				std::unique_lock<OptimisticMutex> lk(mtx);
-				new (&pBean->tiLogTime) TiLogTime(EPlaceHolder{});
+				new (&pBean->ext.tiLogTime) TiLogTime(EPlaceHolder{});
 				if (mCaches.size() >= TILOG_INNO_LOG_QUEUE_NEARLY_FULL_SIZE)
 				{
 					do
@@ -2935,7 +2935,7 @@ namespace tilogspace
 
 		TiLogInnerLogMgr::~TiLogInnerLogMgr() { Impl().~TiLogInnerLogMgrImpl(); }
 		TiLogInnerLogMgrImpl& TiLogInnerLogMgr::Impl() { return *(TiLogInnerLogMgrImpl*)&data; }
-		void TiLogInnerLogMgr::PushLog(TiLogBean* pBean) { Impl().PushLog(pBean); }
+		void TiLogInnerLogMgr::PushLog(TiLogCompactString* pBean) { Impl().PushLog(pBean); }
 	}	 // namespace internal
 }	 // namespace tilogspace
 
@@ -2990,7 +2990,7 @@ namespace tilogspace
 	void TiLogSubSystem::AsyncDisablePrinter(EPrinterID printer) { engine->tiLogPrinterManager.AsyncDisablePrinter(printer); }
 	void TiLogSubSystem::AsyncSetPrinters(printer_ids_t printerIds) { engine->tiLogPrinterManager.AsyncSetPrinters(printerIds); }
 	void TiLogSubSystem::Sync() { engine->tiLogDaemon.Sync(); }
-	void TiLogSubSystem::PushLog(TiLogBean* pBean) { engine->tiLogDaemon.PushLog(pBean); }
+	void TiLogSubSystem::PushLog(TiLogCompactString* pBean) { engine->tiLogDaemon.PushLog(pBean); }
 	uint64_t TiLogSubSystem::GetPrintedLogs() { return engine->tiLogDaemon.GetPrintedLogs(); }
 	void TiLogSubSystem::ClearPrintedLogsNumber() { engine->tiLogDaemon.ClearPrintedLogsNumber(); }
 
