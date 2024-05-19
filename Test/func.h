@@ -85,17 +85,17 @@ namespace funcspace
 	{
 		constexpr auto sleep_ms = TestLoopType::SLEEP_MS_DEFORE_TEST();
 		if (sleep_ms != 0) { std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms)); }
-		if_constexpr(TestLoopType::ASYNC_SET_PRINTERS()) { TILOG_CURRENT_MODULE.AsyncSetPrinters(ids); }
-		else { TILOG_CURRENT_MODULE.SetPrinters(ids); }
-		bool terminal_enabled = TILOG_CURRENT_MODULE.IsPrinterInPrinters(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL, ids);
+		if_constexpr(TestLoopType::ASYNC_SET_PRINTERS()) { TILOG_CURRENT_SUB_SYSTEM.AsyncSetPrinters(ids); }
+		else { TILOG_CURRENT_SUB_SYSTEM.SetPrinters(ids); }
+		bool terminal_enabled = TILOG_CURRENT_SUB_SYSTEM.IsPrinterInPrinters(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL, ids);
 		if (!terminal_enabled) { TICOUT << TEST_STRING_PREFIX << testName << '\n'; }
 		TILOGA << "\n\n========Test: " << testName << '\n';
 		if (TestLoopType::FSYNC_DEFORE_TEST())
 		{
-			TILOG_CURRENT_MODULE.FSync();
+			TILOG_CURRENT_SUB_SYSTEM.FSync();
 		} else if (TestLoopType::SYNC_DEFORE_TEST())
 		{
-			TILOG_CURRENT_MODULE.Sync();
+			TILOG_CURRENT_SUB_SYSTEM.Sync();
 		}
 		constexpr uint64_t loops = TestLoopType::GET_SINGLE_THREAD_LOOPS();
 		constexpr int32_t threads = (int32_t)TestLoopType::THREADS();
@@ -139,10 +139,10 @@ namespace funcspace
 		}
 		if (TestLoopType::FSYNC_AFTER_TEST())
 		{
-			TILOG_CURRENT_MODULE.FSync();
+			TILOG_CURRENT_SUB_SYSTEM.FSync();
 		} else if (TestLoopType::SYNC_AFTER_TEST())
 		{
-			TILOG_CURRENT_MODULE.Sync();
+			TILOG_CURRENT_SUB_SYSTEM.Sync();
 		}
 		constexpr auto sleep_ms2 = TestLoopType::SLEEP_MS_AFTER_TEST();
 		if (sleep_ms2 != 0) { std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms2)); }

@@ -25,14 +25,14 @@ using namespace tilogspace;
 int main()
 {
 #if FUN_MAIN == -1
-	TILOG_CURRENT_MODULE.EnablePrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
+	TILOG_CURRENT_SUB_SYSTEM.EnablePrinter(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL);
 	(TILOGV<<"main.cpp").printf("abc %d %lld",123,456LL);
 	(TILOGV << "666").printf("abc %0999999999999999d %", 123, 456LL);
 	(TILOGV << "6601000010000000000100000000100000000000230100000000000230002300000000236")
 		.printf
 		("abc 0100000000010000000000101000000000002300000000000023002301000000000002300023 %d %lld",123,456LL);
 #elif FUN_MAIN==0
-	TILOG_CURRENT_MODULE.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
+	TILOG_CURRENT_SUB_SYSTEM.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
 	TICOUT << "file_multi_thread_log_lat_test_____________________";
 
 	double rdstc0 = SingleLoopTimeTestFunc<false>();

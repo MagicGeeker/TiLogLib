@@ -162,7 +162,7 @@ namespace tilogspace
 		{
 			inline TiLogStreamInner(tilogspace::internal::TiLogStringView source)
 			{
-				new (&stream) TiLogStream(ETiLogModule(-1), source.data(), (uint16_t)source.size());
+				new (&stream) TiLogStream(ETiLogSubSysID(-1), source.data(), (uint16_t)source.size());
 			}
 			~TiLogStreamInner();
 			inline TiLogStream* Stream() noexcept { return &stream; }
@@ -1540,14 +1540,14 @@ namespace tilogspace
 
 		struct TiLogEngine
 		{
-			TiLogModBase tiLogModBase;
-			mod_id_t mod;
+			TiLogSubSystem subsystem;
+			sub_sys_t mod;
 			TiLogPrinterManager tiLogPrinterManager;
 			TiLogDaemon tiLogDaemon;
-			inline TiLogEngine(mod_id_t m) : tiLogModBase(), mod(m), tiLogPrinterManager(this), tiLogDaemon(this)
+			inline TiLogEngine(sub_sys_t m) : subsystem(), mod(m), tiLogPrinterManager(this), tiLogDaemon(this)
 			{
-				tiLogModBase.engine = this;
-				tiLogModBase.mod = mod;
+				subsystem.engine = this;
+				subsystem.mod = mod;
 			}
 		};
 
@@ -1557,7 +1557,7 @@ namespace tilogspace
 			{
 				constexpr static uint32_t CONCURRENT = TILOG_MAY_MAX_RUNNING_THREAD_NUM;
 			};
-			using engine_t = std::array<TiLogEngine, TILOG_MODULE_SPECS_SIZE>;
+			using engine_t = std::array<TiLogEngine, TILOG_STATIC_SUB_SYS_SIZE>;
 
 			const String* mainThrdId = GetThreadIDString();
 			mempoolspace::mempool mpool;
@@ -1783,7 +1783,7 @@ namespace tilogspace
 				p = TiLogNonePrinter::getInstance();
 				break;
 			case PRINTER_TILOG_FILE:
-				p = new TiLogFilePrinter(e, TILOG_ACTIVE_MODULE_SPECS[e->mod].data);
+				p = new TiLogFilePrinter(e, TILOG_STATIC_SUB_SYS_CFGS[e->mod].data);
 				break;
 			case PRINTER_TILOG_TERMINAL:
 				p = TiLogTerminalPrinter::getInstance();
@@ -1797,8 +1797,8 @@ namespace tilogspace
 		}
 
 		TiLogPrinterManager::TiLogPrinterManager(TiLogEngine* e)
-			: m_engine(e), m_printers(GetPrinterNum()), m_dest(TILOG_ACTIVE_MODULE_SPECS[e->mod].defaultEnabledPrinters),
-			  m_level(TILOG_ACTIVE_MODULE_SPECS[e->mod].defaultLogLevel)
+			: m_engine(e), m_printers(GetPrinterNum()), m_dest(TILOG_STATIC_SUB_SYS_CFGS[e->mod].defaultEnabledPrinters),
+			  m_level(TILOG_STATIC_SUB_SYS_CFGS[e->mod].defaultLogLevel)
 		{
 			addPrinter(CreatePrinter(e, EPrinterID::PRINTER_ID_NONE));
 			for (EPrinterID x = PRINTER_ID_BEGIN; x < PRINTER_ID_MAX; x = (EPrinterID)(x << 1U))
@@ -2041,11 +2041,11 @@ namespace tilogspace
 		//get unique ThreadStru* by TiLogCore* and thread id
 		ThreadStru* TiLogDaemon::GetThreadStru()
 		{
-			static thread_local ThreadStru* strus[TILOG_MODULE_SPECS_SIZE]{};
+			static thread_local ThreadStru* strus[TILOG_STATIC_SUB_SYS_SIZE]{};
 #ifndef TILOG_COMPILER_MINGW
 			// mingw64 bug when define no pod thread_local varibles
 			// see https://sourceforge.net/p/mingw-w64/bugs/893/
-			static thread_local ThreadExitWatcher watchers[TILOG_MODULE_SPECS_SIZE]{};
+			static thread_local ThreadExitWatcher watchers[TILOG_STATIC_SUB_SYS_SIZE]{};
 #endif
 			auto pDstQueue= &mThreadStruQueue.availQueue;
 			auto f = [&, pDstQueue] {
@@ -2986,44 +2986,44 @@ namespace tilogspace
 	TiLogPrinter::~TiLogPrinter() { delete mData; }
 #ifdef __________________________________________________TiLog__________________________________________________
 
-	void TiLogModBase::AsyncEnablePrinter(EPrinterID printer) { engine->tiLogPrinterManager.AsyncEnablePrinter(printer); }
-	void TiLogModBase::AsyncDisablePrinter(EPrinterID printer) { engine->tiLogPrinterManager.AsyncDisablePrinter(printer); }
-	void TiLogModBase::AsyncSetPrinters(printer_ids_t printerIds) { engine->tiLogPrinterManager.AsyncSetPrinters(printerIds); }
-	void TiLogModBase::Sync() { engine->tiLogDaemon.Sync(); }
-	void TiLogModBase::PushLog(TiLogBean* pBean) { engine->tiLogDaemon.PushLog(pBean); }
-	uint64_t TiLogModBase::GetPrintedLogs() { return engine->tiLogDaemon.GetPrintedLogs(); }
-	void TiLogModBase::ClearPrintedLogsNumber() { engine->tiLogDaemon.ClearPrintedLogsNumber(); }
+	void TiLogSubSystem::AsyncEnablePrinter(EPrinterID printer) { engine->tiLogPrinterManager.AsyncEnablePrinter(printer); }
+	void TiLogSubSystem::AsyncDisablePrinter(EPrinterID printer) { engine->tiLogPrinterManager.AsyncDisablePrinter(printer); }
+	void TiLogSubSystem::AsyncSetPrinters(printer_ids_t printerIds) { engine->tiLogPrinterManager.AsyncSetPrinters(printerIds); }
+	void TiLogSubSystem::Sync() { engine->tiLogDaemon.Sync(); }
+	void TiLogSubSystem::PushLog(TiLogBean* pBean) { engine->tiLogDaemon.PushLog(pBean); }
+	uint64_t TiLogSubSystem::GetPrintedLogs() { return engine->tiLogDaemon.GetPrintedLogs(); }
+	void TiLogSubSystem::ClearPrintedLogsNumber() { engine->tiLogDaemon.ClearPrintedLogsNumber(); }
 
-	void TiLogModBase::FSync()
+	void TiLogSubSystem::FSync()
 	{
 		engine->tiLogDaemon.Sync();
 		engine->tiLogPrinterManager.waitForIO();
 	}
-	printer_ids_t TiLogModBase::GetPrinters() { return engine->tiLogPrinterManager.GetPrinters(); }
-	bool TiLogModBase::IsPrinterInPrinters(EPrinterID p, printer_ids_t ps)
+	printer_ids_t TiLogSubSystem::GetPrinters() { return engine->tiLogPrinterManager.GetPrinters(); }
+	bool TiLogSubSystem::IsPrinterInPrinters(EPrinterID p, printer_ids_t ps)
 	{
 		return engine->tiLogPrinterManager.IsPrinterInPrinters(p, ps);
 	}
-	bool TiLogModBase::IsPrinterActive(EPrinterID printer) { return engine->tiLogPrinterManager.IsPrinterActive(printer); }
-	void TiLogModBase::EnablePrinter(EPrinterID printer)
+	bool TiLogSubSystem::IsPrinterActive(EPrinterID printer) { return engine->tiLogPrinterManager.IsPrinterActive(printer); }
+	void TiLogSubSystem::EnablePrinter(EPrinterID printer)
 	{
 		Sync();
 		AsyncEnablePrinter(printer);
 	}
-	void TiLogModBase::DisablePrinter(EPrinterID printer)
+	void TiLogSubSystem::DisablePrinter(EPrinterID printer)
 	{
 		Sync();
 		AsyncEnablePrinter(printer);
 	}
 
-	void TiLogModBase::SetPrinters(printer_ids_t printerIds)
+	void TiLogSubSystem::SetPrinters(printer_ids_t printerIds)
 	{
 		Sync();
 		AsyncSetPrinters(printerIds);
 	}
 
-	void TiLogModBase::SetLogLevel(ELevel level) { engine->tiLogPrinterManager.SetLogLevel(level); }
-	ELevel TiLogModBase::GetLogLevel() { return engine->tiLogPrinterManager.GetLogLevel(); }
+	void TiLogSubSystem::SetLogLevel(ELevel level) { engine->tiLogPrinterManager.SetLogLevel(level); }
+	ELevel TiLogSubSystem::GetLogLevel() { return engine->tiLogPrinterManager.GetLogLevel(); }
 
 #endif
 
@@ -3049,7 +3049,7 @@ namespace tilogspace
 		}
 	}	 // namespace internal
 
-	TiLogModBase& TiLog::GetMoudleBaseRef(mod_id_t mod) { return TiLogEngines::getRInstance().engines[mod].tiLogModBase; }
+	TiLogSubSystem& TiLog::GetSubSystemRef(sub_sys_t mod) { return TiLogEngines::getRInstance().engines[mod].subsystem; }
 	TiLogEngines::TiLogEngines()
 	{
 		ti_iostream_mtx_t::init();
@@ -3063,7 +3063,7 @@ namespace tilogspace
 
 		for (size_t i = 0; i < engines.size(); i++)
 		{
-			new (&engines[i]) TiLogEngine(TILOG_ACTIVE_MODULE_SPECS[i].mod);
+			new (&engines[i]) TiLogEngine(TILOG_STATIC_SUB_SYS_CFGS[i].mod);
 		}
 		TICLOG << "TiLog " << &TiLog::getRInstance() << " TiLogEngines " << TiLogEngines::getInstance() << " in thrd "
 			   << std::this_thread::get_id() << '\n';
