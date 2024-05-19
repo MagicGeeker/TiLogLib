@@ -55,7 +55,7 @@ using namespace tilogspace;
 //#define static_log_level_multi_thread_benchmark_test_____________________
 //#define dynamic_log_level_multi_thread_benchmark_test_____________________
 #ifdef TILOG_CUSTOMIZATION_H
-#define user_module_test_____________________
+#define user_subsystem_test_____________________
 #endif
 
 struct Student
@@ -801,8 +801,8 @@ TEST_CASE("terminal_multi_way_log_test_____________________")
 }
 #endif
 
-#ifdef user_module_test_____________________
-TEST_CASE("user_module_test_____________________")
+#ifdef user_subsystem_test_____________________
+TEST_CASE("user_subsystem_test_____________________")
 {
 	TILOG_CURRENT_SUB_SYSTEM.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
 
@@ -813,7 +813,7 @@ TEST_CASE("user_module_test_____________________")
 		constexpr static bool PRINT_LOOP_TIME() { return true; }
 	};
 
-	MultiThreadTest<testLoop_t>("user_module_test_____________________", tilogspace::EPrinterID::PRINTER_TILOG_FILE, [](int index) {
+	MultiThreadTest<testLoop_t>("user_subsystem_test_____________________", tilogspace::EPrinterID::PRINTER_TILOG_FILE, [](int index) {
 		for (uint64_t j = 0; j < testLoop_t::GET_SINGLE_THREAD_LOOPS(); j++)
 		{
 			switch (j % 3)

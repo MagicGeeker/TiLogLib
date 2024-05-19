@@ -123,7 +123,6 @@
 #endif
 
 #define  TILOG_INTERNAL_REGISTER_PRINTERS_MACRO(...)  __VA_ARGS__
-#define  TILOG_INTERNAL_REGISTER_MODULES_MACRO(...)  __VA_ARGS__
 
 #define TILOG_INTERNAL_STD_STEADY_CLOCK 1
 #define TILOG_INTERNAL_STD_SYSTEM_CLOCK 2
@@ -274,18 +273,18 @@ namespace tilogspace
 	enum ETiLogSubSysID : sub_sys_t
 	{
 		TILOG_SUB_SYSTEM_START = 0,
-		//...// user defined mod id begin
+		//...// user defined subsys id begin
 		TILOG_SUB_SYSTEM_GLOBAL_FILE = 0,
 		TILOG_SUB_SYSTEM_GLOBAL_TERMINAL = 1,
 		TILOG_SUB_SYSTEM_GLOBAL_FILE_TERMINAL = 2,
-		//...// user defined mod id end
+		//...// user defined subsys id end
 		TILOG_SUB_SYSTEMS
 	};
 
 	struct TiLogSubsysCfg
 	{
-		sub_sys_t mod;
-		const char moduleName[32];
+		sub_sys_t subsys;
+		const char subsystemName[32];
 		const char data[256];
 		printer_ids_t defaultEnabledPrinters;
 		ELevel defaultLogLevel;	   // set the default log level,dynamic log level will always <= static log level
@@ -2404,7 +2403,7 @@ namespace tilogspace
 			TiLogTime tiLogTime;
 			const char* source_location_str;  // like "ERROR a.cpp:102 foo()"
 			uint16_t source_location_size;
-			sub_sys_t mod;
+			sub_sys_t subsys;
 
 			DEBUG_DECLARE(uint8_t tidlen)
 			DEBUG_CANARY_UINT64(flag3)
@@ -2539,7 +2538,7 @@ namespace tilogspace
 
 	protected:
 		internal::TiLogEngine* engine{};
-		sub_sys_t mod{};
+		sub_sys_t subsys{};
 	};
 
 
@@ -2548,7 +2547,7 @@ namespace tilogspace
 		friend struct internal::TiLogNiftyCounterIniter;
 
 	public:
-		static TiLogSubSystem& GetSubSystemRef(sub_sys_t mod);
+		static TiLogSubSystem& GetSubSystemRef(sub_sys_t subsys);
 
 		TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_FUNC_IMPL(TiLog, tilogbuf)
 
@@ -2616,7 +2615,7 @@ namespace tilogspace
 
 #ifdef H__________________________________________________TiLogStream__________________________________________________
 
-	TILOG_FORCEINLINE constexpr bool should_log(sub_sys_t mod, ELevel level);
+	TILOG_FORCEINLINE constexpr bool should_log(sub_sys_t subsys, ELevel level);
 	class TiLogStreamEx;
 
 namespace internal
@@ -2686,11 +2685,11 @@ namespace internal
 
 	public:
 		// unique way to make a valid stream
-		inline TiLogStream(sub_sys_t mod, const char* source_location_str, uint16_t source_location_size) : StringType(EPlaceHolder{})
+		inline TiLogStream(sub_sys_t subsys, const char* source_location_str, uint16_t source_location_size) : StringType(EPlaceHolder{})
 		{
 			create(TILOG_SINGLE_LOG_RESERVE_LEN);
 			TiLogBean& bean = *ext();
-			bean.mod = mod;
+			bean.subsys = subsys;
 			bean.source_location_str = source_location_str;
 			bean.source_location_size = source_location_size;
 			const String* tidstr = tilogspace::internal::GetThreadIDString();
@@ -2702,7 +2701,7 @@ namespace internal
 		{
 			DEBUG_ASSERT(pCore != nullptr);
 			DEBUG_RUN(TiLogBean::check(this->ext()));
-			TiLog::GetSubSystemRef(ext()->mod).PushLog(this->ext());
+			TiLog::GetSubSystemRef(ext()->subsys).PushLog(this->ext());
 		}
 
 	public:
@@ -3052,11 +3051,11 @@ namespace internal
 		inline TiLogStreamEx(TiLogStreamEx&& rhs) noexcept : TiLogStreamEx() { swap(rhs); }
 		inline TiLogStreamEx& operator=(TiLogStreamEx&& rhs) noexcept { return this->stream = std::move(rhs.stream), *this; }
 
-		inline TiLogStreamEx(sub_sys_t mod, tilogspace::internal::TiLogStringView source) : tilogspace::TiLogStreamEx()
+		inline TiLogStreamEx(sub_sys_t subsys, tilogspace::internal::TiLogStringView source) : tilogspace::TiLogStreamEx()
 		{
-			if (tilogspace::should_log(mod, internal::ELogLevelChar2ELevel(source[0])))
+			if (tilogspace::should_log(subsys, internal::ELogLevelChar2ELevel(source[0])))
 			{
-				new (&stream) TiLogStream(mod, source.data(), (uint16_t)source.size());
+				new (&stream) TiLogStream(subsys, source.data(), (uint16_t)source.size());
 			}
 		};
 
@@ -3086,8 +3085,8 @@ namespace internal
 
 namespace tilogspace
 {
-	TILOG_FORCEINLINE constexpr ELevel GetDefaultLogLevel(sub_sys_t MOD) { return TILOG_STATIC_SUB_SYS_CFGS[MOD].defaultLogLevel; }
-	TILOG_FORCEINLINE constexpr bool SupportDynamicLevel(sub_sys_t MOD) { return TILOG_STATIC_SUB_SYS_CFGS[MOD].supportDynamicLogLevel; }
+	TILOG_FORCEINLINE constexpr ELevel GetDefaultLogLevel(sub_sys_t SUB_SYS) { return TILOG_STATIC_SUB_SYS_CFGS[SUB_SYS].defaultLogLevel; }
+	TILOG_FORCEINLINE constexpr bool SupportDynamicLevel(sub_sys_t SUB_SYS) { return TILOG_STATIC_SUB_SYS_CFGS[SUB_SYS].supportDynamicLogLevel; }
 
 	template <bool... b>
 	struct all_true;
@@ -3113,17 +3112,17 @@ namespace tilogspace
 		return b0 && all_true_dynamic(b...);
 	}
 
-	TILOG_FORCEINLINE constexpr bool should_log(sub_sys_t mod, ELevel level)
+	TILOG_FORCEINLINE constexpr bool should_log(sub_sys_t subsys, ELevel level)
 	{
-		return SupportDynamicLevel(mod) ? (level <= TiLog::GetSubSystemRef(mod).GetLogLevel()) : (level <= GetDefaultLogLevel(mod));
+		return SupportDynamicLevel(subsys) ? (level <= TiLog::GetSubSystemRef(subsys).GetLogLevel()) : (level <= GetDefaultLogLevel(subsys));
 	}
 
-	TILOG_FORCEINLINE TiLogStream CreateNewTiLogStream(tilogspace::internal::TiLogStringView src, sub_sys_t MOD)
+	TILOG_FORCEINLINE TiLogStream CreateNewTiLogStream(tilogspace::internal::TiLogStringView src, sub_sys_t SUB_SYS)
 	{
-		return { MOD, src.data(), (uint16_t)src.size() };
+		return { SUB_SYS, src.data(), (uint16_t)src.size() };
 	}
 
-	TILOG_FORCEINLINE TiLogStreamEx CreateNewTiLogStreamEx(tilogspace::internal::TiLogStringView src, sub_sys_t MOD) { return { MOD, src }; }
+	TILOG_FORCEINLINE TiLogStreamEx CreateNewTiLogStreamEx(tilogspace::internal::TiLogStringView src, sub_sys_t SUB_SYS) { return { SUB_SYS, src }; }
 }	 // namespace tilogspace
 
 namespace tilogspace
@@ -3272,11 +3271,11 @@ namespace tilogspace
 
 //------------------------------------------define micro for user------------------------------------------//
 // force create a TiLogStream, regardless of what lv is
-#define TILOG_STREAM_CREATE_DLV(mod, lv) tilogspace::CreateNewTiLogStream(TILOG_GET_LEVEL_SOURCE_LOCATION_DLV(lv), mod)
-// same as TILOG_STREAM_CREATE_DLV, and use constexpr mod,lv (better performace)
-#define TILOG_STREAM_CREATE(mod, lv) tilogspace::CreateNewTiLogStream(TILOG_GET_LEVEL_SOURCE_LOCATION(lv), mod)
+#define TILOG_STREAM_CREATE_DLV(subsys, lv) tilogspace::CreateNewTiLogStream(TILOG_GET_LEVEL_SOURCE_LOCATION_DLV(lv), subsys)
+// same as TILOG_STREAM_CREATE_DLV, and use constexpr subsys,lv (better performace)
+#define TILOG_STREAM_CREATE(subsys, lv) tilogspace::CreateNewTiLogStream(TILOG_GET_LEVEL_SOURCE_LOCATION(lv), subsys)
 // create a TiLogStreamEx
-#define TILOG_STREAMEX_CREATE(mod, lv) tilogspace::CreateNewTiLogStreamEx(TILOG_GET_LEVEL_SOURCE_LOCATION(lv), mod)
+#define TILOG_STREAMEX_CREATE(subsys, lv) tilogspace::CreateNewTiLogStreamEx(TILOG_GET_LEVEL_SOURCE_LOCATION(lv), subsys)
 
 #define TICOUT (*tilogspace::lock_proxy_t(tilogspace::ti_iostream_mtx_t::getInstance()->ticout_mtx,std::cout))
 #define TICERR (*tilogspace::lock_proxy_t(tilogspace::ti_iostream_mtx_t::getInstance()->ticerr_mtx,std::cerr))
@@ -3298,9 +3297,9 @@ namespace tilogspace
 #define TIDLOGD TIDLOG(TILOG_CURRENT_SUBSYS_ID, tilogspace::ELevel::DEBUG)
 #define TIDLOGV TIDLOG(TILOG_CURRENT_SUBSYS_ID, tilogspace::ELevel::VERBOSE)
 
-// support dynamic mod and log level
-#define TIDLOG(mod, lv) tilogspace::should_log(mod, lv) && TILOG_STREAM_CREATE_DLV(mod, lv)
-// constexpr mod and level only (better performace)
+// support dynamic subsys and log level
+#define TIDLOG(subsys, lv) tilogspace::should_log(subsys, lv) && TILOG_STREAM_CREATE_DLV(subsys, lv)
+// constexpr subsys and level only (better performace)
 #define TILOG(constexpr_mod, constexpr_lv)                                                                                                 \
 	tilogspace::should_log(constexpr_mod, constexpr_lv) && TILOG_STREAM_CREATE(constexpr_mod, constexpr_lv)
 

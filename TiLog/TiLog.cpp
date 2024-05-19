@@ -1541,13 +1541,13 @@ namespace tilogspace
 		struct TiLogEngine
 		{
 			TiLogSubSystem subsystem;
-			sub_sys_t mod;
+			sub_sys_t subsys;
 			TiLogPrinterManager tiLogPrinterManager;
 			TiLogDaemon tiLogDaemon;
-			inline TiLogEngine(sub_sys_t m) : subsystem(), mod(m), tiLogPrinterManager(this), tiLogDaemon(this)
+			inline TiLogEngine(sub_sys_t m) : subsystem(), subsys(m), tiLogPrinterManager(this), tiLogDaemon(this)
 			{
 				subsystem.engine = this;
-				subsystem.mod = mod;
+				subsystem.subsys = subsys;
 			}
 		};
 
@@ -1583,7 +1583,7 @@ namespace tilogspace
 			char tname[16];
 			if (mpEngine != nullptr)
 			{
-				snprintf(tname, 16, "printer@%d#%d", (int)mpEngine->mod, (int)mpPrinter->getUniqueID());
+				snprintf(tname, 16, "printer@%d#%d", (int)mpEngine->subsys, (int)mpPrinter->getUniqueID());
 			} else
 			{
 				snprintf(tname, 16, "printer#%d", (int)mpPrinter->getUniqueID());
@@ -1783,7 +1783,7 @@ namespace tilogspace
 				p = TiLogNonePrinter::getInstance();
 				break;
 			case PRINTER_TILOG_FILE:
-				p = new TiLogFilePrinter(e, TILOG_STATIC_SUB_SYS_CFGS[e->mod].data);
+				p = new TiLogFilePrinter(e, TILOG_STATIC_SUB_SYS_CFGS[e->subsys].data);
 				break;
 			case PRINTER_TILOG_TERMINAL:
 				p = TiLogTerminalPrinter::getInstance();
@@ -1797,8 +1797,8 @@ namespace tilogspace
 		}
 
 		TiLogPrinterManager::TiLogPrinterManager(TiLogEngine* e)
-			: m_engine(e), m_printers(GetPrinterNum()), m_dest(TILOG_STATIC_SUB_SYS_CFGS[e->mod].defaultEnabledPrinters),
-			  m_level(TILOG_STATIC_SUB_SYS_CFGS[e->mod].defaultLogLevel)
+			: m_engine(e), m_printers(GetPrinterNum()), m_dest(TILOG_STATIC_SUB_SYS_CFGS[e->subsys].defaultEnabledPrinters),
+			  m_level(TILOG_STATIC_SUB_SYS_CFGS[e->subsys].defaultLogLevel)
 		{
 			addPrinter(CreatePrinter(e, EPrinterID::PRINTER_ID_NONE));
 			for (EPrinterID x = PRINTER_ID_BEGIN; x < PRINTER_ID_MAX; x = (EPrinterID)(x << 1U))
@@ -1921,8 +1921,8 @@ namespace tilogspace
 			{
 				this->pCore = pCore, this->pThreadStru = pThreadStru;
 				DEBUG_PRINTA(
-					"ThreadExitWatcher init [this %p pCore %p pThreadStru %p] tid %s,mod %u\n", this, pCore, pThreadStru,
-					pThreadStru->tid->c_str(), (unsigned)pCore->mTiLogEngine->mod);
+					"ThreadExitWatcher init [this %p pCore %p pThreadStru %p] tid %s,subsys %u\n", this, pCore, pThreadStru,
+					pThreadStru->tid->c_str(), (unsigned)pCore->mTiLogEngine->subsys);
 			}
 			~ThreadExitWatcher()
 			{
@@ -1957,7 +1957,7 @@ namespace tilogspace
 		{
 			return std::thread([this, &thrd, p] {
 				char tname[16];
-				snprintf(tname, 16, "%s@%d", thrd.GetName(), (int)this->mTiLogEngine->mod);
+				snprintf(tname, 16, "%s@%d", thrd.GetName(), (int)this->mTiLogEngine->subsys);
 				SetThreadName((thrd_t)-1, tname);
 				auto f = thrd.GetThrdEntryFunc();
 				thrd.mStatus = RUN;
@@ -2054,7 +2054,7 @@ namespace tilogspace
 				DEBUG_ASSERT(pStru->tid != nullptr);
 
 #ifndef TILOG_COMPILER_MINGW
-				watchers[this->mTiLogEngine->mod].init(this, pStru);
+				watchers[this->mTiLogEngine->subsys].init(this, pStru);
 #endif
 				++mThreadStruQueue.handledUserThreadCnt;
 				synchronized(mThreadStruQueue)
@@ -2066,8 +2066,8 @@ namespace tilogspace
 				notify_all_at_thread_exit(pStru->thrdExistCV, std::move(lk));
 				return pStru;
 			};
-			if (strus[this->mTiLogEngine->mod] == nullptr) { strus[this->mTiLogEngine->mod] = f(); }
-			return strus[this->mTiLogEngine->mod];
+			if (strus[this->mTiLogEngine->subsys] == nullptr) { strus[this->mTiLogEngine->subsys] = f(); }
+			return strus[this->mTiLogEngine->subsys];
 		}
 
 		inline void TiLogDaemon::MarkThreadDying(ThreadStru* pStru)
@@ -2116,8 +2116,8 @@ namespace tilogspace
 			}
 			mTiLogPrinterManager->DestroyPrinters();	   // make sure printers output all logs and free to SyncedIOBeanPool
 			DEBUG_PRINTI(
-				"engine %p mod %u tilogcore %p handledUserThreadCnt %llu diedUserThreadCnt %llu\n", this->mTiLogEngine,
-				(unsigned)this->mTiLogEngine->mod, this, (unsigned long long)mThreadStruQueue.handledUserThreadCnt,
+				"engine %p subsys %u tilogcore %p handledUserThreadCnt %llu diedUserThreadCnt %llu\n", this->mTiLogEngine,
+				(unsigned)this->mTiLogEngine->subsys, this, (unsigned long long)mThreadStruQueue.handledUserThreadCnt,
 				(unsigned long long)mThreadStruQueue.diedUserThreadCnt);
 			DEBUG_PRINTI("TiLogCore %p exit\n", this);
 			this->mMagicNumber = MAGIC_NUMBER_DEAD;
@@ -3049,7 +3049,7 @@ namespace tilogspace
 		}
 	}	 // namespace internal
 
-	TiLogSubSystem& TiLog::GetSubSystemRef(sub_sys_t mod) { return TiLogEngines::getRInstance().engines[mod].subsystem; }
+	TiLogSubSystem& TiLog::GetSubSystemRef(sub_sys_t subsys) { return TiLogEngines::getRInstance().engines[subsys].subsystem; }
 	TiLogEngines::TiLogEngines()
 	{
 		ti_iostream_mtx_t::init();
@@ -3063,7 +3063,7 @@ namespace tilogspace
 
 		for (size_t i = 0; i < engines.size(); i++)
 		{
-			new (&engines[i]) TiLogEngine(TILOG_STATIC_SUB_SYS_CFGS[i].mod);
+			new (&engines[i]) TiLogEngine(TILOG_STATIC_SUB_SYS_CFGS[i].subsys);
 		}
 		TICLOG << "TiLog " << &TiLog::getRInstance() << " TiLogEngines " << TiLogEngines::getInstance() << " in thrd "
 			   << std::this_thread::get_id() << '\n';
