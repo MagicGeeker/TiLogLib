@@ -145,7 +145,6 @@
 //#define TILOG_ALIGNED_OPERATOR_DELETE(ptr, alignment) ::operator delete(ptr,(std::align_val_t)alignment,std::nothrow)
 
 #define TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL FALSE //TRUE or FALSE,if false TiLog::SetLogLevel no effect
-#define TILOG_STRICT_ORDERED_LOG TRUE //TRUE or FALSE,if false some log may be unordered in log printer
 #define TILOG_ERROR_FORMAT_STRING  " !!!ERR FMT "
 
 /**************************************************user-defined data structure**************************************************/

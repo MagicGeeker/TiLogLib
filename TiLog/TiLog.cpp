@@ -2146,16 +2146,6 @@ namespace tilogspace
 
 		inline void TiLogDaemon::Sync()
 		{
-#if !TILOG_STRICT_ORDERED_LOG
-			uint64_t core_loop_count = mCoreLoopCount;
-			for (;;)
-			{
-				NotifyPoll();
-				if (core_loop_count + TILOG_DAEMON_PROCESSER_NUM < mCoreLoopCount) { return; }
-				mPoll.SetPollPeriodMs(TILOG_POLL_THREAD_SLEEP_MS_IF_SYNC);
-				std::this_thread::sleep_for(std::chrono::milliseconds(TILOG_POLL_THREAD_SLEEP_MS_IF_SYNC));
-			}
-#else
 			core_seq_t seq;
 			synchronized(mScheduler) { seq = mScheduler.mPollSeq; }
 			for (;;)
@@ -2168,7 +2158,6 @@ namespace tilogspace
 				mPoll.SetPollPeriodMs(TILOG_POLL_THREAD_SLEEP_MS_IF_SYNC);
 				std::this_thread::sleep_for(std::chrono::milliseconds(TILOG_POLL_THREAD_SLEEP_MS_IF_SYNC));
 			}
-#endif
 		}
 
 		void TiLogDaemon::PushLog(TiLogCompactString* pBean)
@@ -2521,9 +2510,7 @@ namespace tilogspace
 		inline void TiLogCore::MayPushLog()
 		{
 			++mDeliver.mPushLogCount;
-#if !TILOG_STRICT_ORDERED_LOG
-			if (mDeliver.mIoBeanForPush) { pushLogsToPrinters(mDeliver.mIoBeanForPush); }
-#else
+
 			auto& schd = mTiLogDaemon->mScheduler;
 			synchronized(schd)
 			{
@@ -2554,7 +2541,6 @@ namespace tilogspace
 					}
 				}
 			}
-#endif
 		}
 
 		void TiLogCore::pushLogsToPrinters(IOBean* pIObean)
