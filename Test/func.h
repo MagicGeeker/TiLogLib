@@ -128,14 +128,12 @@ namespace funcspace
 		uint64_t ns = s1m.GetNanosecondsUpToNOW();
 		if_constexpr(TestLoopType::PRINT_LOOP_TIME())
 		{
-			if (!terminal_enabled)
-			{
-				TICOUT << (1e6 * threads * loops / ns) << " loops per millisecond\n";
-				TICOUT << (1e6 * loops / ns) << " loops per thread per millisecond\n";
-			}
+			char total[50], singlethrd[50];
+			snprintf(total, sizeof(total), "%3.2e loops per second\n", 1e9 * threads * loops / ns);
+			snprintf(singlethrd, sizeof(singlethrd), "%3.2e loops per thread per second\n", 1e9 * loops / ns);
+			if (!terminal_enabled) { TICOUT << total << singlethrd; }
 
-			TILOGA << (1e6 * threads * loops / ns) << " loops per millisecond\n";
-			TILOGA << (1e6 * loops / ns) << " loops per thread per millisecond\n";
+			TILOGA << total << singlethrd;
 		}
 		if (TestLoopType::FSYNC_AFTER_TEST())
 		{
@@ -209,6 +207,7 @@ struct lat_t
 	double user_avg = 0.0;
 	uint64_t log_lat_num = 0;
 	uint64_t log_lat_sum = 0;
+	// log_his[i]:count of i rdtsc; log_his[0]:count of bigger than 65535 rdtsc.
 	size_t log_his[UINT16_MAX] = { 0 };
 	double log_avg = 0.0;
 };
@@ -228,7 +227,7 @@ static std::string LatDump(lat_t& lat)
 	s += "\ncost " + std::to_string(100.0 * (lat.log_avg + lat.user_avg) / lat.user_avg) + '%';
 	s += "\n>65535 cnt:" + std::to_string(lat.log_his[0]) + " freq:" + std::to_string(lat.log_his[0] * 1.0 / lat.log_lat_num) + "\n";
 
-	std::deque<double> d = { 5, 20, 50, 75, 90, 99, 99.9 };
+	std::deque<double> d = { 10, 20, 50, 75, 90, 99, 99.9, 99.99 };
 	for (size_t i = 1; i < UINT16_MAX; ++i)
 	{
 		num += lat.log_his[i];
@@ -236,7 +235,7 @@ static std::string LatDump(lat_t& lat)
 		if (d.empty()) { break; }
 		if (p >= d.front())
 		{
-			snprintf(pct, 10, "%4.1f", d.front());
+			snprintf(pct, 10, "%.2f", d.front());
 			s = s + "[" + pct + "%:" + std::to_string(i) + "] ";
 			d.pop_front();
 		}

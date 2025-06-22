@@ -17,9 +17,9 @@ namespace tilogspace
 
 
 	constexpr static TiLogSubsysCfg TILOG_STATIC_SUB_SYS_CFGS[] = {
-		{ TILOG_SUB_SYSTEM_0, "mod0", "a:/mod0/", PRINTER_TILOG_FILE, VERBOSE, false },
-		{ TILOG_SUB_SYSTEM_1, "mod1", "a:/mod1/", PRINTER_TILOG_FILE, VERBOSE, false },
-		{ TILOG_SUB_SYSTEM_2, "mod2", "a:/mod2/", PRINTER_TILOG_FILE, VERBOSE, false },
+		{ TILOG_SUB_SYSTEM_0, "subsys0", "a:/subsys0/", PRINTER_TILOG_FILE, VERBOSE, false },
+		{ TILOG_SUB_SYSTEM_1, "subsys1", "a:/subsys1/", PRINTER_TILOG_FILE, VERBOSE, false },
+		{ TILOG_SUB_SYSTEM_2, "subsys2", "a:/subsys2/", PRINTER_TILOG_FILE, VERBOSE, false },
 	};
 	constexpr static size_t TILOG_STATIC_SUB_SYS_SIZE = sizeof(TILOG_STATIC_SUB_SYS_CFGS) / sizeof(TILOG_STATIC_SUB_SYS_CFGS[0]);
 }	 // namespace tilogspace

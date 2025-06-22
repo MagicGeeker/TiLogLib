@@ -306,7 +306,7 @@ namespace tilogspace
 
 	constexpr static TiLogSubsysCfg TILOG_STATIC_SUB_SYS_CFGS[] = {
 		{ TILOG_SUB_SYSTEM_GLOBAL_FILE, "global_file", "a:/global/", PRINTER_TILOG_FILE, VERBOSE, false },
-		{ TILOG_SUB_SYSTEM_GLOBAL_TERMINAL, "global_terminal", "", PRINTER_TILOG_TERMINAL, INFO, true },
+		{ TILOG_SUB_SYSTEM_GLOBAL_TERMINAL, "global_terminal", "a:/global_t/", PRINTER_TILOG_TERMINAL, INFO, true },
 		{ TILOG_SUB_SYSTEM_GLOBAL_FILE_TERMINAL, "global_ft", "a:/global_ft/", PRINTER_TILOG_FILE | PRINTER_TILOG_TERMINAL, INFO, false }
 	};
 	constexpr static size_t TILOG_STATIC_SUB_SYS_SIZE = sizeof(TILOG_STATIC_SUB_SYS_CFGS) / sizeof(TILOG_STATIC_SUB_SYS_CFGS[0]);
@@ -1392,6 +1392,7 @@ namespace tilogspace
 	private:
 		TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_MEMBER_DECLARE(ti_iostream_mtx_t, instance)
 	};
+
 
 	struct lock_proxy_t
 	{
@@ -3292,8 +3293,8 @@ namespace tilogspace
 // support dynamic subsys and log level
 #define TIDLOG(subsys, lv) tilogspace::should_log(subsys, lv) && TILOG_STREAM_CREATE_DLV(subsys, lv)
 // constexpr subsys and level only (better performace)
-#define TILOG(constexpr_mod, constexpr_lv)                                                                                                 \
-	tilogspace::should_log(constexpr_mod, constexpr_lv) && TILOG_STREAM_CREATE(constexpr_mod, constexpr_lv)
+#define TILOG(constexpr_subsys, constexpr_lv)                                                                                                 \
+	tilogspace::should_log(constexpr_subsys, constexpr_lv) && TILOG_STREAM_CREATE(constexpr_subsys, constexpr_lv)
 
 #define TILOGEX(stream_ex) stream_ex.ShouldLog() && (*stream_ex.Stream())
 
