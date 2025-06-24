@@ -1649,6 +1649,278 @@ namespace tilogspace
 	}	 // namespace mempoolspace
 }	 // namespace tilogspace
 
+namespace tilogspace
+{
+	namespace mempoolspace
+	{
+		enum
+		{
+			MEM_POOL_XMALLOC_MAX_SIZE = 512,
+			XMALLOC_MEM_BLOCK_ALIGN = 32,
+			STD_MALLOC_MEM_BLOCK_ALIGN = 16,
+
+			LINEAR_MEM_POOL_ALIGN = 32 * 1024,
+			LINEAR_MEM_POOL_CAPACITY = LINEAR_MEM_POOL_ALIGN - 96,
+
+			MEM_POOL_NEW_CHAR = 0xaa,
+			MEM_POOL_FREED_CHAR = 0xbb
+		};
+		static_assert(LINEAR_MEM_POOL_ALIGN % XMALLOC_MEM_BLOCK_ALIGN == 0, "must be 0");
+
+		struct utils
+		{
+			static inline size_t size_round_up(size_t size)
+			{
+				return (size + XMALLOC_MEM_BLOCK_ALIGN - 1) / XMALLOC_MEM_BLOCK_ALIGN * XMALLOC_MEM_BLOCK_ALIGN;
+			}
+
+			static void* xmalloc_from_std(size_t sz)
+			{
+				//                       |            MEM_POOL_XMALLOC_ALIGN          |
+				//---------sz---------sz up to 32----------------------------up_bound_size
+				size_t up_bound_size =
+					(sz + XMALLOC_MEM_BLOCK_ALIGN - 1) / XMALLOC_MEM_BLOCK_ALIGN * XMALLOC_MEM_BLOCK_ALIGN + XMALLOC_MEM_BLOCK_ALIGN;
+				DEBUG_ASSERT2(up_bound_size - sz >= XMALLOC_MEM_BLOCK_ALIGN, up_bound_size, sz);
+				//                       |                                MEM_POOL_XMALLOC_ALIGN/2 >= sizeof(size_t)             |
+				//------------------oversize_p(store sz)-----------------------------------------------------------------p(user data)
+				void* oversize_p = TiLogMemoryManager::operator new(up_bound_size, tilog_align_val_t(XMALLOC_MEM_BLOCK_ALIGN));
+				static_assert(XMALLOC_MEM_BLOCK_ALIGN % 2 == 0, "fatal");
+				static_assert(STD_MALLOC_MEM_BLOCK_ALIGN >= sizeof(size_t), "fatal");
+				*(size_t*)oversize_p = sz;	  // store the sz
+				void* p = (uint8_t*)oversize_p + STD_MALLOC_MEM_BLOCK_ALIGN;
+				DEBUG_ASSERT1((uintptr_t)p % XMALLOC_MEM_BLOCK_ALIGN == STD_MALLOC_MEM_BLOCK_ALIGN, p);
+				return p;
+			}
+			static void xfree_to_std(void* p)
+			{
+				DEBUG_ASSERT1(((uintptr_t)p) % XMALLOC_MEM_BLOCK_ALIGN == STD_MALLOC_MEM_BLOCK_ALIGN, p);
+				void* oversize_p = (uint8_t*)p - STD_MALLOC_MEM_BLOCK_ALIGN;
+				tilogspace::TiLogMemoryManager::operator delete(oversize_p, tilog_align_val_t(XMALLOC_MEM_BLOCK_ALIGN));
+			}
+			static void* xrealloc_from_std(void* p, size_t sz)
+			{
+				void* oversize_p = (uint8_t*)p - STD_MALLOC_MEM_BLOCK_ALIGN;
+				size_t sz_old = *(size_t*)oversize_p;
+				if (sz_old < sz)
+				{
+					void* p2 = xmalloc_from_std(sz);
+					memcpy(p2, p, sz_old);
+					tilogspace::TiLogMemoryManager::operator delete(oversize_p, tilog_align_val_t(alignof(obj_t)));
+					return p2;
+				} else
+				{
+					return p;
+				}
+			}
+			static bool is_alloc_from_std(void* p) { return ((uintptr_t)p) % XMALLOC_MEM_BLOCK_ALIGN == STD_MALLOC_MEM_BLOCK_ALIGN; }
+		};
+
+		struct linear_mem_pool_list;
+		struct linear_mem_pool
+		{
+			~linear_mem_pool()
+			{
+				DEBUG_RUN(memset(pMem, MEM_POOL_FREED_CHAR, sizeof(pMem)));
+			}
+			linear_mem_pool(linear_mem_pool_list* pool_list0, linear_mem_pool* prev0) : pool_list(pool_list0)
+			{
+				DEBUG_RUN(memset(pMem, MEM_POOL_NEW_CHAR, sizeof(pMem)));
+				this->prev = prev0;
+				if (prev == nullptr) { prev = this; }
+
+				this->next = prev->next;
+				prev->next = this;
+				this->next->prev = this;
+			}
+			constexpr size_t capacity() const { return LINEAR_MEM_POOL_CAPACITY; }
+
+			void* xmalloc(size_t size)
+			{
+
+				DEBUG_ASSERT(size != 0);	// not support 0
+				size = utils::size_round_up(size);
+				if (pEnd + size <= pMemEnd)
+				{
+					uint8_t* p0 = pEnd;
+					pEnd += size;
+					pLastAlloc = p0;
+					return p0;
+				} else
+				{
+					return nullptr;
+				}
+			}
+
+			void* xrealloc(void* p, size_t size)
+			{
+				if (size > MEM_POOL_XMALLOC_MAX_SIZE) { return nullptr; }
+				size = utils::size_round_up(size);
+				DEBUG_ASSERT(p == pLastAlloc);
+				if ((uint8_t*)p + size <= pMemEnd)
+				{
+					pEnd = (uint8_t*)p + size;
+					return p;
+				} else
+				{
+					return nullptr;
+				}
+			}
+
+			static linear_mem_pool* get_linear_mem_pool(void* p)
+			{
+				constexpr auto off = offsetof(linear_mem_pool, pMem);
+				static_assert(off % XMALLOC_MEM_BLOCK_ALIGN == 0, "pMem must alignas XMALLOC_MEM_BLOCK_ALIGN");
+				return (linear_mem_pool*)(((uintptr_t)p) / LINEAR_MEM_POOL_ALIGN * LINEAR_MEM_POOL_ALIGN);
+			}
+			bool is_in_linear_mem_pool(void* p) { return pMem <= p && p < pMemEnd; }
+
+			alignas(XMALLOC_MEM_BLOCK_ALIGN) uint8_t pMem[LINEAR_MEM_POOL_CAPACITY];
+			uint8_t* const pMemEnd = &pMem[LINEAR_MEM_POOL_CAPACITY];
+			uint8_t* pEnd = pMem;
+			linear_mem_pool_list* const pool_list = nullptr;
+			const uint64_t magic_number = 0x1234;
+
+			uint8_t* pLastAlloc = nullptr;
+			linear_mem_pool* prev = nullptr;
+			linear_mem_pool* next = nullptr;
+		};
+
+		enum
+		{
+			LINEAR_MEM_POOL_SIZEOF = sizeof(linear_mem_pool)
+		};
+		static_assert(LINEAR_MEM_POOL_SIZEOF >= 0.95 * LINEAR_MEM_POOL_ALIGN, "fatal");
+		using linear_mem_pool_blocks_t =
+			TiLogAlignedBlockPool<TiLogAlignedBlockPoolFeat<LINEAR_MEM_POOL_SIZEOF, LINEAR_MEM_POOL_ALIGN, OptimisticMutex>>;
+
+		struct linear_mem_pool_list
+		{
+			linear_mem_pool_list() {}
+			~linear_mem_pool_list()
+			{
+				auto curr = head;
+				do
+				{
+					auto next = curr->next;
+					delete_linear_mem_pool(curr);
+					curr = next;
+				} while (curr != head);
+			}
+			void* xmalloc(size_t sz)
+			{
+				if (sz > MEM_POOL_XMALLOC_MAX_SIZE) { return utils::xmalloc_from_std(sz); }
+				void* p;
+				std::lock_guard<OptimisticMutex> lgd(mtx);
+				while (true)
+				{
+					p = tail->xmalloc(sz);
+					if (p != nullptr) { break; }
+					linear_mem_pool* tailnew = new_linear_mem_pool();
+					tail = tailnew;
+				}
+				return p;
+			}
+			void* xreallocal(void* p, size_t sz)
+			{
+				if (!utils::is_alloc_from_std(p))
+				{
+					std::lock_guard<OptimisticMutex> lgd(mtx);
+					void* ptr = tail->xrealloc(p, sz);
+					if (ptr == nullptr)
+					{
+						void* pn = utils::xmalloc_from_std(sz);
+						size_t copy_size = tail->pEnd - (uint8_t*)p;
+						DEBUG_ASSERT(copy_size < sz);
+						memcpy(pn, p, copy_size);
+						return pn;
+					} else
+					{
+						return p;
+					}
+				} else
+				{
+					return utils::xrealloc_from_std(p, sz);
+				}
+			}
+
+			void xfree(void* p)
+			{
+				if (utils::is_alloc_from_std(p))
+				{
+					utils::xfree_to_std(p);
+					return;
+				}
+				std::lock_guard<OptimisticMutex> lgd(mtx);
+				linear_mem_pool *this_pool = linear_mem_pool::get_linear_mem_pool(p), *pool = head, *next = nullptr;
+				for (; pool != this_pool; pool = next)
+				{
+					next = pool->next;
+					delete_linear_mem_pool(pool);
+				}
+				head = this_pool;
+				head->prev = tail;
+				tail->next = head;
+			}
+
+			static linear_mem_pool_list* get_linear_mem_pool_list(void* p)
+			{
+				linear_mem_pool* pool = linear_mem_pool::get_linear_mem_pool(p);
+				return pool->pool_list;
+			}
+
+			linear_mem_pool* new_linear_mem_pool() { return new_linear_mem_pool(tail); }
+			linear_mem_pool* new_linear_mem_pool(linear_mem_pool* prev_pool)
+			{
+				return new (linear_mem_pool_blocks.acquire_nolock()) linear_mem_pool(this, prev_pool);
+			}
+			void delete_linear_mem_pool(linear_mem_pool* p)
+			{
+				p->~linear_mem_pool();
+				linear_mem_pool_blocks.release_nolock(p);
+			}
+
+			linear_mem_pool_blocks_t linear_mem_pool_blocks;
+			linear_mem_pool* head{ new_linear_mem_pool(nullptr) };
+			linear_mem_pool* tail{ head };
+			size_t pool_count{ 1 };
+			OptimisticMutex mtx;
+			const uint64_t magic_number = 0xab34;
+		};
+
+		struct tilogstream_mempool
+		{
+			static linear_mem_pool_list* acquire_localthread_mempool(sub_sys_t sub_sys_id)
+			{
+				static thread_local linear_mem_pool_list* lpools[TILOG_STATIC_SUB_SYS_SIZE];
+				if (lpools[sub_sys_id] == nullptr) { lpools[sub_sys_id] = new linear_mem_pool_list(); }
+				return lpools[sub_sys_id];
+			}
+			static void release_localthread_mempool(linear_mem_pool_list* plist) { delete plist; }
+			static void* xmalloc(linear_mem_pool_list* plist, size_t sz) { return plist->xmalloc(sz); }
+			static void* xreallocal(linear_mem_pool_list* plist, void* p, size_t sz) { return plist->xreallocal(p, sz); }
+
+			// free all pointers xmalloced earlier than ptr
+			static void xfree(void* ptr)
+			{
+				linear_mem_pool_list* pool_list = linear_mem_pool_list::get_linear_mem_pool_list(ptr);
+				pool_list->xfree(ptr);
+			}
+
+			// return a random iterator xmalloc from pool
+			template <typename it_t>
+			static it_t xfree_from_std(it_t bg, it_t ed)	//[bg,ed) must in same linear_mem_pool_list
+			{
+				DEBUG_DECLARE(size_t total_cnt = ed - bg);
+				if (bg == ed) { return ed; }
+				auto it = std::partition(bg, ed, [](void* p) { return utils::is_alloc_from_std(p); });
+				DEBUG_DECLARE(size_t freed_cnt = it - bg);
+				size_t remain_cnt = ed - it;
+				std::for_each(bg, it, [](void* p) { utils::xfree_to_std(p); });
+				return remain_cnt == 0 ? ed : it;
+			}
+		};
+	}	 // namespace mempoolspace
+}	 // namespace tilogspace
 
 
 namespace tilogspace
