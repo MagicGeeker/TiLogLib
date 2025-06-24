@@ -271,11 +271,13 @@ namespace tilogspace
 	using sub_sys_t = uint8_t;
 	enum ETiLogSubSysID : sub_sys_t
 	{
-		TILOG_SUB_SYSTEM_START = 0,
+		// reserved begin
+		TILOG_SUB_SYSTEM_INTERNAL = 0,  //reserved for internal logs in tilog
 		//...// user defined subsys id begin
-		TILOG_SUB_SYSTEM_GLOBAL_FILE = 0,
-		TILOG_SUB_SYSTEM_GLOBAL_TERMINAL = 1,
-		TILOG_SUB_SYSTEM_GLOBAL_FILE_TERMINAL = 2,
+		TILOG_SUB_SYSTEM_START = 1,
+		TILOG_SUB_SYSTEM_GLOBAL_FILE = 1,
+		TILOG_SUB_SYSTEM_GLOBAL_TERMINAL = 2,
+		TILOG_SUB_SYSTEM_GLOBAL_FILE_TERMINAL = 3,
 		//...// user defined subsys id end
 		TILOG_SUB_SYSTEMS
 	};
@@ -305,6 +307,7 @@ namespace tilogspace
 
 
 	constexpr static TiLogSubsysCfg TILOG_STATIC_SUB_SYS_CFGS[] = {
+		{ TILOG_SUB_SYSTEM_INTERNAL, "tilog", "a:/tilog/", PRINTER_TILOG_FILE, VERBOSE, false },
 		{ TILOG_SUB_SYSTEM_GLOBAL_FILE, "global_file", "a:/global/", PRINTER_TILOG_FILE, VERBOSE, false },
 		{ TILOG_SUB_SYSTEM_GLOBAL_TERMINAL, "global_terminal", "a:/global_t/", PRINTER_TILOG_TERMINAL, INFO, true },
 		{ TILOG_SUB_SYSTEM_GLOBAL_FILE_TERMINAL, "global_ft", "a:/global_ft/", PRINTER_TILOG_FILE | PRINTER_TILOG_TERMINAL, INFO, false }
@@ -2378,31 +2381,31 @@ namespace tilogspace
 
 			inline size_type betterCap(size_type cap) { return DEFAULT_CAPACITY > cap ? DEFAULT_CAPACITY : cap; }
 
-			inline void malloc(const size_type size, const size_type cap) { ((this_type)this)->do_malloc(size, cap); }
-			inline void do_malloc(const size_type size, const size_type cap)
+			inline void malloc(const size_type size, const size_type cap)
 			{
 				DEBUG_ASSERT(size <= cap);
 				size_type mem_size = cap + (size_type)sizeof('\0') + size_head();	 // request extra 1 byte for '\0'
-				Core* p = (Core*)TiLogMemoryManager::timalloc(mem_size);
+				Core* p = (Core*)(((this_type)this)->do_malloc(mem_size));
 				DEBUG_ASSERT(p != nullptr);
 				pCore = p;
 				this->pCore->size = size;
 				this->pCore->capacity = cap;	// capacity without '\0'
 				check();
 			}
+			inline void* do_malloc(const size_type mem_size) { return TiLogMemoryManager::timalloc(mem_size); }
 
-			inline void realloc(const size_type new_cap) { ((this_type)this)->do_realloc(new_cap); }
-			inline void do_realloc(const size_type new_cap)
+			inline void realloc(const size_type new_cap)
 			{
 				check();
 				size_type cap = this->capacity();
 				size_type mem_size = new_cap + (size_type)sizeof('\0') + size_head();	 // request extra 1 byte for '\0'
-				Core* p = (Core*)TiLogMemoryManager::tirealloc(this->pCore, mem_size);
-				DEBUG_ASSERT2(p != nullptr,cap,mem_size);
+				Core* p = (Core*)((this_type)this)->do_realloc(pCore,mem_size);
+				DEBUG_ASSERT2(p != nullptr, cap, mem_size);
 				pCore = p;
 				this->pCore->capacity = new_cap;	// capacity without '\0'
 				check();
 			}
+			inline void* do_realloc(void*pcore,const size_type mem_size) { return TiLogMemoryManager::tirealloc(pcore, mem_size); }
 			inline void free() { ((this_type)this)->do_free(); }
 			inline void do_free() { TiLogMemoryManager::tifree(this->pCore); }
 			inline char* pFront() { return buf(); }
@@ -2792,8 +2795,8 @@ namespace tilogspace
 			sub_sys_t subsys;
 
 			DEBUG_DECLARE(uint8_t tidlen)
-			DEBUG_CANARY_UINT64(flag3)
-			DEBUG_DECLARE(char datas[])	   //{tid}{userlog}
+				DEBUG_CANARY_UINT64(flag3)
+				DEBUG_DECLARE(char datas[])	   //{tid}{userlog}
 
 		public:
 			ELogLevelFlag level() const { return (ELogLevelFlag)source_location_str[0]; }
@@ -3077,6 +3080,8 @@ namespace tilogspace
 		// unique way to make a valid stream
 		inline TiLogStream(sub_sys_t subsys, const char* source_location_str, uint16_t source_location_size) : StringType(EPlaceHolder{})
 		{
+			//force store ptr in pCore, then used in do_malloc
+			pCore = (Core*)mempoolspace::tilogstream_mempool::acquire_localthread_mempool(subsys);
 			create(TILOG_SINGLE_LOG_RESERVE_LEN);
 			TiLogBean& bean = *ext();
 			bean.subsys = subsys;
@@ -3252,28 +3257,16 @@ namespace tilogspace
 		// force overwrite super destructor,do nothing
 		inline void do_destructor() {}
 
-		inline void do_malloc(const size_type size, const size_type cap)
+		inline void* do_malloc(const size_type mem_size)
 		{
-			DEBUG_ASSERT(size <= cap);
-			size_type mem_size = cap + (size_type)sizeof('\0') + size_head();	 // request extra 1 byte for '\0'
-			Core* p = (Core*)internal::TiLogStreamMemoryManager::timalloc(mem_size);
-			DEBUG_ASSERT(p != nullptr);
-			pCore = p;
-			this->pCore->size = size;
-			this->pCore->capacity = cap;	// capacity without '\0'
-			check();
+			auto* plist = (mempoolspace::linear_mem_pool_list*)pCore;
+			return mempoolspace::tilogstream_mempool::xmalloc(plist, mem_size);
 		}
 
-		inline void do_realloc(const size_type new_cap)
+		inline void* do_realloc(void* pcore, const size_type mem_size)
 		{
-			check();
-			size_type cap = this->capacity();
-			size_type mem_size = new_cap + (size_type)sizeof('\0') + size_head();	 // request extra 1 byte for '\0'
-			Core* p = (Core*)internal::TiLogStreamMemoryManager::tireallocal(this->pCore, mem_size);
-			DEBUG_ASSERT2(p != nullptr, cap, mem_size);
-			pCore = p;
-			this->pCore->capacity = new_cap;	// capacity without '\0'
-			check();
+			auto* plist = mempoolspace::tilogstream_mempool::acquire_localthread_mempool(pCore->ext.subsys);
+			return mempoolspace::tilogstream_mempool::xreallocal(plist, pcore, mem_size);
 		}
 		inline void do_free() { internal::TiLogStreamMemoryManager::tifree(this->pCore); }
 

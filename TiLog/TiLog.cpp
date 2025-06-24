@@ -162,7 +162,7 @@ namespace tilogspace
 		{
 			inline TiLogStreamInner(tilogspace::internal::TiLogStringView source)
 			{
-				new (&stream) TiLogStream(ETiLogSubSysID(-1), source.data(), (uint16_t)source.size());
+				new (&stream) TiLogStream(ETiLogSubSysID(TILOG_SUB_SYSTEM_INTERNAL), source.data(), (uint16_t)source.size());
 			}
 			~TiLogStreamInner();
 			inline TiLogStream* Stream() noexcept { return &stream; }
@@ -936,6 +936,14 @@ namespace tilogspace
 		using VecLogCachePtr = VecLogCache*;
 
 
+		enum core_seq_t : uint64_t
+		{
+			SEQ_INVALID = 0,
+			SEQ_BEIGN = 1,
+			SEQ_FREE = UINT64_MAX
+		};
+		inline core_seq_t& operator++(core_seq_t& s) { return (core_seq_t&)++(uint64_t&)s; }
+
 		class TiLogCore;
 		class TiLogDaemon;
 		struct ThreadStru : public TiLogObject
@@ -945,19 +953,18 @@ namespace tilogspace
 			ThreadLocalSpinMutex spinMtx;	 // protect cache
 
 			mempoolspace::local_mempool* lpool;
+			mempoolspace::linear_mem_pool_list* lmempoolist;
+			core_seq_t pollseq_when_thrd_dead = core_seq_t::SEQ_INVALID;
 			const String* tid;
 			std::mutex thrdExistMtx;
 			std::condition_variable thrdExistCV;
 
-			explicit ThreadStru(TiLogDaemon* daemon)
-				: pDaemon(daemon), qCache(), spinMtx(), lpool(get_local_mempool()), tid(GetThreadIDString()), thrdExistMtx(), thrdExistCV()
-			{
-				DEBUG_PRINTI("ThreadStru ator pDaemon %p this %p tid [%p %s]\n", pDaemon, this, tid, tid->c_str());
-				IncTidStrRefCnt(tid);
-			};
-
+			explicit ThreadStru(TiLogDaemon* daemon);
+			
 			~ThreadStru()
 			{
+				mempoolspace::tilogstream_mempool::release_localthread_mempool(lmempoolist);
+
 				uint32_t refcnt = DecTidStrRefCnt(tid);
 				if (refcnt == 0)
 				{
@@ -1226,13 +1233,6 @@ namespace tilogspace
 		struct TiLogMap_t;
 		struct TiLogEngines;
 
-		enum core_seq_t : uint64_t
-		{
-			SEQ_INVALID = 0,
-			SEQ_BEIGN = 1,
-			SEQ_FREE = UINT64_MAX
-		};
-		inline core_seq_t& operator++(core_seq_t& s) { return (core_seq_t&)++(uint64_t&)s; }
 
 		struct TiLogCoreMini
 		{
@@ -1260,7 +1260,7 @@ namespace tilogspace
 			};
 			bool IsBusy() override { return mNeedWoking; };
 
-			inline explicit TiLogCore(TiLogDaemon*d);
+			inline explicit TiLogCore(TiLogDaemon* d, uint32_t id);
 			inline ~TiLogCore() final;
 
 		private:
@@ -1287,6 +1287,7 @@ namespace tilogspace
 			TiLogPrinterManager* mTiLogPrinterManager;
 			TiLogMap_t* mTiLogMap;
 			atomic_uint64_t mPrintedLogs{ 0 };
+			const uint32_t mID;
 
 			std::thread mThread;
 
@@ -1302,6 +1303,7 @@ namespace tilogspace
 
 			struct GCStru
 			{
+				MergeVecVecLogcaches mTOGC;
 				VecLogCache mGCList;
 				TiLogStreamHelper::TiLogStreamMemoryManagerCache cache;
 			} mGC;
@@ -1325,6 +1327,8 @@ namespace tilogspace
 			inline void Sync();
 
 			inline void MarkThreadDying(ThreadStru* pStru);
+
+			inline const TiLogEngine* GetEngine() { return mTiLogEngine; }
 
 
 		private:
@@ -1376,7 +1380,7 @@ namespace tilogspace
 			struct
 			{
 				std::array<TiLogCore*, TILOG_DAEMON_PROCESSER_NUM> mCoreArr;
-				MultiSet<TiLogCoreMini> mCoreMap;
+				MultiSet<TiLogCoreMini> mCoreMap;  // earliest active cores->newest active cores->free cores // [210,0x0100],[209,0x0200],[SEQ_FREE,0x0300]
 				core_seq_t mPollSeq{ SEQ_BEIGN };		// max seq of log has collected and commit to core
 				core_seq_t mHandledSeq{ SEQ_BEIGN };	// max seq of log has handled in TiLogCore
 				atomic<uint64_t> mCoreWaitCount{};
@@ -1561,6 +1565,7 @@ namespace tilogspace
 
 			const String* mainThrdId = GetThreadIDString();
 			mempoolspace::mempool mpool;
+			mempoolspace::tilogstream_mempool mempool;
 			TiLogMap_t tilogmap;
 			TiLogConcurrentHashMap<const String*, uint32_t, ThreadIdStrRefCountFeat> threadIdStrRefCount;
 			union
@@ -1939,9 +1944,9 @@ namespace tilogspace
 	namespace internal
 	{
 #ifdef __________________________________________________TiLogCore__________________________________________________
-		TiLogCore::TiLogCore(TiLogDaemon* d)
+		TiLogCore::TiLogCore(TiLogDaemon* d, uint32_t id)
 			: TiLogCoreMini(SEQ_FREE, this), mTiLogDaemon(d), mTiLogEngine(d->mTiLogEngine),
-			  mTiLogPrinterManager(&mTiLogEngine->tiLogPrinterManager), mTiLogMap(&TiLogEngines::getRInstance().tilogmap)
+			  mTiLogPrinterManager(&mTiLogEngine->tiLogPrinterManager), mTiLogMap(&TiLogEngines::getRInstance().tilogmap), mID(id)
 		{
 			DEBUG_PRINTA("TiLogCore::TiLogCore %p\n", this);
 			for (size_t i = 0; i < mDeliver.mIoBeanSizes.capacity(); i++)
@@ -1981,6 +1986,7 @@ namespace tilogspace
 				mDoing = true;
 
 				{
+					mGC.mTOGC = mMerge.mMergeLogVecVec;
 					MergeSortForGlobalQueue();
 					// CountSortForGlobalQueue();
 					mDeliver.mDeliverCache.swap(mMerge.mMergeCaches);
@@ -1993,8 +1999,29 @@ namespace tilogspace
 					mDeliver.mDeliverCache.clear();
 				}
 				{
-					TiLogStreamHelper::DestroyTiLogCompactString(mGC.mGCList, mGC.cache);
+					//TiLogStreamHelper::DestroyTiLogCompactString(mGC.mGCList, mGC.cache);
 					mGC.mGCList.clear();
+
+					for (auto& vit : mGC.mTOGC)
+					{
+						if (vit.empty()) { continue; }
+						auto it_from_pool = mempoolspace::tilogstream_mempool::xfree_from_std(vit.begin(), vit.end());
+						if (it_from_pool != vit.end())
+						{
+							TiLogCore* min_seq_core;
+							synchronized(mTiLogDaemon->mScheduler)
+							{
+								auto it = mTiLogDaemon->mScheduler.mCoreMap.begin();
+								min_seq_core = it->core;
+							}
+							//for free ptr in order, only min_seq_core is permitted
+							if (this == min_seq_core) {
+
+								mempoolspace::tilogstream_mempool::xfree(*it_from_pool);
+							}
+						}
+						vit.clear();
+					}
 				}
 				TiLogDaemon::InitMergeLogVecVec(mMerge.mMergeLogVecVec);
 				MayPushLog();
@@ -2066,6 +2093,7 @@ namespace tilogspace
 				notify_all_at_thread_exit(pStru->thrdExistCV, std::move(lk));
 				return pStru;
 			};
+			// create a ThreadStru for every subsys and thread
 			if (strus[this->mTiLogEngine->subsys] == nullptr) { strus[this->mTiLogEngine->subsys] = f(); }
 			return strus[this->mTiLogEngine->subsys];
 		}
@@ -2091,7 +2119,7 @@ namespace tilogspace
 
 			for (size_t i = 0; i < TILOG_DAEMON_PROCESSER_NUM; ++i)
 			{
-				auto core = new TiLogCore(this);
+				auto core = new TiLogCore(this, i);
 				mScheduler.mCoreArr[i] = core;
 				TiLogCoreMini cmini{ SEQ_FREE, core };
 				mScheduler.mCoreMap.emplace(cmini);
@@ -2657,7 +2685,7 @@ namespace tilogspace
 						DEBUG_ASSERT(!currCore->mNeedWoking);
 						ChangeCoreSeq(currCore, seq);
 						DEBUG_ASSERT(currCore->mMerge.mMergeLogVecVec.mIndex == 0);
-						currCore->mMerge.mMergeLogVecVec.swap(mMerge.mMergeLogVecVec);
+						currCore->mMerge.mMergeLogVecVec.swap(mMerge.mMergeLogVecVec);	  // exchange logs to core's mMergeLogVecVec
 						currCore->mNeedWoking = true;
 					}
 					synchronized(mScheduler) { ++mScheduler.mPollSeq; }
@@ -2691,14 +2719,36 @@ namespace tilogspace
 					(llu)mThreadStruQueue.dyingQueue.size(), (llu)mThreadStruQueue.waitMergeQueue.size(),
 					(llu)mThreadStruQueue.toDelQueue.size());
 
-				for (auto it = mThreadStruQueue.toDelQueue.begin(); it != mThreadStruQueue.toDelQueue.end();)
+				if (!mThreadStruQueue.toDelQueue.empty())
 				{
-					ThreadStru& threadStru = **it;
-					DEBUG_PRINTA("thrd %s exit delete thread stru\n", threadStru.tid->c_str());
-					mMerge.mRawDatas.remove(threadStru.tid);
-					delete (&threadStru);
-					it = mThreadStruQueue.toDelQueue.erase(it);
+					mPoll.SetPollPeriodMs(TILOG_POLL_THREAD_SLEEP_MS_IF_EXIST_THREAD_DYING);
+					core_seq_t pollseq, handledseq;
+					synchronized(mScheduler)
+					{
+						pollseq = mScheduler.mPollSeq;
+						handledseq = mScheduler.mHandledSeq;
+					}
+					for (auto it = mThreadStruQueue.toDelQueue.begin(); it != mThreadStruQueue.toDelQueue.end();)
+					{
+						ThreadStru& threadStru = **it;
+						if (threadStru.pollseq_when_thrd_dead == core_seq_t::SEQ_INVALID)
+						{
+							threadStru.pollseq_when_thrd_dead = pollseq;
+						} else if (handledseq <= threadStru.pollseq_when_thrd_dead)
+						{
+							DEBUG_PRINTA("thrd %s exit but some logs remians in core Entry\n", threadStru.tid->c_str());
+						} else
+						{
+							DEBUG_PRINTA("thrd %s exit delete thread stru\n", threadStru.tid->c_str());
+							mMerge.mRawDatas.remove(threadStru.tid);
+							delete (&threadStru);
+							it = mThreadStruQueue.toDelQueue.erase(it);
+							continue;
+						}
+						++it;
+					}
 				}
+
 				for (auto it = mThreadStruQueue.waitMergeQueue.begin(); it != mThreadStruQueue.waitMergeQueue.end();)
 				{
 					ThreadStru& threadStru = *(*it);
@@ -2883,7 +2933,12 @@ namespace tilogspace
 						AppendToMergeCacheByMetaData(mDeliver, *pBean);
 						to_free.emplace_back(pBean);
 					}
-					TiLogStreamHelper::DestroyTiLogCompactString(to_free, cache);
+					if (!to_free.empty())
+					{
+						auto it_from_pool = mempoolspace::tilogstream_mempool::xfree_from_std(to_free.begin(), to_free.end());
+						if (it_from_pool != to_free.end()) { mempoolspace::tilogstream_mempool::xfree(*it_from_pool); }
+					}
+					//TiLogStreamHelper::DestroyTiLogCompactString(to_free, cache);
 					to_free.clear();
 					mCaches.clear();
 
@@ -3026,6 +3081,15 @@ namespace tilogspace
 			if (cnt == 0) { TiLogEngines::getRInstance().threadIdStrRefCount.remove(s); }
 			return cnt;
 		}
+
+		ThreadStru::ThreadStru(TiLogDaemon* daemon)
+			: pDaemon(daemon), qCache(), spinMtx(), lpool(get_local_mempool()),
+			  lmempoolist(mempoolspace::tilogstream_mempool::acquire_localthread_mempool(daemon->GetEngine()->subsys)),
+			  tid(GetThreadIDString()), thrdExistMtx(), thrdExistCV()
+		{
+			DEBUG_PRINTI("ThreadStru ator pDaemon %p this %p tid [%p %s]\n", pDaemon, this, tid, tid->c_str());
+			IncTidStrRefCnt(tid);
+		};
 
 		mempoolspace::local_mempool* ThreadStru::get_local_mempool() { return TiLogEngines::getRInstance().mpool.get_local_mempool(); }
 		void ThreadStru::free_local_mempool(mempoolspace::local_mempool* lpool)

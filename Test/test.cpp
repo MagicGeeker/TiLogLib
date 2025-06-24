@@ -30,7 +30,7 @@ using namespace tilogspace;
 #define file_single_thread_operator_test_____________________
 #define terminal_single_thread_long_string_log_test_____________________
 #define file_static_log_test_____________________
-#define terminal_multi_way_log_test_____________________
+ #define terminal_multi_way_log_test_____________________
 
 
 //__________________________________________________long time test__________________________________________________//
@@ -55,7 +55,7 @@ using namespace tilogspace;
 //#define static_log_level_multi_thread_benchmark_test_____________________
 //#define dynamic_log_level_multi_thread_benchmark_test_____________________
 #ifdef TILOG_CUSTOMIZATION_H
-#define user_subsystem_test_____________________
+ #define user_subsystem_test_____________________
 #endif
 
 struct Student
@@ -106,10 +106,10 @@ int main()
 
 #ifdef do_nothing_test_____________________
 
-TEST_CASE("do_nothing_test_____________________")
-{
+	TEST_CASE("do_nothing_test_____________________")
+	{
 
-}
+	}
 
 #endif
 
@@ -819,13 +819,13 @@ TEST_CASE("user_subsystem_test_____________________")
 			switch (j % 3)
 			{
 			case 0:
-				TILOG(tilogspace::TILOG_SUB_SYSTEM_0, tilogspace::ELevel::ERROR) << "mod0 index= " << index << " j= " << j;
+				TILOG(tilogspace::TILOG_SUB_MAIN, tilogspace::ELevel::ERROR) << "mod0 index= " << index << " j= " << j;
 				break;
 			case 1:
-				TILOG(tilogspace::TILOG_SUB_SYSTEM_1, tilogspace::ELevel::ERROR) << "mod1 index= " << index << " j= " << j;
+				TILOG(tilogspace::TILOG_SUB_STOR, tilogspace::ELevel::ERROR) << "mod1 index= " << index << " j= " << j;
 				break;
 			case 2:
-				TILOG(tilogspace::TILOG_SUB_SYSTEM_2, tilogspace::ELevel::ERROR) << "mod2 index= " << index << " j= " << j;
+				TILOG(tilogspace::TILOG_SUB_NETWORK, tilogspace::ELevel::ERROR) << "mod2 index= " << index << " j= " << j;
 				break;
 			}
 		}
