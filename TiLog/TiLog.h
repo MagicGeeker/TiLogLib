@@ -164,8 +164,8 @@ namespace tilogspace
 	using PriorQueue = std::priority_queue<T,Seq,Comp>;
 	template <typename T,typename Container=Deque<T>>
 	using Stack = std::stack<T,Container>;
-	template <typename K>
-	using Set = std::set<K, std::less<K>, Allocator<K>>;
+	template <typename K, typename Comp = std::less<K>>
+	using Set = std::set<K, Comp, Allocator<K>>;
 	template <typename K, typename Comp = std::less<K>>
 	using MultiSet = std::multiset<K, Comp, Allocator<K>>;
 	template <typename K, typename V, typename Comp = std::less<K>>
@@ -461,18 +461,8 @@ namespace tilogspace
 	{
 	};
 
-	template <typename T, size_t N = 0>
-	struct TiLogAlignedMemMgr : TiLogMemoryManager
-	{
-		constexpr static size_t ALIGN = alignof(T);
-		using TiLogMemoryManager::operator new;
-		using TiLogMemoryManager::operator delete;
-		inline static void* operator new(size_t sz) { return TiLogMemoryManager::operator new(sz, (tilog_align_val_t)alignof(T)); }
-		inline static void operator delete(void* p) { TiLogMemoryManager::operator delete(p, (tilog_align_val_t)alignof(T)); }
-	};
-
 	template <size_t N>
-	struct TiLogAlignedMemMgr<void, N> : TiLogMemoryManager
+	struct TiLogAlignedMemMgr : TiLogMemoryManager
 	{
 		constexpr static size_t ALIGN = N;
 		using TiLogMemoryManager::operator new;
@@ -481,11 +471,12 @@ namespace tilogspace
 		inline static void operator delete(void* p) { TiLogMemoryManager::operator delete(p, (tilog_align_val_t)ALIGN); }
 	};
 
+#define TILOG_ALIGNED_OPERATORS(N)                                                                                                         \
+	constexpr static size_t ALIGN = N;                                                                                                     \
+	inline static void* operator new(size_t sz) { return TiLogMemoryManager::operator new(sz, (tilog_align_val_t)ALIGN); }                 \
+	inline static void operator delete(void* p) { TiLogMemoryManager::operator delete(p, (tilog_align_val_t)ALIGN); }
+
 	class TiLogObject : public TiLogMemoryManager
-	{
-	};
-	template <typename T>
-	class TiLogAlignedObject : public TiLogAlignedMemMgr<T>
 	{
 	};
 }  // namespace tilogspace
@@ -991,7 +982,7 @@ namespace tilogspace
 	constexpr static size_t ALIGN_OF_LOCAL_MEMPOOL = ALIGN_OF_MINI_OBJPOOL;
 
 	// local thread mempool,a set of objpool
-	struct local_mempool : local_mempool_data_t, local_mempool_meta_t, TiLogAlignedMemMgr<void, ALIGN_OF_LOCAL_MEMPOOL>
+	struct local_mempool : local_mempool_data_t, local_mempool_meta_t, TiLogAlignedMemMgr<ALIGN_OF_LOCAL_MEMPOOL>
 	{
 		local_mempool(pool_id_t id_)
 		{
@@ -1528,8 +1519,140 @@ namespace tilogspace
 		Vector<ObjectPtr> pool{ SIZE };
 		TILOG_MUTEXABLE_CLASS_MACRO(typename FeatType::mutex_type, mtx);
 	};
+}  // namespace tilogspace
+
+namespace tilogspace
+{
+	namespace mempoolspace
+	{
+		template <size_t SIZE_OF, size_t ALIGN, typename MUTEX = std::mutex>
+		struct TiLogAlignedBlockPoolFeat : protected TiLogObject
+		{
+			using mutex_type = MUTEX;
+			constexpr static uint32_t SIZEOF = SIZE_OF;
+			constexpr static uint32_t ALIGNMENT = ALIGN;
+		};
+
+		template <typename FeatType>
+		class TiLogAlignedBlockPool : public TiLogObject
+		{
+			constexpr static uint32_t BLOCK_ALLOC_SIZE = 128;
+
+			struct blocks;
+			union blk
+			{
+				struct blk_base
+				{
+					char b[FeatType::SIZEOF];
+					blk* next;
+					blocks* bs;
+				} base;
+				constexpr static size_t aligned_size =
+					(sizeof(blk_base) + FeatType::ALIGNMENT - 1) / FeatType::ALIGNMENT * FeatType::ALIGNMENT;
+				char _b[aligned_size];
+			};
+
+			struct blocks
+			{
+				TILOG_ALIGNED_OPERATORS(FeatType::ALIGNMENT) blk blks[BLOCK_ALLOC_SIZE];
+				uint32_t remain_bs = BLOCK_ALLOC_SIZE;
+
+				blk* head;
+				blocks()
+				{
+					head = &blks[0];
+					for (uint32_t i = 0; i < BLOCK_ALLOC_SIZE; i++)
+					{
+						DEBUG_ASSERT(((uintptr_t)&blks[i]) % FeatType::ALIGNMENT == 0);
+						blks[i].base.next = &blks[i + 1];
+						blks[i].base.bs = this;
+					}
+					blks[BLOCK_ALLOC_SIZE - 1].base.next = nullptr;
+				}
+				void put(blk* b)
+				{
+					DEBUG_ASSERT(((uintptr_t)b) % FeatType::ALIGNMENT == 0);
+					b->base.next = head;
+					head = b;
+					remain_bs++;
+				}
+				blk* get()
+				{
+					blk* p = head;
+					DEBUG_ASSERT(((uintptr_t)p) % FeatType::ALIGNMENT == 0);
+					head = head->base.next;
+					remain_bs--;
+					return p;
+				}
+				bool empty() { return head == nullptr; }
+				bool full() { return remain_bs == BLOCK_ALLOC_SIZE; }
+			};
+			struct CMP
+			{
+				bool operator()(blocks* lhs, blocks* rhs) const { return lhs->remain_bs < rhs->remain_bs; }
+			};
+
+		public:
+			~TiLogAlignedBlockPool() { DEBUG_ASSERT1(pool.empty(), "mem leak"); };
+
+			explicit TiLogAlignedBlockPool() {}
+
+			void release(void* p)
+			{
+				std::lock_guard<typename FeatType::mutex_type> lgd(mtx);
+				release_nolock(p);
+			}
+			void release_nolock(void* p)
+			{
+
+				blk* ptr = (blk*)p;
+				blocks* bs = ptr->base.bs;
+				bs->put(ptr);
+				if (bs->full())
+				{
+					pool.erase(bs);
+					delete bs;
+				} else
+				{
+					pool.erase(bs);
+					pool.emplace(bs);
+				}
+			}
+
+			void* acquire()
+			{
+				std::lock_guard<typename FeatType::mutex_type> lgd(mtx);
+				return acquire_nolock();
+			}
+			void* acquire_nolock()
+			{
+				if (pool.empty())
+				{
+					blocks* bs = new blocks();
+					pool.emplace(bs);
+					return bs->get();
+				} else
+				{
+					auto it = pool.begin();
+					blocks* bs = *it;
+					void* p = bs->get();
+					pool.erase(it);
+					if (!bs->empty()) { pool.emplace(bs); }
+					return p;
+				}
+			}
+
+		protected:
+			Set<blocks*, CMP> pool;	   // smaller size blocks prior
+			TILOG_MUTEXABLE_CLASS_MACRO(typename FeatType::mutex_type, mtx);
+		};
+	}	 // namespace mempoolspace
+}	 // namespace tilogspace
 
 
+
+namespace tilogspace
+{
 	constexpr char LOG_PREFIX[] = "???AFEWIDV????";	   // begin ??? ,and end ???? is invalid
 	constexpr const char* const LOG_LEVELS[] = { "????????", "????????", "????????", "ALWAYS  ", "FATAL   ", "ERROR   ", "WARNING ",
 												 "INFO    ", "DEBUG   ", "VERBOSE ", "????????", "????????", "????????", "????????" };
