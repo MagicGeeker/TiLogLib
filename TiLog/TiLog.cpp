@@ -87,6 +87,10 @@ using namespace tilogspace::internal;
 namespace tilogspace
 {
 	TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_OUTSIDE(ti_iostream_mtx_t,instance)
+	namespace mempoolspace
+	{
+		TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_OUTSIDE(tilogstream_pool_controler, instance)
+	}	 // namespace mempoolspace
 	namespace internal
 	{
 		namespace tilogtimespace
@@ -954,7 +958,7 @@ namespace tilogspace
 
 			mempoolspace::local_mempool* lpool;
 			mempoolspace::linear_mem_pool_list* lmempoolist;
-			core_seq_t pollseq_when_thrd_dead = core_seq_t::SEQ_INVALID;
+			core_seq_t pollseq_when_thrd_dead = core_seq_t::SEQ_INVALID;			
 			const String* tid;
 			std::mutex thrdExistMtx;
 			std::condition_variable thrdExistCV;
@@ -1206,6 +1210,8 @@ namespace tilogspace
 
 			std::atomic<bool> mDoing{ false };	  // not accurate,no need own mMtx
 			bool mNeedWoking{};					  // protected by mMtx
+
+			SteadyTimePoint mLastTrim{SteadyTimePoint::min()};
 		};
 
 		struct DeliverStru
@@ -1565,7 +1571,6 @@ namespace tilogspace
 
 			const String* mainThrdId = GetThreadIDString();
 			mempoolspace::mempool mpool;
-			mempoolspace::tilogstream_mempool mempool;
 			TiLogMap_t tilogmap;
 			TiLogConcurrentHashMap<const String*, uint32_t, ThreadIdStrRefCountFeat> threadIdStrRefCount;
 			union
@@ -2699,6 +2704,11 @@ namespace tilogspace
 				}
 
 				nowTime = SteadyClock::now();
+				if (nowTime > mPoll.mLastPolltime + std::chrono::milliseconds(TILOG_STREAM_MEMPOOL_TRIM_MS))
+				{
+					mPoll.mLastPolltime = nowTime;
+					mempoolspace::tilogstream_mempool::trim();
+				}
 				// try lock when first run or deliver complete recently
 				// force lock if in TiLogCore exit or exist dying threads or pool internal > TILOG_POLL_THREAD_MAX_SLEEP_MS
 				unique_lock<decltype(mThreadStruQueue)> lk_queue(mThreadStruQueue, std::defer_lock);
@@ -3083,7 +3093,8 @@ namespace tilogspace
 		}
 
 		ThreadStru::ThreadStru(TiLogDaemon* daemon)
-			: pDaemon(daemon), qCache(), spinMtx(), lpool(get_local_mempool()),
+			//: pDaemon(daemon), qCache(), spinMtx(), lpool(get_local_mempool()),
+			: pDaemon(daemon), qCache(), spinMtx(), lpool(nullptr),
 			  lmempoolist(mempoolspace::tilogstream_mempool::acquire_localthread_mempool(daemon->GetEngine()->subsys)),
 			  tid(GetThreadIDString()), thrdExistMtx(), thrdExistCV()
 		{
@@ -3102,8 +3113,12 @@ namespace tilogspace
 	TiLogSubSystem& TiLog::GetSubSystemRef(sub_sys_t subsys) { return TiLogEngines::getRInstance().engines[subsys].subsystem; }
 	TiLogEngines::TiLogEngines()
 	{
+		mempoolspace::tilogstream_pool_controler::init();
 		ti_iostream_mtx_t::init();
-		atexit([] { ti_iostream_mtx_t::uninit(); });
+		atexit([] {
+			ti_iostream_mtx_t::uninit();
+			mempoolspace::tilogstream_pool_controler::uninit();
+		});
 		IncTidStrRefCnt(this->mainThrdId);	  // main thread thread_local varibles(tid,mempoool...) keep available
 		InitClocks();
 		TiLogInnerLogMgr::init();
