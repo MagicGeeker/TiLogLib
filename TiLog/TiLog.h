@@ -2925,6 +2925,7 @@ namespace tilogspace
 		public:
 			DEBUG_CANARY_UINT32(flag1)
 			TiLogTime tiLogTime;
+			const String* tid;
 			const char* source_location_str;  // like "ERROR a.cpp:102 foo()"
 			uint16_t source_location_size;
 			sub_sys_t subsys;
@@ -3207,8 +3208,8 @@ namespace tilogspace
 			bean.source_location_str = source_location_str;
 			bean.source_location_size = source_location_size;
 			const String* tidstr = tilogspace::internal::GetThreadIDString();
-			DEBUG_RUN(bean.tidlen = (uint8_t)(tidstr->size() - 1));
-			this->appends(*tidstr);
+			DEBUG_ASSERT(tidstr);
+			bean.tid = tidstr;
 		}
 
 		inline ~TiLogStream()

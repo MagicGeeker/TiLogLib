@@ -159,6 +159,14 @@ namespace tilogspace
 		constexpr static size_t TILOG_INNO_LOG_QUEUE_FULL_SIZE = (size_t)(1024);
 		constexpr static size_t TILOG_INNO_LOG_QUEUE_NEARLY_FULL_SIZE = (size_t)(TILOG_INNO_LOG_QUEUE_FULL_SIZE * 0.75);
 
+		enum core_seq_t : uint64_t
+		{
+			SEQ_INVALID = 0,
+			SEQ_BEIGN = 1,
+			SEQ_FREE = UINT64_MAX
+		};
+		inline core_seq_t& operator++(core_seq_t& s) { return (core_seq_t&)++(uint64_t&)s; }
+
 		struct TiLogStreamInner
 		{
 			inline TiLogStreamInner(tilogspace::internal::TiLogStringView source)
@@ -180,6 +188,8 @@ namespace tilogspace
 			TiLogInnerLogMgr();
 			~TiLogInnerLogMgr();
 			void PushLog(TiLogCompactString* str);
+			core_seq_t GetInnerLogPoolSeq();
+			void SetPollPeriodMs(uint32_t ms);
 			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_FUNC_IMPL(TiLogInnerLogMgr, instance)
 			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_MEMBER_DECLARE(TiLogInnerLogMgr, instance)
 		private:
@@ -939,14 +949,7 @@ namespace tilogspace
 		};
 		using VecLogCachePtr = VecLogCache*;
 
-
-		enum core_seq_t : uint64_t
-		{
-			SEQ_INVALID = 0,
-			SEQ_BEIGN = 1,
-			SEQ_FREE = UINT64_MAX
-		};
-		inline core_seq_t& operator++(core_seq_t& s) { return (core_seq_t&)++(uint64_t&)s; }
+		
 
 		class TiLogCore;
 		class TiLogDaemon;
@@ -958,6 +961,7 @@ namespace tilogspace
 
 			mempoolspace::linear_mem_pool_list* lmempoolist;
 			core_seq_t pollseq_when_thrd_dead = core_seq_t::SEQ_INVALID;			
+			core_seq_t inno_pollseq_when_thrd_dead = core_seq_t::SEQ_INVALID;			
 			const String* tid;
 			std::mutex thrdExistMtx;
 			std::condition_variable thrdExistCV;
@@ -2474,7 +2478,7 @@ namespace tilogspace
 			auto preSize = logs.size();
 			auto source_location_size = bean.ext.source_location_size;
 			auto beanSVSize = logsv.size();
-			size_t L2 = (source_location_size + beanSVSize);
+			size_t L2 = (source_location_size + bean.ext.tid->size() + beanSVSize);
 			size_t append_size = L2 + TILOG_RESERVE_LEN_L1;
 			size_t reserveSize = preSize + append_size;
 			logs.reserve(reserveSize);
@@ -2496,6 +2500,7 @@ namespace tilogspace
 			}
 			logs.writend(mDeliver.mlogprefix, sizeof(mDeliver.mlogprefix));
 			logs.writend(bean.ext.source_location_str,source_location_size);
+			logs.writend(bean.ext.tid->c_str(), bean.ext.tid->size());
 			logs.writend(logsv.data(), beanSVSize);			 //-----logsv.size()
 													   // clang-format off
 			// |----mlogprefix(32or24)----------|------------source_location----------------------------|--logsv(tid|usedata)-----|
@@ -2721,20 +2726,26 @@ namespace tilogspace
 
 				if (!mThreadStruQueue.toDelQueue.empty())
 				{
-					mPoll.SetPollPeriodMs(TILOG_POLL_THREAD_SLEEP_MS_IF_EXIST_THREAD_DYING);
-					core_seq_t pollseq, handledseq;
+					auto& inno_mgr = TiLogInnerLogMgr::getRInstance();
+					uint32_t ms = TILOG_POLL_THREAD_SLEEP_MS_IF_EXIST_THREAD_DYING;
+					mPoll.SetPollPeriodMs(ms);
+					inno_mgr.SetPollPeriodMs(ms);
+					core_seq_t pollseq, handledseq, inno_pollseq;
 					synchronized(mScheduler)
 					{
 						pollseq = mScheduler.mPollSeq;
 						handledseq = mScheduler.mHandledSeq;
 					}
+					inno_pollseq = inno_mgr.GetInnerLogPoolSeq();
 					for (auto it = mThreadStruQueue.toDelQueue.begin(); it != mThreadStruQueue.toDelQueue.end();)
 					{
 						ThreadStru& threadStru = **it;
 						if (threadStru.pollseq_when_thrd_dead == core_seq_t::SEQ_INVALID)
 						{
 							threadStru.pollseq_when_thrd_dead = pollseq;
-						} else if (handledseq <= threadStru.pollseq_when_thrd_dead)
+							threadStru.inno_pollseq_when_thrd_dead = inno_pollseq;
+						} else if (
+							handledseq <= threadStru.pollseq_when_thrd_dead || inno_pollseq <= threadStru.inno_pollseq_when_thrd_dead)
 						{
 							DEBUG_PRINTA("thrd %s exit but some logs remians in core Entry\n", threadStru.tid->c_str());
 						} else
@@ -2816,6 +2827,7 @@ namespace tilogspace
 						}
 					}
 					mPoll.SetPollPeriodMs(ms);
+					TiLogInnerLogMgr::getRInstance().SetPollPeriodMs(ms);
 				}
 			}
 
@@ -2898,6 +2910,8 @@ namespace tilogspace
 			} stat{ RUN };
 			bool mNeedWoking{};
 			thread logthrd;
+			core_seq_t mPoolSeq{core_seq_t::SEQ_INVALID};
+			atomic<uint32_t> mPollPeriodMs = { TILOG_POLL_THREAD_MAX_SLEEP_MS };
 			TILOG_MUTEXABLE_CLASS_MACRO_WITH_CV(OptimisticMutex, mtx, cv_type, cv);
 
 			TiLogInnerLogMgrImpl() : logthrd(&TiLogInnerLogMgrImpl::InnoLoger, this) {}
@@ -2917,7 +2931,8 @@ namespace tilogspace
 				{
 					unique_lock<OptimisticMutex> lk(mtx);
 					if (stat == TO_STOP) { break; }
-					cv.wait_for(lk, chrono::milliseconds(100));
+					cv.wait_for(lk, chrono::milliseconds(mPollPeriodMs));
+					++mPoolSeq;
 
 					if (!mCaches.empty()) { mDeliver.mIoBean.mTime = mCaches.front()->ext.time(); }
 					for (auto it = mCaches.first_sub_queue_begin(); it != mCaches.first_sub_queue_end(); ++it)
@@ -2968,6 +2983,17 @@ namespace tilogspace
 				}
 				mCaches.emplace_back(pBean);
 			}
+
+			core_seq_t GetInnerLogPoolSeq()
+			{
+				std::unique_lock<OptimisticMutex> lk(mtx);
+				return mPoolSeq;
+			}
+			void SetPollPeriodMs(uint32_t ms)
+			{
+				uint32_t old_ms = mPollPeriodMs.exchange(ms);
+				if (old_ms > ms) { cv.notify_one(); }
+			}
 		};
 
 		TiLogInnerLogMgr::TiLogInnerLogMgr()
@@ -2980,6 +3006,9 @@ namespace tilogspace
 		TiLogInnerLogMgr::~TiLogInnerLogMgr() { Impl().~TiLogInnerLogMgrImpl(); }
 		TiLogInnerLogMgrImpl& TiLogInnerLogMgr::Impl() { return *(TiLogInnerLogMgrImpl*)&data; }
 		void TiLogInnerLogMgr::PushLog(TiLogCompactString* pBean) { Impl().PushLog(pBean); }
+
+		core_seq_t TiLogInnerLogMgr::GetInnerLogPoolSeq() { return TiLogInnerLogMgr::getRInstance().Impl().GetInnerLogPoolSeq(); }
+		void TiLogInnerLogMgr::SetPollPeriodMs(uint32_t ms) { TiLogInnerLogMgr::getRInstance().Impl().SetPollPeriodMs(ms); }
 	}	 // namespace internal
 }	 // namespace tilogspace
 
