@@ -1560,17 +1560,21 @@ namespace tilogspace
 			{
 				constexpr static uint32_t CONCURRENT = TILOG_MAY_MAX_RUNNING_THREAD_NUM;
 			};
-			using engine_t = std::array<TiLogEngine, TILOG_STATIC_SUB_SYS_SIZE>;
+			union engine_t
+			{
+				TiLogEngine e;
+				char c;
+				engine_t():c(){}
+				~engine_t(){}
+			};
 
 			const String* mainThrdId = GetThreadIDString();
 			
 			TiLogMap_t tilogmap;
 			TiLogConcurrentHashMap<const String*, uint32_t, ThreadIdStrRefCountFeat> threadIdStrRefCount;
-			union
-			{
-				char engines_buf[1]{};
-				engine_t engines;
-			};
+
+			using engines_t = std::array<engine_t, TILOG_STATIC_SUB_SYS_SIZE>;
+			engines_t engines;
 
 			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE(TiLogEngines)
 			TiLogEngines();
@@ -3125,7 +3129,7 @@ namespace tilogspace
 
 	}	 // namespace internal
 
-	TiLogSubSystem& TiLog::GetSubSystemRef(sub_sys_t subsys) { return TiLogEngines::getRInstance().engines[subsys].subsystem; }
+	TiLogSubSystem& TiLog::GetSubSystemRef(sub_sys_t subsys) { return TiLogEngines::getRInstance().engines[subsys].e.subsystem; }
 	TiLogEngines::TiLogEngines()
 	{
 		mempoolspace::tilogstream_pool_controler::init();
@@ -3141,16 +3145,19 @@ namespace tilogspace
 		DEBUG_PRINTA("fix dtoa deadlock in (s)printf for mingw64 %f %f", 1.0f, 1.0);
 		ctor_single_instance_printers();
 
-		for (size_t i = 0; i < engines.size(); i++)
+		for (size_t i = TILOG_SUB_SYSTEM_START; i < engines.size(); i++)
 		{
-			new (&engines[i]) TiLogEngine(TILOG_STATIC_SUB_SYS_CFGS[i].subsys);
+			new (&engines[i].e) TiLogEngine(TILOG_STATIC_SUB_SYS_CFGS[i].subsys);
 		}
 		TICLOG << "TiLog " << &TiLog::getRInstance() << " TiLogEngines " << TiLogEngines::getInstance() << " in thrd "
 			   << std::this_thread::get_id() << '\n';
 	}
 	TiLogEngines::~TiLogEngines()
 	{
-		engines.~engine_t();
+		for (size_t i = engines.size() - 1; i >= TILOG_SUB_SYSTEM_START; i--)
+		{
+			engines[i].e.~TiLogEngine();
+		}
 		dtor_single_instance_printers();
 		TiLogInnerLogMgr::uninit();
 		UnInitClocks();
