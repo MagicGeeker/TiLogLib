@@ -956,7 +956,6 @@ namespace tilogspace
 			CrcQueueLogCache qCache;
 			ThreadLocalSpinMutex spinMtx;	 // protect cache
 
-			mempoolspace::local_mempool* lpool;
 			mempoolspace::linear_mem_pool_list* lmempoolist;
 			core_seq_t pollseq_when_thrd_dead = core_seq_t::SEQ_INVALID;			
 			const String* tid;
@@ -972,20 +971,12 @@ namespace tilogspace
 				uint32_t refcnt = DecTidStrRefCnt(tid);
 				if (refcnt == 0)
 				{
-					if (lpool != nullptr)
-					{
-						auto dumpstr = lpool->dump();
-						DEBUG_PRINTA("lpool dump %s\n", dumpstr.c_str());
-						free_local_mempool(lpool);
-					}
 					DEBUG_PRINTI("ThreadStru dtor pDaemon %p this %p tid [%p %s]\n", pDaemon, this, tid, tid->c_str());
 					delete (tid);
 					// DEBUG_RUN(tid = NULL);
 				}
 			}
 
-			mempoolspace::local_mempool* get_local_mempool();
-			void free_local_mempool(mempoolspace::local_mempool* lpool);
 		};
 
 		class TiLogCore;
@@ -1310,8 +1301,6 @@ namespace tilogspace
 			struct GCStru
 			{
 				MergeVecVecLogcaches mTOGC;
-				VecLogCache mGCList;
-				TiLogStreamHelper::TiLogStreamMemoryManagerCache cache;
 			} mGC;
 		};
 
@@ -1570,7 +1559,7 @@ namespace tilogspace
 			using engine_t = std::array<TiLogEngine, TILOG_STATIC_SUB_SYS_SIZE>;
 
 			const String* mainThrdId = GetThreadIDString();
-			mempoolspace::mempool mpool;
+			
 			TiLogMap_t tilogmap;
 			TiLogConcurrentHashMap<const String*, uint32_t, ThreadIdStrRefCountFeat> threadIdStrRefCount;
 			union
@@ -2000,12 +1989,9 @@ namespace tilogspace
 					DeliverLogs();
 					ShrinkDeliverIoBeanMem();
 					++mDeliver.mDeliveredTimes;
-					mDeliver.mDeliverCache.swap(mGC.mGCList);
 					mDeliver.mDeliverCache.clear();
 				}
 				{
-					//TiLogStreamHelper::DestroyTiLogCompactString(mGC.mGCList, mGC.cache);
-					mGC.mGCList.clear();
 
 					for (auto& vit : mGC.mTOGC)
 					{
@@ -2924,7 +2910,6 @@ namespace tilogspace
 				mFile.open(TILOG_INTERNAL_LOG_FILE_PATH, "a");
 				DeliverStru mDeliver;
 				Vector<TiLogCompactString*> to_free;
-				TiLogStreamHelper::TiLogStreamMemoryManagerCache cache;
 				while (1)
 				{
 					unique_lock<OptimisticMutex> lk(mtx);
@@ -2948,7 +2933,6 @@ namespace tilogspace
 						auto it_from_pool = mempoolspace::tilogstream_mempool::xfree_from_std(to_free.begin(), to_free.end());
 						if (it_from_pool != to_free.end()) { mempoolspace::tilogstream_mempool::xfree(*it_from_pool); }
 					}
-					//TiLogStreamHelper::DestroyTiLogCompactString(to_free, cache);
 					to_free.clear();
 					mCaches.clear();
 
@@ -3093,8 +3077,7 @@ namespace tilogspace
 		}
 
 		ThreadStru::ThreadStru(TiLogDaemon* daemon)
-			//: pDaemon(daemon), qCache(), spinMtx(), lpool(get_local_mempool()),
-			: pDaemon(daemon), qCache(), spinMtx(), lpool(nullptr),
+			: pDaemon(daemon), qCache(), spinMtx(),
 			  lmempoolist(mempoolspace::tilogstream_mempool::acquire_localthread_mempool(daemon->GetEngine()->subsys)),
 			  tid(GetThreadIDString()), thrdExistMtx(), thrdExistCV()
 		{
@@ -3102,12 +3085,6 @@ namespace tilogspace
 			IncTidStrRefCnt(tid);
 		};
 
-		mempoolspace::local_mempool* ThreadStru::get_local_mempool() { return TiLogEngines::getRInstance().mpool.get_local_mempool(); }
-		void ThreadStru::free_local_mempool(mempoolspace::local_mempool* lpool)
-		{
-			auto& pool = TiLogEngines::getRInstance().mpool;
-			pool.put_local_mempool(lpool);
-		}
 	}	 // namespace internal
 
 	TiLogSubSystem& TiLog::GetSubSystemRef(sub_sys_t subsys) { return TiLogEngines::getRInstance().engines[subsys].subsystem; }
@@ -3148,20 +3125,6 @@ namespace tilogspace
 }	 // namespace tilogspace
 
 
-namespace tilogspace
-{
-	namespace internal
-	{
-		void* TiLogStreamMemoryManager::timalloc(size_t sz) { return TiLogEngines::getRInstance().mpool.xmalloc(sz); }
-		// void* TiLogStreamMemoryManager::ticalloc(size_t num_ele, size_t sz_ele) { return nullptr; }
-		void* TiLogStreamMemoryManager::tireallocal(void* p, size_t sz) { return TiLogEngines::getRInstance().mpool.xreallocal(p, sz); }
-		void TiLogStreamMemoryManager::tifree(void* p) { TiLogEngines::getRInstance().mpool.xfree(p); }
-		void TiLogStreamMemoryManager::tifree(void* ptrs[], size_t sz, UnorderedMap<mempoolspace::objpool*, Vector<void*>>& frees)
-		{
-			TiLogEngines::getRInstance().mpool.xfree(ptrs, ptrs + sz, frees);
-		}
-	}	 // namespace internal
-}	 // namespace tilogspace
 namespace tilogspace
 {
 	TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_OUTSIDE(TiLog,tilogbuf);

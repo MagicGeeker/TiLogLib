@@ -442,6 +442,7 @@ namespace tilogspace
 			DEBUG_ASSERT((alignv & (alignv - 1)) == 0);
 			size_t av = alignv < 16 ? 16 : alignv;
 			char* ptr = (char*)TILOG_MALLOC_FUNCTION(sz + av);	  // alloc enough space
+			DEBUG_ASSERT2(ptr != NULL, sz, alignv);
 
 			char* p = (char*)((uintptr_t(ptr) & ~(av - 1)) + av);	 // find the next aligned address after ptr
 			// char* p = (char*)( (uintptr_t)ptr / av * av + av );   //it is equal
@@ -2969,28 +2970,12 @@ namespace tilogspace
 		struct TiLogEngine;
 		struct TiLogEngines;
 
-		struct TiLogStreamMemoryManager
-		{
-			static void* timalloc(size_t sz);
-			static void* ticalloc(size_t num_ele, size_t sz_ele);
-			static void* tireallocal(void* p, size_t sz);
-			static void tifree(void* p);
-			static void tifree(void* ptrs[], size_t sz, UnorderedMap<mempoolspace::objpool*, Vector<void*>>& frees);
-		};
-
 		struct TiLogStreamHelper /*: public TiLogObject*/
 		{
 			using ExtType = TiLogBean;
 			using ObjectType = TiLogStream;
 			using TiLogCompactString = TiLogStringExtend<tilogspace::internal::TiLogStreamHelper>::Core;
 
-			struct TiLogStreamMemoryManagerCache
-			{
-				Vector<void*> cache0;
-				UnorderedMap<mempoolspace::objpool*, Vector<void*>> cache1;
-			};
-
-			inline static void DestroyTiLogCompactString(const Vector<TiLogCompactString*>& to_free, TiLogStreamMemoryManagerCache& cache);
 			template <typename... Args>
 			static void mini_format_impl(TiLogStream& outs, TiLogStringView fmt, std::tuple<Args...>&& args);
 			template <typename... Args>
@@ -3402,8 +3387,7 @@ namespace tilogspace
 			auto* plist = mempoolspace::tilogstream_mempool::acquire_localthread_mempool(pCore->ext.subsys);
 			return mempoolspace::tilogstream_mempool::xreallocal(plist, pcore, mem_size);
 		}
-		inline void do_free() { internal::TiLogStreamMemoryManager::tifree(this->pCore); }
-
+		inline void do_free();	  // DO NOT implement forerer(dtor has been hacked)
 	};
 	inline void swap(TiLogStream& lhs, TiLogStream& rhs) noexcept { lhs.swap(rhs); }
 #undef TILOG_INTERNAL_STRING_TYPE
@@ -3412,20 +3396,6 @@ namespace tilogspace
 
 	namespace internal
 	{
-
-		void TiLogStreamHelper::DestroyTiLogCompactString(const Vector<TiLogCompactString*>& to_free, TiLogStreamMemoryManagerCache& cache)
-		{
-			cache.cache0.clear();
-			for (auto p : to_free)
-			{
-				TiLogBean::check(&p->ext);
-				cache.cache0.emplace_back(p);
-			}
-			if (!cache.cache0.empty())
-			{
-				TiLogStreamMemoryManager::tifree(&cache.cache0.front(), cache.cache0.size(), cache.cache1);
-			}
-		}
 
 		struct Functor
 		{
