@@ -1803,6 +1803,8 @@ namespace tilogspace
 				}
 			}
 
+			bool is_lastAlloc(void* p) { return p == pLastAlloc; }
+
 			static linear_mem_pool* get_linear_mem_pool(void* p)
 			{
 				constexpr auto off = offsetof(linear_mem_pool, pMem);
@@ -1840,16 +1842,32 @@ namespace tilogspace
 			{
 				if (sz > MEM_POOL_XMALLOC_MAX_SIZE) { return utils::xmalloc_from_std(sz); }
 				void* p;
-				std::lock_guard<OptimisticMutex> lgd(mtx);
 				if (tail == nullptr) { head = tail = new_linear_mem_pool(nullptr); }
 				if (tail == nullptr) { return utils::xmalloc_from_std(sz); }
+				enum : uint32_t
+				{
+					TRY_MALLOC = 0x00,
+					TRY_FREE_LOCAL = 0x01,
+					TRY_NEW_LPOOL = 0x02,
+				};
+				uint32_t e{};
 				while (true)
 				{
 					p = tail->xmalloc(sz);
 					if (p != nullptr) { break; }
-					linear_mem_pool* tailnew = new_linear_mem_pool();
-					if (tailnew == nullptr) { return utils::xmalloc_from_std(sz); }
-					tail = tailnew;
+
+					if ((e & TRY_NEW_LPOOL) != 0) { break; }
+					if ((e & TRY_FREE_LOCAL) == 0)
+					{
+						xfree_local();
+						e |= TRY_FREE_LOCAL;
+					} else if ((e & TRY_NEW_LPOOL) == 0)
+					{
+						linear_mem_pool* tailnew = new_linear_mem_pool();
+						if (tailnew == nullptr) { return utils::xmalloc_from_std(sz); }
+						tail = tailnew;
+						e |= TRY_NEW_LPOOL;
+					}
 				}
 				return p;
 			}
@@ -1857,13 +1875,24 @@ namespace tilogspace
 			{
 				if (!utils::is_alloc_from_std(p))
 				{
-					std::lock_guard<OptimisticMutex> lgd(mtx);
+					if (!tail->is_lastAlloc(p))
+					{
+						linear_mem_pool* pool = linear_mem_pool::get_linear_mem_pool(p);
+						// we don't know how much bytes p contains,but know p'bytes < sz
+						size_t copy_size = pool->pLastAlloc - (uint8_t*)p; 
+						// we don't know where p is in pool
+						copy_size = std::min(copy_size, sz);
+						void* pn = utils::xmalloc_from_std(sz);
+						memcpy(pn, p, copy_size);
+						return pn;
+					}
 					void* ptr = tail->xrealloc(p, sz);
 					if (ptr == nullptr)
 					{
 						void* pn = utils::xmalloc_from_std(sz);
 						size_t copy_size = tail->pEnd - (uint8_t*)p;
-						DEBUG_ASSERT(copy_size < sz);
+						copy_size = std::min(copy_size, (size_t)MEM_POOL_XMALLOC_MAX_SIZE);
+						copy_size = std::min(copy_size, sz);
 						memcpy(pn, p, copy_size);
 						return pn;
 					} else
@@ -1884,6 +1913,18 @@ namespace tilogspace
 					return;
 				}
 				std::lock_guard<OptimisticMutex> lgd(mtx);
+				ptr_to_free = p;
+			}
+
+			void xfree_local()
+			{
+				void*p;
+				synchronized(mtx)
+				{
+					p = ptr_to_free;
+					if (!p) { return; }
+					ptr_to_free = nullptr;
+				}
 				linear_mem_pool *this_pool = linear_mem_pool::get_linear_mem_pool(p), *pool = head, *next = nullptr;
 				for (; pool != this_pool; pool = next)
 				{
@@ -1913,6 +1954,7 @@ namespace tilogspace
 			linear_mem_pool* head{ nullptr };
 			linear_mem_pool* tail{ head };
 			OptimisticMutex mtx;
+			void* ptr_to_free{};
 			const uint64_t magic_number = 0xab34;
 		};
 

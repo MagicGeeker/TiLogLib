@@ -877,6 +877,23 @@ TEST_CASE("terminal_streamex_test_____________________")
 		TILOGEX(tiloge) << "tiloge test__ 123";
 		TILOGEX(tiloge) << "tiloge test__ 456";
 	}
+	{
+		TILOGE << "realloc test begin";
+		TiLogStreamEx s0 = TILOG_STREAMEX_CREATE(TILOG_CURRENT_SUBSYS_ID, tilogspace::ERROR);
+		TiLogStreamEx s1 = TILOG_STREAMEX_CREATE(TILOG_CURRENT_SUBSYS_ID, tilogspace::ERROR);
+		TILOGEX(s0) << "\ns0 begin\n";
+		TILOGEX(s1) << "\ns1 begin\n";
+		for (auto i = 0; i < 2048; i++) {
+			TILOGEX(s1) << char('a' + i % 26);
+		}
+		for (auto i = 0; i < 2048; i++) {
+			TILOGEX(s0) << char('A' + i % 26);
+		}
+		TILOGEX(s0) << "\ns0 end\n";
+		TILOGEX(s1) << "\ns1 end\n";
+		
+		TILOGE << "realloc test end";
+	}
 	TILOG_CURRENT_SUB_SYSTEM.FSync();
 }
 #endif
