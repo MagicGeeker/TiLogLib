@@ -224,7 +224,7 @@ namespace tilogspace
 
 	constexpr static size_t TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE = ((size_t)1 << 8U);			 // single thread cache queue max length
 	
-	constexpr static size_t TILOG_IO_STRING_DATA_POOL_SIZE = ((size_t)4);	// io string data max szie
+	constexpr static size_t TILOG_IO_STRING_DATA_POOL_SIZE = ((size_t)6);	// io string data max szie
 	constexpr static size_t TILOG_SINGLE_LOG_RESERVE_LEN = 60 + 40;	// reserve size for every log(include sizeof TiLogBean)
 	constexpr static size_t TILOG_SINGLE_LOG_AVERAGE_LEN = 120; // single log averge printable log(include field in TiLogBean)
 	constexpr static size_t TILOG_THREAD_ID_MAX_LEN = SIZE_MAX;	// tid max len,SIZE_MAX means no limit,in popular system limit is TILOG_UINT64_MAX_CHAR_LEN
@@ -1482,7 +1482,7 @@ namespace tilogspace
 		{
 			for (auto p : pool)
 			{
-				FeatType::Destroy(p);
+				del_obj(p);
 			}
 		};
 
@@ -1490,18 +1490,28 @@ namespace tilogspace
 		{
 			for (auto& p : pool)
 			{
-				p = FeatType::create();
+				p = new_obj();
 			}
+		}
+		ObjectPtr new_obj()
+		{
+			size++;
+			return FeatType::create();
+		}
+		void del_obj(ObjectPtr p)
+		{
+			size--;
+			FeatType::Destroy(p);
 		}
 
 		void release(ObjectPtr p)
 		{
 			synchronized(mtx)
 			{
-				if (pool.size() >= SIZE)
+				if (size >= SIZE)
 				{
 					mtx.unlock();
-					FeatType::Destroy(p);
+					del_obj(p);
 					return;
 				}
 				pool.emplace_back(p);
@@ -1516,9 +1526,8 @@ namespace tilogspace
 				if (!force && size >= SIZE) { return nullptr; }
 				if (pool.empty())
 				{
-					size++;
 					lk.unlock();
-					return FeatType::create();
+					return new_obj();
 				}
 				p = pool.back();
 				pool.pop_back();
@@ -1532,10 +1541,10 @@ namespace tilogspace
 			synchronized(mtx)
 			{
 				if (sz == UINT32_MAX) { sz = size / 2; }
+				if (sz >= pool.size()) { break; }
 				for (auto i = sz; i < pool.size(); i++)
 				{
-					size--;
-					FeatType::Destroy(pool[i]);
+					del_obj(pool[i]);
 				}
 				pool.resize(sz);
 			}
@@ -1548,7 +1557,7 @@ namespace tilogspace
 		static_assert(SIZE > 0, "fatal error");
 
 		Vector<ObjectPtr> pool{ SIZE };
-		uint32_t size = SIZE;
+		uint32_t size = 0;
 		TILOG_MUTEXABLE_CLASS_MACRO(typename FeatType::mutex_type, mtx);
 	};
 }  // namespace tilogspace
@@ -1836,7 +1845,7 @@ namespace tilogspace
 
 		struct linear_mem_pool_list
 		{
-			linear_mem_pool_list() {}
+			inline linear_mem_pool_list();
 			inline ~linear_mem_pool_list();
 
 			void* xmalloc(size_t sz)
@@ -1974,21 +1983,25 @@ namespace tilogspace
 			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_FUNC_IMPL(tilogstream_pool_controler, instance)
 			ssize_t total_alloced_bytes{};
 			constexpr static ssize_t max_bytes{ (ssize_t)(TILOG_STREAM_MEMPOOL_MAX_MEM_MBS << 20) };
-			linear_mem_pool_list_blocks_t linear_mem_pool_list_blocks{};
-			inline bool may_full() { return total_alloced_bytes >= max_bytes || linear_mem_pool_list_blocks.may_full(); }
+			ssize_t plist_cnt{};
+			constexpr static ssize_t max_plist_cnt{ (ssize_t)TILOG_STREAM_MEMPOOLIST_MAX_NUM };
+
+			inline bool may_full() { return total_alloced_bytes >= max_bytes || plist_cnt >= max_plist_cnt; }
 
 			inline linear_mem_pool_list* get_linear_mem_pool_list()
 			{
 				if (may_full()) { return nullptr; }
-				return linear_mem_pool_list_blocks.acquire(false);
+				return new linear_mem_pool_list();
 			}
-			inline void put_linear_mem_pool_list(linear_mem_pool_list* p) { linear_mem_pool_list_blocks.release(p); }
-			inline void trim() { linear_mem_pool_list_blocks.resize(); }
+			inline void put_linear_mem_pool_list(linear_mem_pool_list* p) { delete p; }
+			inline void trim() {}
 		};
 
 
+		linear_mem_pool_list::linear_mem_pool_list() { ++tilogstream_pool_controler::getRInstance().plist_cnt; }
 		linear_mem_pool_list::~linear_mem_pool_list()
 		{
+			--tilogstream_pool_controler::getRInstance().plist_cnt;
 			auto curr = head;
 			if (curr)
 			{
@@ -2021,8 +2034,10 @@ namespace tilogspace
 			static L* acquire_localthread_mempool(sub_sys_t sub_sys_id)
 			{
 				static thread_local L* lpools[TILOG_STATIC_SUB_SYS_SIZE];
-				if (lpools[sub_sys_id] == nullptr)
+				static thread_local bool try_once_arr[TILOG_STATIC_SUB_SYS_SIZE];
+				if (lpools[sub_sys_id] == nullptr && !try_once_arr[sub_sys_id])
 				{
+					try_once_arr[sub_sys_id]=true;
 					auto& ctrler = tilogstream_pool_controler::getRInstance();
 					lpools[sub_sys_id] = ctrler.get_linear_mem_pool_list();
 				}
