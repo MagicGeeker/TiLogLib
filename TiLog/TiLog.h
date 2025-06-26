@@ -316,7 +316,7 @@ namespace tilogspace
 
 
 	constexpr static TiLogSubsysCfg TILOG_STATIC_SUB_SYS_CFGS[] = {
-		{ TILOG_SUB_SYSTEM_INTERNAL, "tilog", "a:/tilog/", PRINTER_TILOG_FILE, VERBOSE, false },
+		{ TILOG_SUB_SYSTEM_INTERNAL, "tilog", "a:/tilog/", PRINTER_TILOG_FILE, INFO, false },
 		{ TILOG_SUB_SYSTEM_GLOBAL_FILE, "global_file", "a:/global/", PRINTER_TILOG_FILE, VERBOSE, false },
 		{ TILOG_SUB_SYSTEM_GLOBAL_TERMINAL, "global_terminal", "a:/global_t/", PRINTER_TILOG_TERMINAL, INFO, true },
 		{ TILOG_SUB_SYSTEM_GLOBAL_FILE_TERMINAL, "global_ft", "a:/global_ft/", PRINTER_TILOG_FILE | PRINTER_TILOG_TERMINAL, INFO, false }

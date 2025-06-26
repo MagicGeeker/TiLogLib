@@ -18,7 +18,7 @@ namespace tilogspace
 
 
 	constexpr static TiLogSubsysCfg TILOG_STATIC_SUB_SYS_CFGS[] = {
-		{ TILOG_SUB_SYSTEM_INTERNAL, "tilog", "a:/tilog/", PRINTER_TILOG_FILE, VERBOSE, false },
+		{ TILOG_SUB_SYSTEM_INTERNAL, "tilog", "a:/tilog/", PRINTER_TILOG_FILE, INFO, false },
 		{ TILOG_SUB_MAIN, "main", "a:/main/", PRINTER_TILOG_FILE, VERBOSE, false },
 		{ TILOG_SUB_STOR, "stor", "a:/stor/", PRINTER_TILOG_FILE, VERBOSE, false },
 		{ TILOG_SUB_NETWORK, "network", "a:/network/", PRINTER_TILOG_FILE, VERBOSE, false },

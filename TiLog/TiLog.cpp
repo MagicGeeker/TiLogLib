@@ -41,7 +41,7 @@
 #define __________________________________________________TiLog__________________________________________________
 
 #define TILOG_INNO_STREAM_CREATE(lv) TiLogStreamInner(TILOG_GET_LEVEL_SOURCE_LOCATION(lv))
-#define TIINNOLOG(constexpr_lv) should_log(constexpr_lv) && TILOG_INNO_STREAM_CREATE(constexpr_lv)
+#define TIINNOLOG(constexpr_lv) tilogspace::should_log(TILOG_SUB_SYSTEM_INTERNAL, constexpr_lv) && TILOG_INNO_STREAM_CREATE(constexpr_lv)
 
 #define DEBUG_PRINTA(...) TIINNOLOG(ALWAYS).Stream()->printf(__VA_ARGS__)
 #define DEBUG_PRINTF(...) TIINNOLOG(FATAL).Stream()->printf(__VA_ARGS__)
@@ -158,10 +158,7 @@ namespace tilogspace
 	{
 		constexpr static size_t TILOG_INNO_LOG_QUEUE_FULL_SIZE = (size_t)(1024);
 		constexpr static size_t TILOG_INNO_LOG_QUEUE_NEARLY_FULL_SIZE = (size_t)(TILOG_INNO_LOG_QUEUE_FULL_SIZE * 0.75);
-		constexpr static char TILOG_INTERNAL_LOG_FILE_PATH[] = "a:/tilogs.txt";
-		constexpr static ELevel TILOG_INTERNAL_LOG_LEVEL = INFO;
 
-		TILOG_FORCEINLINE constexpr bool should_log(ELevel level) { return level <= TILOG_INTERNAL_LOG_LEVEL; }
 		struct TiLogStreamInner
 		{
 			inline TiLogStreamInner(tilogspace::internal::TiLogStringView source)
@@ -895,6 +892,7 @@ namespace tilogspace
 		class TiLogFilePrinter : public TiLogPrinter
 		{
 			friend class TiLogPrinterManager;
+			friend struct TiLogInnerLogMgrImpl;
 
 		public:
 
@@ -904,7 +902,9 @@ namespace tilogspace
 			bool isSingleInstance() const override{ return false; }
 
 		protected:
+			TiLogFilePrinter(String folderPath);
 			TiLogFilePrinter(TiLogEngine* e, String folderPath);
+			void ctor_check();
 
 			~TiLogFilePrinter() override;
 			void CreateNewFile(MetaData metaData);
@@ -1695,11 +1695,15 @@ namespace tilogspace
 
 #ifdef __________________________________________________TiLogFilePrinter__________________________________________________
 
+		TiLogFilePrinter::TiLogFilePrinter(String folderPath0) : TiLogPrinter(), folderPath(std::move(folderPath0)) { ctor_check(); }
 		TiLogFilePrinter::TiLogFilePrinter(TiLogEngine* e, String folderPath0) : TiLogPrinter(e), folderPath(std::move(folderPath0))
 		{
+			ctor_check();
+		}
+		void TiLogFilePrinter::ctor_check()
+		{
 			DEBUG_PRINTA("file printer %p path %s\n", this, folderPath.c_str());
-			DEBUG_ASSERT(!folderPath.empty());
-			DEBUG_ASSERT(folderPath.back() == '/');
+			if (folderPath.empty() || folderPath.back() != '/') { std::abort(); }
 		}
 
 		TiLogFilePrinter::~TiLogFilePrinter() {}
@@ -1708,10 +1712,10 @@ namespace tilogspace
 		{
 			if (singleFilePrintedLogSize > TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE)
 			{
-				s_printedLogsLength += singleFilePrintedLogSize;
-				singleFilePrintedLogSize = 0;
 				if (mFile)
 				{
+					s_printedLogsLength += singleFilePrintedLogSize;
+					singleFilePrintedLogSize = 0;
 					mFile.close();
 					DEBUG_PRINTV("sync and write index=%u \n", (unsigned)index);
 				}
@@ -2885,7 +2889,7 @@ namespace tilogspace
 		struct TiLogInnerLogMgrImpl
 		{
 			PodCircularQueue<TiLogCompactString*, TILOG_INNO_LOG_QUEUE_FULL_SIZE> mCaches;
-			TiLogFile mFile;
+			TiLogFilePrinter mFilePriter{ TILOG_STATIC_SUB_SYS_CFGS[TILOG_SUB_SYSTEM_INTERNAL].data };
 			enum
 			{
 				RUN,
@@ -2907,7 +2911,6 @@ namespace tilogspace
 			void InnoLoger()
 			{
 				SetThreadName((thrd_t)-1, "InnoLoger");
-				mFile.open(TILOG_INTERNAL_LOG_FILE_PATH, "a");
 				DeliverStru mDeliver;
 				Vector<TiLogCompactString*> to_free;
 				while (1)
@@ -2916,6 +2919,7 @@ namespace tilogspace
 					if (stat == TO_STOP) { break; }
 					cv.wait_for(lk, chrono::milliseconds(100));
 
+					if (!mCaches.empty()) { mDeliver.mIoBean.mTime = mCaches.front()->ext.time(); }
 					for (auto it = mCaches.first_sub_queue_begin(); it != mCaches.first_sub_queue_end(); ++it)
 					{
 						TiLogCompactString* pBean = *it;
@@ -2937,7 +2941,12 @@ namespace tilogspace
 					mCaches.clear();
 
 					TiLogStringView sv{ mDeliver.mIoBean.data(), mDeliver.mIoBean.size() };
-					mFile.write(sv);
+					if (sv.size() != 0)
+					{
+						TiLogPrinter::buf_t buf{ sv.data(), sv.size(), mDeliver.mIoBean.mTime };
+						TiLogPrinter::MetaData metaData{ &buf };
+						mFilePriter.onAcceptLogs(metaData);
+					}
 					mDeliver.mIoBean.clear();
 				}
 				stat = STOP;
