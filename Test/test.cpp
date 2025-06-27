@@ -30,7 +30,7 @@ using namespace tilogspace;
 #define file_single_thread_operator_test_____________________
 #define terminal_single_thread_long_string_log_test_____________________
 #define file_static_log_test_____________________
- #define terminal_multi_way_log_test_____________________
+#define terminal_multi_way_log_test_____________________
 
 
 //__________________________________________________long time test__________________________________________________//
@@ -467,6 +467,7 @@ TEST_CASE("none_multi_thread_memory_leak_stress_test_____________________")
 		constexpr static bool ASYNC_SET_PRINTERS() { return true; }
 		constexpr static int32_t THREADS() { return 10; }
 		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return 50; }
+		constexpr static bool PRINT_TEST_NAME() { return false; }
 		constexpr static bool PRINT_TOTAL_TIME() { return false; }
 	};
 

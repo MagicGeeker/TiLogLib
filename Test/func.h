@@ -68,6 +68,7 @@ struct multi_thread_test_loop_t
 	constexpr static bool ASYNC_SET_PRINTERS() { return false; }
 	constexpr static bool PRINT_TOTAL_TIME() { return true; }
 	constexpr static int32_t THREADS() { return 4; }
+	constexpr static bool PRINT_TEST_NAME() { return true; }
 	constexpr static bool PRINT_LOOP_TIME() { return false; }
 	constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return test_release ? 1000 : 100; }
 };
@@ -88,8 +89,11 @@ namespace funcspace
 		if_constexpr(TestLoopType::ASYNC_SET_PRINTERS()) { TILOG_CURRENT_SUB_SYSTEM.AsyncSetPrinters(ids); }
 		else { TILOG_CURRENT_SUB_SYSTEM.SetPrinters(ids); }
 		bool terminal_enabled = TILOG_CURRENT_SUB_SYSTEM.IsPrinterInPrinters(tilogspace::EPrinterID::PRINTER_TILOG_TERMINAL, ids);
-		if (!terminal_enabled) { TICOUT << TEST_STRING_PREFIX << testName << '\n'; }
-		TILOGA << "\n\n========Test: " << testName << '\n';
+		if_constexpr(TestLoopType::PRINT_TEST_NAME())
+		{
+			if (!terminal_enabled) { TICOUT << TEST_STRING_PREFIX << testName << '\n'; }
+			TILOGA << "\n\n========Test: " << testName << '\n';
+		}
 		if (TestLoopType::FSYNC_DEFORE_TEST())
 		{
 			TILOG_CURRENT_SUB_SYSTEM.FSync();
