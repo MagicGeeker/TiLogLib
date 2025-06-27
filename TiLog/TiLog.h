@@ -241,6 +241,7 @@ namespace tilogspace
 	constexpr static uint64_t TILOG_STREAM_MEMPOOL_MAX_MEM_MBS =
 		(((uint64_t)TILOG_STREAM_MEMPOOLIST_MAX_NUM * TILOG_STREAM_MEMPOOL_MAX_NUM_IN_POOLIST * TILOG_STREAM_LINEAR_MEM_POOL_ALIGN) >> 20);
 	constexpr static uint32_t TILOG_STREAM_MEMPOOL_TRIM_MS = 500;	// range(0,)
+	constexpr static uint32_t TILOG_STREAM_MEMPOOL_TRY_GET_CYCLE = 1024;	// range(1,)
 	
 
 	// user thread suspend and notify merge thread if merge rawdata size >= it.
@@ -2012,10 +2013,11 @@ namespace tilogspace
 			static L* acquire_localthread_mempool(sub_sys_t sub_sys_id)
 			{
 				static thread_local L* lpools[TILOG_STATIC_SUB_SYS_SIZE];
-				static thread_local bool try_once_arr[TILOG_STATIC_SUB_SYS_SIZE];
-				if (lpools[sub_sys_id] == nullptr && !try_once_arr[sub_sys_id])
+				static thread_local uint32_t try_cycle[TILOG_STATIC_SUB_SYS_SIZE];
+				// internal log such as ThreadExitWatcher::ThreadExitWatcher will NOT create ThreadStru(will cause mem leak)
+				if (sub_sys_id == TILOG_SUB_SYSTEM_INTERNAL) { return nullptr; }
+				if (lpools[sub_sys_id] == nullptr && ((try_cycle[sub_sys_id]++) % TILOG_STREAM_MEMPOOL_TRY_GET_CYCLE == 0))
 				{
-					try_once_arr[sub_sys_id]=true;
 					auto& ctrler = tilogstream_pool_controler::getRInstance();
 					lpools[sub_sys_id] = ctrler.get_linear_mem_pool_list();
 				}
