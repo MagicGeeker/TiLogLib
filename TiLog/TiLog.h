@@ -1682,12 +1682,6 @@ namespace tilogspace
 				}
 			}
 
-			size_t total_alloced_bytes()
-			{
-				synchronized(mtx) { return total_alloced_bytes_nolock(); }
-			}
-			size_t total_alloced_bytes_nolock() { return pool.size() * sizeof(blocks); }
-
 		protected:
 			Set<blocks*, CMP> pool;	   // smaller size blocks prior
 			TILOG_MUTEXABLE_CLASS_MACRO(typename FeatType::mutex_type, mtx);
@@ -1968,25 +1962,15 @@ namespace tilogspace
 			const uint64_t magic_number = 0xab34;
 		};
 
-		struct linear_mem_pool_list_blocks_t_feat
-		{
-			using mutex_type = OptimisticMutex;
-			constexpr static uint32_t MAX_SIZE = TILOG_STREAM_MEMPOOLIST_MAX_NUM;
-			inline static linear_mem_pool_list* create() { return new linear_mem_pool_list{}; }
-			inline static void recreate(linear_mem_pool_list* p) {}
-			inline static void Destroy(linear_mem_pool_list* p) { delete p; }
-		};
-		using linear_mem_pool_list_blocks_t = TiLogSyncedObjectPool<linear_mem_pool_list, linear_mem_pool_list_blocks_t_feat>;
+
 		struct tilogstream_pool_controler
 		{
 			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_MEMBER_DECLARE(tilogstream_pool_controler, instance)
 			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_FUNC_IMPL(tilogstream_pool_controler, instance)
-			ssize_t total_alloced_bytes{};
-			constexpr static ssize_t max_bytes{ (ssize_t)(TILOG_STREAM_MEMPOOL_MAX_MEM_MBS << 20) };
-			ssize_t plist_cnt{};
+			std::atomic<ssize_t> plist_cnt{};
 			constexpr static ssize_t max_plist_cnt{ (ssize_t)TILOG_STREAM_MEMPOOLIST_MAX_NUM };
 
-			inline bool may_full() { return total_alloced_bytes >= max_bytes || plist_cnt >= max_plist_cnt; }
+			inline bool may_full() { return plist_cnt >= max_plist_cnt; }
 
 			inline linear_mem_pool_list* get_linear_mem_pool_list()
 			{
@@ -1998,10 +1982,13 @@ namespace tilogspace
 		};
 
 
-		linear_mem_pool_list::linear_mem_pool_list() { ++tilogstream_pool_controler::getRInstance().plist_cnt; }
+		linear_mem_pool_list::linear_mem_pool_list()
+		{
+			tilogstream_pool_controler::getRInstance().plist_cnt.fetch_add(1, std::memory_order_relaxed);
+		}
 		linear_mem_pool_list::~linear_mem_pool_list()
 		{
-			--tilogstream_pool_controler::getRInstance().plist_cnt;
+			tilogstream_pool_controler::getRInstance().plist_cnt.fetch_sub(1, std::memory_order_relaxed);
 			auto curr = head;
 			if (curr)
 			{
@@ -2012,20 +1999,11 @@ namespace tilogspace
 					curr = next;
 				} while (curr != head);
 			}
-			ssize_t &total_alloced_bytes = tilogstream_pool_controler::getRInstance().total_alloced_bytes,
-					sz = (ssize_t)linear_mem_pool_blocks.total_alloced_bytes_nolock();
-			total_alloced_bytes -= sz;
 		}
 
 		linear_mem_pool* linear_mem_pool_list::new_linear_mem_pool(linear_mem_pool* prev_pool)
 		{
-			ssize_t &total_alloced_bytes = tilogstream_pool_controler::getRInstance().total_alloced_bytes,
-					max_size = tilogstream_pool_controler::getRInstance().max_bytes;
-			if (total_alloced_bytes >= max_size) { return nullptr; }
-			ssize_t sz_old = (ssize_t)linear_mem_pool_blocks.total_alloced_bytes_nolock();
 			void* b = linear_mem_pool_blocks.acquire_nolock();
-			ssize_t sz_new = (ssize_t)linear_mem_pool_blocks.total_alloced_bytes_nolock();
-			total_alloced_bytes = total_alloced_bytes - sz_old + sz_new;
 			return new (b) linear_mem_pool(this, prev_pool);
 		}
 		struct tilogstream_mempool
