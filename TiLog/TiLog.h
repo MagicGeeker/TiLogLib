@@ -2630,7 +2630,7 @@ namespace tilogspace
 			public:
 				inline NoSteadyTimeHelper() { steadyT = steady_flag_helper::min(); }
 
-				inline steady_flag_t compare(const NoSteadyTimeHelper& rhs) const { return (this->steadyT - rhs.steadyT); }
+				inline bool operator<(const NoSteadyTimeHelper& rhs) const { return this->steadyT < rhs.steadyT; }
 
 				inline steady_flag_t toSteadyFlag() const { return steadyT; }
 
@@ -2727,7 +2727,7 @@ namespace tilogspace
 
 				inline NativeSteadySystemClockWrapper(TimePoint t) { chronoTime = t; }
 
-				inline steady_flag_t compare(const NativeSteadySystemClockWrapper& r) const { return (chronoTime - r.chronoTime).count(); }
+				inline bool operator<(const NativeSteadySystemClockWrapper& r) const { return chronoTime < r.chronoTime; }
 
 				inline NativeSteadySystemClockWrapper(const NativeSteadySystemClockWrapper& t) = default;
 				inline NativeSteadySystemClockWrapper& operator=(const NativeSteadySystemClockWrapper& t) = default;
@@ -2801,8 +2801,6 @@ namespace tilogspace
 
 				inline size_t hash() const { return (size_t)chronoTime.time_since_epoch().count(); }
 
-				inline steady_flag_t compare(const SteadyClockImpl& r) const { return (chronoTime - r.chronoTime).count(); }
-
 				inline time_t to_time_t() const
 				{
 					auto dura = chronoTime - getInitSteadyTime();
@@ -2869,9 +2867,7 @@ namespace tilogspace
 					}
 				}
 
-				inline bool operator<(const ITiLogTime& rhs) const { return impl.compare(rhs.impl) < 0; }
-
-				inline tilog_steady_flag_t compare(const ITiLogTime& rhs) const { return impl.compare(rhs.impl); }
+				inline bool operator<(const ITiLogTime& rhs) const { return impl < rhs.impl; }
 
 				inline size_t hash() const { return impl.hash(); }
 
