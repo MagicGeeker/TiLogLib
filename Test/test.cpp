@@ -707,7 +707,7 @@ TEST_CASE("terminal_multi_way_log_test_____________________")
 	TILOGE << ULLONG_MAX;
 	TILOGE << nullptr;
 	TILOGE << NULL;
-	TILOGE << "e0";
+	TILOGE << "e0 hello world!";
 
 	const char* pe1 = "e1";
 	TILOGE << pe1;
@@ -715,10 +715,24 @@ TEST_CASE("terminal_multi_way_log_test_____________________")
 	TILOGE << re1;
 	TILOGE << (const void*)pe1;
 
-	const char e2[] = { 'e', '2', '\0' };
-	TILOGE.printf(e2);
-	const char(&re2)[3] = e2;
-	TILOGE << re2;
+	const signed char e1s[] = { 'e', '2','s', '\0'};
+	const signed char(&re1s)[4] = e1s;
+	TILOGE << re1s;
+	const signed char* pe1s = e1s;
+	TILOGE << pe1s;
+
+	const unsigned char e2u[] = { 'e', '2', 'u','\0' };
+	const unsigned char(&re2u)[4] = e2u;
+	TILOGE << re2u;
+	const unsigned char* pe1u = e2u;
+	TILOGE << pe1u;
+
+	const char e2c[] = { 'e', '2','c','\0' };
+	TILOGE.printf(e2c);
+	const char(&re2c)[4] = e2c;
+	TILOGE << re2c;
+	const char* pe1c = e2c;
+	TILOGE << pe1c;
 
 	TILOGE << 54231.0f;
 	TILOGE << 54231.0e6;

@@ -2194,19 +2194,19 @@ namespace tilogspace
 		};
 
 		template <size_t N>
-		constexpr static_string<N - 1, LITERAL> string_literal(const char (&s)[N])
+		inline constexpr static_string<N - 1, LITERAL> string_literal(const char (&s)[N])
 		{
 			return static_string<N - 1, LITERAL>(s);
 		}
 
 		template <size_t N1, int T1, size_t N2, int T2>
-		constexpr static_string<N1 + N2, CONCAT> string_concat(const static_string<N1, T1>& s1, const static_string<N2, T2>& s2)
+		inline constexpr static_string<N1 + N2, CONCAT> string_concat(const static_string<N1, T1>& s1, const static_string<N2, T2>& s2)
 		{
 			return static_string<N1 + N2, CONCAT>(s1, s2);
 		}
 
 		template <size_t N1, int T1, size_t N2, int T2, size_t N3, int T3>
-		constexpr static_string<N1 + N2 + N3, CONCAT>
+		inline constexpr static_string<N1 + N2 + N3, CONCAT>
 		string_concat(const static_string<N1, T1>& s1, const static_string<N2, T2>& s2, const static_string<N3, T3>& s3)
 		{
 			return string_concat(string_concat(s1, s2), s3);
@@ -2215,20 +2215,20 @@ namespace tilogspace
 		// Search the str for the first occurrence of c
 		// return index in str(finded) or -1(not find)
 		template <std::size_t memsize>
-		constexpr int find(const char (&str)[memsize], char c, int pos = 0)
+		inline constexpr int find(const char (&str)[memsize], char c, int pos = 0)
 		{
 			return pos >= memsize ? -1 : (str[pos] == c ? pos : find(str, c, pos + 1));
 		}
 
 		// Search the str for the last occurrence of c
 		// return index in str(finded) or -1(not find)
-		constexpr int rfind(const char* str, size_t memsize, char c, int pos)
+		inline constexpr int rfind(const char* str, size_t memsize, char c, int pos)
 		{
 			return pos == 0 ? (str[0] == c ? 0 : -1) : (str[pos] == c ? pos : rfind(str, memsize, c, pos - 1));
 		}
-		constexpr int rfind(const char* str, size_t memsize, char c) { return rfind(str, memsize, c, (int)memsize - 1); }
+		inline constexpr int rfind(const char* str, size_t memsize, char c) { return rfind(str, memsize, c, (int)memsize - 1); }
 
-		constexpr bool is_prefix(const char* str, const char* prefix)
+		inline constexpr bool is_prefix(const char* str, const char* prefix)
 		{
 			return prefix[0] == '\0'
 				? true
@@ -2237,7 +2237,7 @@ namespace tilogspace
 
 		// Search the str for the first occurrence of substr
 		// return index in str(finded) or -1(not find)
-		constexpr int find(const char* str, const char* substr, int pos = 0)
+		inline constexpr int find(const char* str, const char* substr, int pos = 0)
 		{
 			return substr[0] == '\0' ? 0 : ((str[0] == '\0') ? -1 : (is_prefix(str, substr) ? pos : find(str + 1, substr, 1 + pos)));
 		}
@@ -3113,6 +3113,7 @@ namespace tilogspace
 		struct ConvertToChar<T>                                                                                                                \
 		{                                                                                                                                      \
 			static constexpr bool value = true;                                                                                                \
+			using type = typename std::remove_cv< std::remove_reference<T>::type >::type;\
 		};
 		ConvertToCharMacro(char) ConvertToCharMacro(const char) ConvertToCharMacro(signed char)
 		ConvertToCharMacro(const signed char) ConvertToCharMacro(const unsigned char) ConvertToCharMacro(unsigned char)
@@ -3278,17 +3279,23 @@ namespace tilogspace
 		template <
 			typename T, typename = typename std::enable_if<!std::is_array<T>::value>::type,
 			typename = typename std::enable_if<std::is_pointer<T>::value>::type,
-			typename = typename std::enable_if<internal::ConvertToChar<typename std::remove_pointer<T>::type>::value>::type>
+			typename = typename internal::ConvertToChar<typename std::remove_pointer<T>::type>::type>
 		inline TiLogStream& operator<<(T s)	   // const chartype *
 		{
-			return append(s), *this;
+			return append((const char*)s), *this;
 		}
 
-		template <size_t N, typename Ch, typename = typename std::enable_if<internal::ConvertToChar<Ch>::value>::type>
-		inline TiLogStream& operator<<(Ch (&s)[N])
+		template <size_t N, typename Ch, typename = typename internal::ConvertToChar<Ch>::type>
+		inline TiLogStream& operator<<(const Ch (&s)[N])	// const chartype [] // such as "hello world"
 		{
 			const size_t SZ = N - (size_t)(s[N - 1] == '\0');
-			return append(s, SZ), *this;	// SZ with '\0'
+			return append((const char*)s, (tilogspace::size_type)SZ), *this;	// usually we think it is a valid string
+		}
+
+		template <size_t N, typename Ch, typename = typename internal::ConvertToChar<Ch>::type>
+		inline TiLogStream& operator<<(Ch (&s)[N])	  // nonconst chartype []
+		{
+			return append((const char*)s), *this;	 // find '\0'
 		}
 
 		inline TiLogStream& operator<<(const void* ptr)
