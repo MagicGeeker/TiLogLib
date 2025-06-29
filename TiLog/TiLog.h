@@ -254,7 +254,10 @@ namespace tilogspace
 		* (TILOG_AVERAGE_CONCURRENT_THREAD_NUM + TILOG_MERGE_RAWDATA_QUEUE_FULL_SIZE);	  // default memory of a single deliver cache
 
 
-	constexpr static size_t TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE= (32U << 20U);	// log size per file,it is not accurate,especially TILOG_DELIVER_CACHE_DEFAULT_MEMORY_BYTES is bigger
+	constexpr static uint32_t TILOG_DISK_SECTOR_SIZE= 4096;
+	constexpr static size_t TILOG_FILE_IO_SIZE= (1U << 19U);	//  must be power of 2 and >>=4096
+	constexpr static size_t TILOG_FILE_BUFFER= (2U << 20U);	//  must be power of 2 and >>=TILOG_FILE_IO_SIZE
+	constexpr static size_t TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE= (64U << 20U);	// log size per file,it is not accurate,especially TILOG_DELIVER_CACHE_DEFAULT_MEMORY_BYTES is bigger
 }	 // namespace tilogspace
 
 
@@ -3006,11 +3009,13 @@ namespace tilogspace
 
 		virtual bool Prepared();
 
+		virtual bool isAlignedOutput();
+
 		TiLogPrinter(void* engine);
 		TiLogPrinter();
 		virtual ~TiLogPrinter();
 
-	private:
+	protected:
 		internal::TiLogPrinterData* mData;
 	};
 
