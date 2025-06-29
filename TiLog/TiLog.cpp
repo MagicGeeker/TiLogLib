@@ -3026,10 +3026,10 @@ namespace tilogspace
 				STOP
 			} stat{ RUN };
 			bool mNeedWoking{};
-			thread logthrd;
 			core_seq_t mPoolSeq{core_seq_t::SEQ_INVALID};
 			atomic<uint32_t> mPollPeriodMs = { TILOG_POLL_THREAD_MAX_SLEEP_MS };
 			TILOG_MUTEXABLE_CLASS_MACRO_WITH_CV(OptimisticMutex, mtx, cv_type, cv);
+			thread logthrd;
 
 			TiLogInnerLogMgrImpl() : logthrd(&TiLogInnerLogMgrImpl::InnoLoger, this) {}
 			~TiLogInnerLogMgrImpl()

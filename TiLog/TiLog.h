@@ -3715,7 +3715,7 @@ namespace tilogspace
 #if defined(__clang__)
 #define FUNCTION_DETAIL0 __PRETTY_FUNCTION__
 #elif defined(__GNUC__)
-	#if (__GNUC__ >= 9 && __GNUC_MINOR__ >= 1)
+	#if (__GNUC__ > 9) || (__GNUC__ == 9 && __GNUC_MINOR__ >= 1)
 	#define FUNCTION_DETAIL0 __PRETTY_FUNCTION__
 	#else
 	#define FUNCTION_DETAIL0 "?" // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=66639
