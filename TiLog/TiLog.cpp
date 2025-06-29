@@ -43,13 +43,14 @@
 #define TILOG_INNO_STREAM_CREATE(lv) TiLogStreamInner(TILOG_GET_LEVEL_SOURCE_LOCATION(lv))
 #define TIINNOLOG(constexpr_lv) tilogspace::should_log(TILOG_SUB_SYSTEM_INTERNAL, constexpr_lv) && TILOG_INNO_STREAM_CREATE(constexpr_lv)
 
-#define DEBUG_PRINTA(...) TIINNOLOG(ALWAYS).Stream()->printf(__VA_ARGS__)
-#define DEBUG_PRINTF(...) TIINNOLOG(FATAL).Stream()->printf(__VA_ARGS__)
-#define DEBUG_PRINTE(...) TIINNOLOG(ERROR).Stream()->printf(__VA_ARGS__)
-#define DEBUG_PRINTW(...) TIINNOLOG(WARNING).Stream()->printf(__VA_ARGS__)
-#define DEBUG_PRINTI(...) TIINNOLOG(INFO).Stream()->printf(__VA_ARGS__)
-#define DEBUG_PRINTD(...) TIINNOLOG(DEBUG).Stream()->printf(__VA_ARGS__)
-#define DEBUG_PRINTV(...) TIINNOLOG(VERBOSE).Stream()->printf(__VA_ARGS__)
+#define DEBUG_PF(LV, ...) TIINNOLOG(LV).Stream()->printf(__VA_ARGS__)
+#define DEBUG_PRINTA(...) DEBUG_PF(ALWAYS, __VA_ARGS__)
+#define DEBUG_PRINTF(...) DEBUG_PF(FATAL, __VA_ARGS__)
+#define DEBUG_PRINTE(...) DEBUG_PF(ERROR, __VA_ARGS__)
+#define DEBUG_PRINTW(...) DEBUG_PF(WARNING, __VA_ARGS__)
+#define DEBUG_PRINTI(...) DEBUG_PF(INFO, __VA_ARGS__)
+#define DEBUG_PRINTD(...) DEBUG_PF(DEBUG, __VA_ARGS__)
+#define DEBUG_PRINTV(...) DEBUG_PF(VERBOSE, __VA_ARGS__)
 
 
 
@@ -563,7 +564,12 @@ namespace tilogspace
 				size_t sz = this->size();
 				size_t cap = this->capacity();
 				size_t mem_size = new_cap + sizeof('\0');	 // request extra 1 byte for '\0'
-				char* p = (char*)tirealloc(this->m_front, mem_size);
+				char* p = (char*)operator new(mem_size, tilog_align_val_t(TILOG_DISK_SECTOR_SIZE));
+				if (this->m_front)
+				{
+					memcpy(p, this->m_front, size());
+					operator delete(this->m_front, tilog_align_val_t(TILOG_DISK_SECTOR_SIZE));
+				}
 				DEBUG_ASSERT(p != NULL);
 				this->m_front = p;
 				this->m_end = this->m_front + sz;
@@ -572,7 +578,7 @@ namespace tilogspace
 			}
 
 			// ptr is m_front
-			inline void do_free() { tifree(this->m_front); }
+			inline void do_free() { operator delete(this->m_front, tilog_align_val_t(TILOG_DISK_SECTOR_SIZE)); }
 			inline char* pFront() { return m_front; }
 			inline const char* pFront() const { return m_front; }
 			inline const char* pEnd() const { return m_end; }
@@ -872,10 +878,10 @@ namespace tilogspace
 		public:
 			inline TiLogFile() = default;
 			inline ~TiLogFile();
-			inline TiLogFile(TiLogStringView fpath, const char mode[3]);
+			inline TiLogFile(TiLogStringView fpath);
 			inline operator bool() const;
 			inline bool valid() const;
-			inline bool open(TiLogStringView fpath, const char mode[3]);
+			inline bool open(TiLogStringView fpath);
 			inline void close();
 			inline void sync();
 			inline int64_t write(TiLogStringView buf);
@@ -1655,37 +1661,24 @@ namespace tilogspace
 			li.QuadPart = size;
 			SetFilePointerEx(fd, li, NULL, FILE_BEGIN);
 		}
-		inline static void func_trunc(HANDLE fd, size_t size,bool inc=false)
+		inline static int func_trunc(HANDLE fd, size_t size, bool inc = false)
 		{
 			func_moveptr(fd, size);
 			SetEndOfFile(fd);
 			if (inc) { SetFileValidData(fd, size); }
+			return 0;
 		}
-		inline static HANDLE func_open(const char* path, const char mode[3])
+		inline static HANDLE func_open(const char* path)
 		{
 			HANDLE fd = nullfd;
-			switch (mode[0])
-			{
-			case 'r':
-				fd = CreateFileA(path, GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, 0);
-				break;
-			case 'a':
-				fd = CreateFileA(path, FILE_APPEND_DATA, 0, nullptr, OPEN_ALWAYS, 0, 0);
-				break;
-			case 'D': {
-				fd = CreateFileA(path, GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS, 0, 0);
-				DWORD written = 0;
-				WriteFile(fd, TILOG_TITLE, sizeof(TILOG_TITLE), &written, NULL);
-				CloseHandle(fd);
-				fd = CreateFileA(path, GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS, FILE_FLAG_NO_BUFFERING, 0);
-				func_trunc(fd,TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE,true);
-				func_moveptr(fd,0);
-				break;
-			}
-			case 'w':
-				fd = CreateFileA(path, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, 0);
-				break;
-			}
+
+			fd = CreateFileA(path, GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS, 0, 0);
+			DWORD written = 0;
+			WriteFile(fd, TILOG_TITLE, sizeof(TILOG_TITLE), &written, NULL);
+			CloseHandle(fd);
+			fd = CreateFileA(path, GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS, FILE_FLAG_NO_BUFFERING, 0);
+			func_trunc(fd, TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE, true);
+			func_moveptr(fd, 0);
 			return fd;
 		}
 		inline static void func_close(HANDLE fd) { CloseHandle(fd); }
@@ -1704,42 +1697,35 @@ namespace tilogspace
 			return ret;
 		}
 #elif defined(TILOG_OS_POSIX)
-		inline static int func_open(const char* path, const char mode[3])
+		inline static int func_trunc(int fd, size_t size, bool inc = false) { return ftruncate(fd, size); }
+		inline static int func_open(const char* path)
 		{
 			int fd = nullfd;
-			switch (mode[0])
-			{
-			case 'r':
-				fd = ::open(path, O_RDONLY);
-				break;
-			case 'a':
-				fd = ::open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
-				break;
-			case 'w':
-				fd = ::open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-				break;
-			}
+			fd = ::open(path, O_WRONLY | O_CREAT | O_DIRECT, 0644);
+			// posix_fallocate(fd, 0, TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE);
+			func_trunc(fd, TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE);
 			return fd;
 		}
 		inline static void func_close(int fd) { ::close(fd); }
 		inline static void func_sync(int fd) { ::fsync(fd); }
 		inline static int64_t func_write(int fd, TiLogStringView buf) { return ::write(fd, buf.data(), buf.size()); }
 #else
-		inline static FILE* func_open(const char* path, const char mode[3]) { return fopen(path, mode); }
+		inline static int func_trunc(int fd, size_t size, bool inc = false) { return 0; }
+		inline static FILE* func_open(const char* path) { return fopen(path, "w"); }
 		inline static void func_close(FILE* fd) { fclose(fd); }
 		inline static void func_sync(FILE* fd) { fflush(fd); }
 		inline static int64_t func_write(FILE* fd, TiLogStringView buf) { return (int64_t)fwrite(buf.data(), buf.size(), 1, fd); }
 #endif
 
 		inline TiLogFile::~TiLogFile() { close(); }
-		inline TiLogFile::TiLogFile(TiLogStringView fpath, const char mode[3]) { open(fpath, mode); }
+		inline TiLogFile::TiLogFile(TiLogStringView fpath) { open(fpath); }
 		inline TiLogFile::operator bool() const { return fctx.fd != nullfd; }
 		inline bool TiLogFile::valid() const { return fctx.fd != nullfd; }
-		inline bool TiLogFile::open(TiLogStringView fpath, const char mode[3])
+		inline bool TiLogFile::open(TiLogStringView fpath)
 		{
 			this->close();
 			fctx.fpath.assign(fpath.data(),fpath.size());
-			return (fctx.fd = func_open(fpath.data(), mode)) != nullfd;
+			return (fctx.fd = func_open(fpath.data())) != nullfd;
 		}
 		inline void TiLogFile::close()
 		{
@@ -1856,7 +1842,7 @@ namespace tilogspace
 				index++;
 			}
 
-			file().open({ s.data(), s.size() }, "D");
+			file().open({ s.data(), s.size() });
 		}
 
 		void TiLogFilePrinter::sync() { file().sync(); }
