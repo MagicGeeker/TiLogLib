@@ -1786,16 +1786,19 @@ namespace tilogspace
 
 		TiLogFilePrinter::~TiLogFilePrinter()
 		{
-			if (singleFilePrintedLogSize < TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE)
-			{
-				DEBUG_ASSERT(singleFilePrintedLogSize % TILOG_DISK_SECTOR_SIZE == 0);
-				if (isSyncIO())
+			auto runnable = [this] {
+				if (singleFilePrintedLogSize < TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE)
 				{
+					DEBUG_ASSERT(singleFilePrintedLogSize % TILOG_DISK_SECTOR_SIZE == 0);
 					file().trunc(singleFilePrintedLogSize);
-				} else
-				{
-					mData->pushTask([this] { file().trunc(singleFilePrintedLogSize); });
-				}
+				};
+			};
+			if (isSyncIO())
+			{
+				runnable();
+			} else
+			{
+				mData->pushTask(runnable);
 			}
 		}
 
