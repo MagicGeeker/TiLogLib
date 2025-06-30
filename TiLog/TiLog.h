@@ -364,9 +364,9 @@ namespace tilogspace
 
 	#define TILOG_MUTEXABLE_CLASS_MACRO(mtx_type, mtx_name)                                                                                    \
 	mtx_type mtx_name;                                                                                                                     \
-	inline void lock() { mtx_name.lock(); };                                                                                               \
-	inline void unlock() { mtx_name.unlock(); };                                                                                           \
-	inline bool try_lock() { return mtx_name.try_lock(); };
+	inline void lock() { mtx_name.lock(); }                                                                                               \
+	inline void unlock() { mtx_name.unlock(); }                                                                                           \
+	inline bool try_lock() { return mtx_name.try_lock(); }
 
 #define TILOG_MUTEXABLE_CLASS_MACRO_WITH_CV(mtx_type, mtx_name, cv_type_alias, cv_name)                                                    \
 	using cv_type_alias =                                                                                                                  \

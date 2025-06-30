@@ -1247,6 +1247,11 @@ namespace tilogspace
 			bool mNeedWoking{};					  // protected by mMtx
 
 			SteadyTimePoint mLastTrim{SteadyTimePoint::min()};
+
+			inline void MayNotifyThrd()
+			{
+				if (!mDoing) { mCV.notify_one(); }
+			}
 		};
 
 		struct DeliverStru
@@ -1614,6 +1619,8 @@ namespace tilogspace
 				~engine_t(){}
 			};
 
+			// fix segment fault for mingw64/Windows when use TICLOG in TiLogEngines::TiLogEngines()
+			std::ios_base::Init init_cout;
 			const String* mainThrdId = GetThreadIDString();
 			
 			TiLogMap_t tilogmap;
@@ -2561,16 +2568,16 @@ namespace tilogspace
 		{
 			constexpr static uint32_t NANOS[8] = { 256, 128, 320, 192, 512, 384, 768, 64 };
 			std::unique_lock<std::mutex> lk(thrd.mMtx);
+			++thrd.mMayWaitingThrds;
 			for (uint32_t i = 0; thrd.IsBusy(); i = (1 + i) % 8)
 			{
 				lk.unlock();
-				thrd.mCV.notify_one();
+				thrd.MayNotifyThrd();
 				// maybe thrd complete at once after notify,so wait_for nanos and wake up to check again.
-				++thrd.mMayWaitingThrds;
 				synchronized_u(lk_wait, thrd.mMtxWait) { thrd.mCvWait.wait_for(lk_wait, std::chrono::nanoseconds(NANOS[i])); }
-				--thrd.mMayWaitingThrds;
 				lk.lock();
 			}
+			--thrd.mMayWaitingThrds;
 			return lk;
 		}
 		inline std::unique_lock<std::mutex> TiLogDaemon::GetPollLock() { return GetCoreThrdLock(mPoll); }
@@ -2729,7 +2736,7 @@ namespace tilogspace
 
 		inline void TiLogDaemon::NotifyPoll()
 		{
-			if (!mPoll.mDoing) mPoll.mCV.notify_one();
+			mPoll.MayNotifyThrd();
 		}
 
 		//core should be locked
@@ -2800,7 +2807,6 @@ namespace tilogspace
 					if (mPoll.mMayWaitingThrds)
 					{
 						mPoll.mCvWait.notify_all();
-						mPoll.mMayWaitingThrds = 0;
 					}
 				}
 
