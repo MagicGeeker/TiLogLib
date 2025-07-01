@@ -153,29 +153,30 @@ namespace tilogspace
 	// user-defined stl,can customize allocator
 	template <typename T>
 	using Allocator = std::allocator<T>;
-	template <typename T>
-	using List = std::list<T, Allocator<T>>;
-	template <typename T>
-	using Vector = std::vector<T, Allocator<T>>;
-	template <typename T>
-	using Deque = std::deque<T, Allocator<T>>;
-	template<typename T, typename Seq = Vector<T>,
-		typename Comp  = std::less<typename Seq::value_type> >
-	using PriorQueue = std::priority_queue<T,Seq,Comp>;
-	template <typename T,typename Container=Deque<T>>
-	using Stack = std::stack<T,Container>;
-	template <typename K, typename Comp = std::less<K>>
-	using Set = std::set<K, Comp, Allocator<K>>;
-	template <typename K, typename Comp = std::less<K>>
-	using MultiSet = std::multiset<K, Comp, Allocator<K>>;
-	template <typename K, typename V, typename Comp = std::less<K>>
-	using Map = std::map<K, V, Comp, Allocator<std::pair<const K, V>>>;
-	template <typename K, typename V, typename Comp = std::less<K>>
-	using MultiMap = std::multimap<K, V, Comp, Allocator<std::pair<const K, V>>>;
-	template <typename K, typename V, typename Hash = std::hash<K>, typename EqualTo = std::equal_to<K>>
-	using UnorderedMap = std::unordered_map<K, V, Hash, EqualTo, Allocator<std::pair<const K, V>>>;
-	template <typename K, typename Hash = std::hash<K>, typename EqualTo = std::equal_to<K>>
-	using UnorderedSet = std::unordered_set<K, Hash, EqualTo, Allocator<K>>;
+	template <typename T, typename AL = Allocator<T>>
+	using List = std::list<T, AL>;
+	template <typename T, typename AL = Allocator<T>>
+	using Vector = std::vector<T, AL>;
+	template <typename T, typename AL = Allocator<T>>
+	using Deque = std::deque<T, AL>;
+	template <typename T, typename Seq = Vector<T>, typename Comp = std::less<typename Seq::value_type>>
+	using PriorQueue = std::priority_queue<T, Seq, Comp>;
+	template <typename T, typename Container = Deque<T>>
+	using Stack = std::stack<T, Container>;
+	template <typename K, typename Comp = std::less<K>, typename AL = Allocator<K>>
+	using Set = std::set<K, Comp, AL>;
+	template <typename K, typename Comp = std::less<K>, typename AL = Allocator<K>>
+	using MultiSet = std::multiset<K, Comp, AL>;
+	template <typename K, typename V, typename Comp = std::less<K>, typename AL = Allocator<std::pair<const K, V>>>
+	using Map = std::map<K, V, Comp, AL>;
+	template <typename K, typename V, typename Comp = std::less<K>, typename AL = Allocator<std::pair<const K, V>>>
+	using MultiMap = std::multimap<K, V, Comp, AL>;
+	template <
+		typename K, typename V, typename Hash = std::hash<K>, typename EqualTo = std::equal_to<K>,
+		typename AL = Allocator<std::pair<const K, V>>>
+	using UnorderedMap = std::unordered_map<K, V, Hash, EqualTo, AL>;
+	template <typename K, typename Hash = std::hash<K>, typename EqualTo = std::equal_to<K>, typename AL = Allocator<K>>
+	using UnorderedSet = std::unordered_set<K, Hash, EqualTo, AL>;
 }	 // namespace tilogspace
 namespace tilogspace
 {
@@ -386,8 +387,8 @@ namespace tilogspace
 			for (uint32_t n = 0; mLockedFlag.test_and_set(std::memory_order_acquire);)
 			{
 				if (++n < NRetry) { continue; }
-				if_constexpr(Nanosec == size_t(-1)) { std::this_thread::yield(); }
-				else if_constexpr(Nanosec != 0) { std::this_thread::sleep_for(std::chrono::nanoseconds(Nanosec)); }
+					if_constexpr(Nanosec == size_t(-1)) { std::this_thread::yield(); }
+					else if_constexpr(Nanosec != 0) { std::this_thread::sleep_for(std::chrono::nanoseconds(Nanosec)); }
 			}
 		}
 
@@ -497,7 +498,48 @@ namespace tilogspace
 	class TiLogObject : public TiLogMemoryManager
 	{
 	};
-}  // namespace tilogspace
+
+	template <typename T>
+	struct NoInitAllocator
+	{
+		using value_type = T;
+
+		template <typename U>
+		NoInitAllocator(const NoInitAllocator<U>&) noexcept
+		{
+		}
+
+		NoInitAllocator() noexcept = default;
+
+		T* allocate(std::size_t n) { return static_cast<T*>(TiLogCppMemoryManager::operator new(n * sizeof(T))); }
+
+		void deallocate(T* p, std::size_t) noexcept { TiLogCppMemoryManager::operator delete(p); }
+
+		template <typename U, typename... Args>
+		void construct(U*) noexcept	   // Not Init
+		{
+		}
+
+		template <typename U>
+		bool operator==(const NoInitAllocator<U>&) const noexcept
+		{
+			return true;
+		}
+
+		template <typename U>
+		bool operator!=(const NoInitAllocator<U>&) const noexcept
+		{
+			return false;
+		}
+
+		template <typename U>
+		struct rebind
+		{
+			using other = NoInitAllocator<U>;
+		};
+	};
+
+}	 // namespace tilogspace
 
 namespace tilogspace
 {

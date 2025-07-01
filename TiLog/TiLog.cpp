@@ -766,27 +766,31 @@ namespace tilogspace
 			}
 
 		public:
-			static void to_vector(Vector<T>& v, const PodCircularQueue& q)
+			template <typename AL>
+			static void to_vector(Vector<T, AL>& v, const PodCircularQueue& q)
 			{
 				v.resize(0);
 				v.insert(v.end(), q.first_sub_queue_begin(), q.first_sub_queue_end());
 				v.insert(v.end(), q.second_sub_queue_begin(), q.second_sub_queue_end());
 			}
 
-			static void to_vector(Vector<T>& v, PodCircularQueue::const_iterator _beg, PodCircularQueue::const_iterator _end)
+			template <typename AL>
+			static void to_vector(Vector<T, AL>& v, PodCircularQueue::const_iterator _beg, PodCircularQueue::const_iterator _end)
 			{
 				DEBUG_ASSERT2(_beg <= _end, _beg, _end);
 				v.resize(0);
 				v.insert(v.end(), _beg, _end);
 			}
 
-			static void append_to_vector(Vector<T>& v, const PodCircularQueue& q)
+			template <typename AL>
+			static void append_to_vector(Vector<T, AL>& v, const PodCircularQueue& q)
 			{
 				v.insert(v.end(), q.first_sub_queue_begin(), q.first_sub_queue_end());
 				v.insert(v.end(), q.second_sub_queue_begin(), q.second_sub_queue_end());
 			}
 
-			static void append_to_vector(Vector<T>& v, PodCircularQueue::const_iterator _beg, PodCircularQueue::const_iterator _end)
+			template <typename AL>
+			static void append_to_vector(Vector<T, AL>& v, PodCircularQueue::const_iterator _beg, PodCircularQueue::const_iterator _end)
 			{
 				DEBUG_ASSERT2(_beg <= _end, _beg, _end);
 				v.insert(v.end(), _beg, _end);
@@ -962,9 +966,9 @@ namespace tilogspace
 
 		using ThreadLocalSpinMutex = OptimisticMutex;
 
-		struct VecLogCache : public Vector<TiLogCompactString*>
+		struct VecLogCache : public Vector<TiLogCompactString*, NoInitAllocator<TiLogCompactString*>>
 		{
-			using Vector<TiLogCompactString*>::Vector;
+			using Vector<TiLogCompactString*, NoInitAllocator<TiLogCompactString*>>::Vector;
 			void shrink_to_fit(size_t minCap)
 			{
 				VecLogCache tmp;
