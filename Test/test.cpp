@@ -308,7 +308,7 @@ TEST_CASE("file_single_thread_benchmark_test_____________________")
 {
 	struct testLoop_t : single_thread_test_loop_t
 	{
-		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return test_release ? testpow10(6) : testpow10(4); }
+		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return test_release ? testpow10(7) : testpow10(5); }
 		constexpr static bool PRINT_LOOP_TIME() { return true; }
 	};
 
@@ -331,7 +331,7 @@ TEST_CASE("file_multi_thread_benchmark_test_____________________")
 	struct testLoop_t : multi_thread_test_loop_t
 	{
 		constexpr static int32_t THREADS() { return 6; }
-		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return test_release ? 100 * 100000 : 100000; }
+		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return test_release ? 2 * testpow10(7) : testpow10(5); }
 		constexpr static bool PRINT_LOOP_TIME() { return true; }
 	};
 
@@ -353,7 +353,7 @@ TEST_CASE("file_multi_thread_benchmark_test_with_format_____________________")
 	struct testLoop_t : multi_thread_test_loop_t
 	{
 		constexpr static int32_t THREADS() { return 6; }
-		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return test_release ? 100 * 100000 : 100000; }
+		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return test_release ? 2 * testpow10(7) : testpow10(5); }
 		constexpr static bool PRINT_LOOP_TIME() { return true; }
 	};
 
@@ -823,26 +823,32 @@ TEST_CASE("user_subsystem_test_____________________")
 
 	struct testLoop_t : multi_thread_test_loop_t
 	{
-		constexpr static int32_t THREADS() { return 12; }
-		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return test_release ? 100 * 100000 : 100000; }
+		constexpr static int32_t THREADS() { return 6; }
+		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return test_release ? testpow10(7) : testpow10(5); }
 		constexpr static bool PRINT_LOOP_TIME() { return true; }
 	};
 
 	MultiThreadTest<testLoop_t>("user_subsystem_test_____________________", tilogspace::EPrinterID::PRINTER_TILOG_FILE, [](int index) {
-		for (uint64_t j = 0; j < testLoop_t::GET_SINGLE_THREAD_LOOPS(); j++)
+		switch (index % 3)
 		{
-			switch (j % 3)
+		case 0:
+			for (uint64_t j = 0; j < testLoop_t::GET_SINGLE_THREAD_LOOPS(); j++)
 			{
-			case 0:
-				TILOG(tilogspace::TILOG_SUB_MAIN, tilogspace::ELevel::ERROR) << "mod0 index= " << index << " j= " << j;
-				break;
-			case 1:
-				TILOG(tilogspace::TILOG_SUB_STOR, tilogspace::ELevel::ERROR) << "mod1 index= " << index << " j= " << j;
-				break;
-			case 2:
-				TILOG(tilogspace::TILOG_SUB_NETWORK, tilogspace::ELevel::ERROR) << "mod2 index= " << index << " j= " << j;
-				break;
+				TILOG(tilogspace::TILOG_SUB_MAIN, tilogspace::ELevel::ERROR) << "main index= " << index << " j= " << j;
 			}
+			break;
+		case 1:
+			for (uint64_t j = 0; j < testLoop_t::GET_SINGLE_THREAD_LOOPS(); j++)
+			{
+				TILOG(tilogspace::TILOG_SUB_STOR, tilogspace::ELevel::ERROR) << "stor index= " << index << " j= " << j;
+			}
+			break;
+		case 2:
+			for (uint64_t j = 0; j < testLoop_t::GET_SINGLE_THREAD_LOOPS(); j++)
+			{
+				TILOG(tilogspace::TILOG_SUB_NETWORK, tilogspace::ELevel::ERROR) << "netw index= " << index << " j= " << j;
+			}
+			break;
 		}
 	});
 }
