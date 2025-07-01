@@ -254,7 +254,7 @@ namespace tilogspace
 		* (TILOG_AVERAGE_CONCURRENT_THREAD_NUM + TILOG_MERGE_RAWDATA_QUEUE_FULL_SIZE);	  // default memory of a single deliver cache
 
 
-	constexpr static uint32_t TILOG_DISK_SECTOR_SIZE= 4096;
+	constexpr static uint32_t TILOG_DISK_SECTOR_SIZE= 4096;   // %32==0 && %512=0
 	constexpr static size_t TILOG_FILE_IO_SIZE= (1U << 19U);	//  must be power of 2 and >>=4096
 	constexpr static size_t TILOG_FILE_BUFFER= (2U << 20U);	//  must be power of 2 and >>=TILOG_FILE_IO_SIZE
 	constexpr static size_t TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE= (64U << 20U);	// log size per file,it is not accurate,especially TILOG_DELIVER_CACHE_DEFAULT_MEMORY_BYTES is bigger
@@ -499,6 +499,106 @@ namespace tilogspace
 	};
 }  // namespace tilogspace
 
+namespace tilogspace
+{
+	constexpr static uint32_t TILOG_AVX_ALIGN = 32;
+	constexpr static uint32_t TILOG_SSE4_ALIGN = 16;
+}	 // namespace tilogspace
+#if TILOG_ENABLE_SSE_4_1
+#include <smmintrin.h>	  // SSE4.1
+namespace tilogspace
+{
+	// src dest MUST BE aligned to 128bit(16 byte)
+	inline void sse128_memcpy_aa(void* dest, const void* src, size_t size)
+	{
+		DEBUG_ASSERT(((uintptr_t)src) % 16 == 0);
+		DEBUG_ASSERT(((uintptr_t)dest) % 16 == 0);
+		constexpr size_t chunk_size = 16 * 4;
+		__m128i* src_end = (__m128i*)((char*)src + (size / chunk_size * chunk_size));
+		__m128i* src_ptr = (__m128i*)src;
+		__m128i* dest_ptr = (__m128i*)dest;
+
+		while (src_ptr < src_end)
+		{
+			__m128i data0 = _mm_load_si128(src_ptr + 0);
+			__m128i data1 = _mm_load_si128(src_ptr + 1);
+			__m128i data2 = _mm_load_si128(src_ptr + 2);
+			__m128i data3 = _mm_load_si128(src_ptr + 3);
+
+			_mm_store_si128(dest_ptr + 0, data0);
+			_mm_store_si128(dest_ptr + 1, data1);
+			_mm_store_si128(dest_ptr + 2, data2);
+			_mm_store_si128(dest_ptr + 3, data3);
+
+			src_ptr += 4;
+			dest_ptr += 4;
+		}
+		DEBUG_ASSERT(src_ptr == src_end);
+		size_t remaining = (char*)src + size - (char*)src_end;
+		if (remaining > 0) { memcpy(dest_ptr, src_ptr, remaining); }
+	}
+
+
+}	 // namespace tilogspace
+#else
+namespace tilogspace
+{
+	inline void sse128_memcpy_aa(void* dest, const void* src, size_t size) { memcpy(dest, src, size); }
+}	 // namespace tilogspace
+#endif
+
+
+#if TILOG_ENABLE_AVX
+#include <immintrin.h>	  //avx
+namespace tilogspace
+{
+	// src dest MUST BE aligned to 256bit(32 byte)
+	inline void avx256_memcpy_aa(void* dest, const void* src, size_t size)
+	{
+		DEBUG_ASSERT(((uintptr_t)src) % 32 == 0);
+		DEBUG_ASSERT(((uintptr_t)dest) % 32 == 0);
+		const size_t chunk_size = 32 * 4;
+		__m256i* src_end = (__m256i*)((char*)src + (size / chunk_size * chunk_size));
+		__m256i* src_ptr = (__m256i*)src;
+		__m256i* dest_ptr = (__m256i*)dest;
+
+		while (src_ptr < src_end)
+		{
+			__m256i data0 = _mm256_load_si256(src_ptr + 0);
+			__m256i data1 = _mm256_load_si256(src_ptr + 1);
+			__m256i data2 = _mm256_load_si256(src_ptr + 2);
+			__m256i data3 = _mm256_load_si256(src_ptr + 3);
+
+			_mm256_store_si256(dest_ptr + 0, data0);
+			_mm256_store_si256(dest_ptr + 1, data1);
+			_mm256_store_si256(dest_ptr + 2, data2);
+			_mm256_store_si256(dest_ptr + 3, data3);
+
+			src_ptr += 4;
+			dest_ptr += 4;
+		}
+		DEBUG_ASSERT(src_ptr == src_end);
+		size_t remaining = (char*)src + size - (char*)src_end;
+		if (remaining > 0) { memcpy(dest_ptr, src_ptr, remaining); }
+	}
+}	 // namespace tilogspace
+#else
+namespace tilogspace
+{
+	inline void avx256_memcpy_aa(void* dest, const void* src, size_t size) { memcpy(dest, src, size); }
+}	 // namespace tilogspace
+#endif
+
+namespace tilogspace
+{
+	inline void adapt_memcpy(void* dest, const void* src, size_t size) { 
+		#if TILOG_ENABLE_AVX
+		avx256_memcpy_aa(dest, src, size);
+		#elif TILOG_ENABLE_SSE_4_1
+		sse128_memcpy_aa(dest, src, size);
+		#endif
+	}
+}	 // namespace tilogspace
 
 namespace tilogspace
 {
@@ -1749,7 +1849,7 @@ namespace tilogspace
 				if (sz_old < sz)
 				{
 					void* p2 = xmalloc_from_std(sz);
-					memcpy(p2, p, sz_old);
+					sse128_memcpy_aa(p2, p, sz_old);
 					tilogspace::TiLogMemoryManager::operator delete(oversize_p, tilog_align_val_t(alignof(obj_t)));
 					return p2;
 				} else
@@ -1892,7 +1992,7 @@ namespace tilogspace
 						// we don't know where p is in pool
 						copy_size = std::min(copy_size, sz);
 						void* pn = utils::xmalloc_from_std(sz);
-						memcpy(pn, p, copy_size);
+						sse128_memcpy_aa(pn, p, copy_size);
 						return pn;
 					}
 					void* ptr = tail->xrealloc(p, sz);
@@ -1902,7 +2002,7 @@ namespace tilogspace
 						size_t copy_size = tail->pEnd - (uint8_t*)p;
 						copy_size = std::min(copy_size, (size_t)MEM_POOL_XMALLOC_MAX_SIZE);
 						copy_size = std::min(copy_size, sz);
-						memcpy(pn, p, copy_size);
+						sse128_memcpy_aa(pn, p, copy_size);
 						return pn;
 					} else
 					{
@@ -2363,7 +2463,7 @@ namespace tilogspace
 			using const_this_type = const this_type;
 
 		public:
-			struct Core
+			struct alignas(32) Core
 			{
 				size_type size;		   // exclude '\0'
 				size_type capacity;	   // exclude '\0',it means Core can save capacity + 1 chars include '\0'
@@ -2372,7 +2472,7 @@ namespace tilogspace
 					char ex[SIZE_OF_EXTEND]{};
 					ExtType ext;
 				};
-				// char buf[]; //It seems like there is an array here
+				// char buf[]; //It seems like there is an array here // 32 byte aligned
 				Core() {}
 				const char* buf() const { return reinterpret_cast<const char*>(this + 1); }
 				char* buf() { return reinterpret_cast<char*>(this + 1); }
@@ -3622,6 +3722,8 @@ namespace tilogspace
 	static_assert(true || TILOG_IS_WITH_FUNCTION_NAME, "this micro must be defined");
 	static_assert(true || TILOG_IS_WITH_FILE_LINE_INFO, "this micro must be defined");
 	static_assert(true || TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL, "this micro must be defined");
+	static_assert(true || TILOG_ENABLE_AVX, "this micro must be defined");
+	static_assert(true || TILOG_ENABLE_SSE_4_1, "this micro must be defined");
 
 	static_assert(
 		TILOG_POLL_THREAD_MAX_SLEEP_MS > TILOG_POLL_THREAD_MIN_SLEEP_MS

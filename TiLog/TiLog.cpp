@@ -567,7 +567,7 @@ namespace tilogspace
 				char* p = (char*)operator new(mem_size, tilog_align_val_t(TILOG_DISK_SECTOR_SIZE));
 				if (this->m_front)
 				{
-					memcpy(p, this->m_front, size());
+					avx256_memcpy_aa(p, this->m_front, size());
 					operator delete(this->m_front, tilog_align_val_t(TILOG_DISK_SECTOR_SIZE));
 				}
 				DEBUG_ASSERT(p != NULL);
@@ -1045,6 +1045,13 @@ namespace tilogspace
 			TiLogTime mTime;
 			size_t raw_size{};
 			
+			inline void append_aa(TiLogCoreString& s)
+			{
+				size_t sz = size() + s.size();
+				reserve(sz);
+				adapt_memcpy(pEnd(), s.begin(), s.size());
+				resetsize(sz);
+			}
 			size_t unaligned_size(){return raw_size;}
 			void make_aligned()
 			{
@@ -1422,6 +1429,8 @@ namespace tilogspace
 
 			struct
 			{
+				using tilogcore_b = char[sizeof(TiLogCore)];
+				alignas(alignof(TiLogCore)) std::array<tilogcore_b, TILOG_DAEMON_PROCESSER_NUM> mCoreArrRaw;
 				std::array<TiLogCore*, TILOG_DAEMON_PROCESSER_NUM> mCoreArr;
 				MultiSet<TiLogCoreMini> mCoreMap;  // earliest active cores->newest active cores->free cores // [210,0x0100],[209,0x0200],[SEQ_FREE,0x0300]
 				core_seq_t mPollSeq{ SEQ_BEIGN };		// max seq of log has collected and commit to core
@@ -1940,7 +1949,13 @@ namespace tilogspace
 		void TiLogPrinterManager::pushLogsToPrinters(IOBean* p)
 		{
 			if (m_bigBean.empty()) { m_bigBean.mTime = p->mTime; }
-			m_bigBean.append(*p);
+			constexpr size_t padding_base = TILOG_ENABLE_AVX ? 32 : (TILOG_ENABLE_SSE_4_1 ? 16 : 1);
+			size_t append_size_unpadding=p->size();
+			size_t append_size = (append_size_unpadding + padding_base - 1) / padding_base * padding_base;
+			size_t padding_size = append_size - append_size_unpadding;
+			alignas(padding_base) constexpr char padding_str[32]="\n                              ";
+			p->append(padding_str,padding_size);
+			m_bigBean.append_aa((*p));
 			m_cached_bytes += p->size();
 
 			if (m_cached_bytes >= TILOG_FILE_BUFFER) { sync(); }
@@ -2223,9 +2238,9 @@ namespace tilogspace
 		{
 			DEBUG_PRINTA("TiLogDaemon::TiLogDaemon %p\n", this);
 
-			for (size_t i = 0; i < TILOG_DAEMON_PROCESSER_NUM; ++i)
+			for (uint32_t i = 0; i < TILOG_DAEMON_PROCESSER_NUM; ++i)
 			{
-				auto core = new TiLogCore(this, i);
+				auto core = new(mScheduler.mCoreArrRaw[i]) TiLogCore(this, i);
 				mScheduler.mCoreArr[i] = core;
 				TiLogCoreMini cmini{ SEQ_FREE, core };
 				mScheduler.mCoreMap.emplace(cmini);
@@ -2246,7 +2261,7 @@ namespace tilogspace
 			mPoll.mThrd.join();
 			for (auto c : mScheduler.mCoreArr)
 			{
-				delete c;
+				c->~TiLogCore();
 			}
 			mTiLogPrinterManager->fsync();	   // make sure printers output all logs and free to SyncedIOBeanPool
 			DEBUG_PRINTI(
