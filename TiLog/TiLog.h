@@ -503,6 +503,11 @@ namespace tilogspace
 {
 	constexpr static uint32_t TILOG_AVX_ALIGN = 32;
 	constexpr static uint32_t TILOG_SSE4_ALIGN = 16;
+#if TILOG_ENABLE_AVX
+	constexpr static uint32_t TILOG_SIMD_ALIGN = TILOG_AVX_ALIGN;
+#elif TILOG_ENABLE_SSE_4_1
+	constexpr static uint32_t TILOG_SIMD_ALIGN = TILOG_SSE4_ALIGN;
+#endif
 }	 // namespace tilogspace
 #if TILOG_ENABLE_SSE_4_1
 #include <smmintrin.h>	  // SSE4.1

@@ -99,7 +99,7 @@ namespace tilogspace
 	static void init_tilog_buffer()
 	{
 		memset(TILOG_BLANK_BUFFER, ' ', sizeof(TILOG_BLANK_BUFFER));
-		for (size_t i = 63; i < sizeof(TILOG_BLANK_BUFFER); i += 64)
+		for (size_t i = 0; i < sizeof(TILOG_BLANK_BUFFER); i += 64)
 		{
 			TILOG_BLANK_BUFFER[i] = '\n';
 		}
@@ -434,6 +434,8 @@ namespace tilogspace
 			inline size_t capacity() const { return check(), m_cap - m_front; }
 			inline const char& front() const { return *m_front; }
 			inline char& front() { return *m_front; }
+			inline const char& back() const { return *(m_end - 1); }
+			inline char& back() { return *(m_end - 1); }
 			inline const char& operator[](size_t index) const { return m_front[index]; }
 			inline char& operator[](size_t index) { return m_front[index]; }
 			inline const char* data() const { return m_front; }
@@ -1057,9 +1059,13 @@ namespace tilogspace
 			{
 				raw_size = size();
 				size_t mod = size() % align;
-				if (mod != 0) { append(TILOG_BLANK_BUFFER, align - mod); }
+				if (mod != 0)
+				{
+					append(TILOG_BLANK_BUFFER, align - mod);
+					this->back() = '\n';
+				}
 			}
-			void make_aligned_to_simd() { make_aligned(TILOG_AVX_ALIGN); }
+			void make_aligned_to_simd() { make_aligned(TILOG_SIMD_ALIGN); }
 			void make_aligned_to_sector() { make_aligned(TILOG_DISK_SECTOR_SIZE); }
 			using TiLogCoreString::TiLogCoreString;
 		};
@@ -1951,13 +1957,8 @@ namespace tilogspace
 		void TiLogPrinterManager::pushLogsToPrinters(IOBean* p)
 		{
 			if (m_bigBean.empty()) { m_bigBean.mTime = p->mTime; }
-			constexpr size_t padding_base = TILOG_ENABLE_AVX ? 32 : (TILOG_ENABLE_SSE_4_1 ? 16 : 1);
-			size_t append_size_unpadding=p->size();
-			size_t append_size = (append_size_unpadding + padding_base - 1) / padding_base * padding_base;
-			size_t padding_size = append_size - append_size_unpadding;
-			alignas(padding_base) constexpr char padding_str[32]="\n                              ";
-			p->append(padding_str,padding_size);
 			m_bigBean.append_aa((*p));
+			m_bigBean.make_aligned_to_simd();
 			m_cached_bytes += p->size();
 
 			if (m_cached_bytes >= TILOG_FILE_BUFFER) { sync(); }
