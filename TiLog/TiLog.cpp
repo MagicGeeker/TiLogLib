@@ -1053,12 +1053,14 @@ namespace tilogspace
 				resetsize(sz);
 			}
 			size_t unaligned_size(){return raw_size;}
-			void make_aligned()
+			void make_aligned(size_t align)
 			{
 				raw_size = size();
-				size_t mod = size() % TILOG_DISK_SECTOR_SIZE;
-				if (mod != 0) { append(TILOG_BLANK_BUFFER, TILOG_DISK_SECTOR_SIZE - mod); }
+				size_t mod = size() % align;
+				if (mod != 0) { append(TILOG_BLANK_BUFFER, align - mod); }
 			}
+			void make_aligned_to_simd() { make_aligned(TILOG_AVX_ALIGN); }
+			void make_aligned_to_sector() { make_aligned(TILOG_DISK_SECTOR_SIZE); }
 			using TiLogCoreString::TiLogCoreString;
 		};
 		void swap(IOBean& lhs, IOBean& rhs)
@@ -1985,7 +1987,7 @@ namespace tilogspace
 			std::unique_lock<std::mutex> lk(mtx, std::defer_lock);
 			if (withlock) { lk.lock(); }
 			if (m_bigBean.empty()) { return; }
-			m_bigBean.make_aligned();
+			m_bigBean.make_aligned_to_sector();
 			IOBean* for_push = m_IOBeanPool.acquire();
 			swap(*for_push, m_bigBean);	   // m_bigBean clear
 			m_cached_bytes = 0;			   // clear m_cached_bytes counter
@@ -2948,9 +2950,9 @@ namespace tilogspace
 								: TILOG_POLL_THREAD_MIN_SLEEP_MS;
 						} else
 						{
-							ms = mPoll.mPollPeriodMs * 100 / TILOG_POLL_MS_ADJUST_PERCENT_RATE >= TILOG_POLL_THREAD_MAX_SLEEP_MS
-								? TILOG_POLL_THREAD_MAX_SLEEP_MS
-								: mPoll.mPollPeriodMs * 100 / TILOG_POLL_MS_ADJUST_PERCENT_RATE;
+							uint32_t ms1 = mPoll.mPollPeriodMs * 100 / TILOG_POLL_MS_ADJUST_PERCENT_RATE;
+							ms = std::max(ms1, ms1 + 1);
+							ms = std::min(ms, TILOG_POLL_THREAD_MAX_SLEEP_MS);
 						}
 					}
 					mPoll.SetPollPeriodMs(ms);
@@ -3081,8 +3083,13 @@ namespace tilogspace
 					}
 					to_free.clear();
 					mCaches.clear();
+					if (mPollPeriodMs > std::max(TILOG_POLL_THREAD_SLEEP_MS_IF_EXIST_THREAD_DYING, TILOG_POLL_THREAD_SLEEP_MS_IF_SYNC)
+						&& mDeliver.mIoBean.size() <= TILOG_FILE_BUFFER)
+					{
+						continue;
+					}
 
-					mDeliver.mIoBean.make_aligned();
+					mDeliver.mIoBean.make_aligned_to_sector();
 					TiLogStringView sv{ mDeliver.mIoBean.data(), mDeliver.mIoBean.size() };
 					if (sv.size() != 0)
 					{

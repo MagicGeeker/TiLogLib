@@ -255,8 +255,8 @@ namespace tilogspace
 
 
 	constexpr static uint32_t TILOG_DISK_SECTOR_SIZE= 4096;   // %32==0 && %512=0
-	constexpr static size_t TILOG_FILE_IO_SIZE= (1U << 19U);	//  must be power of 2 and >>=4096
-	constexpr static size_t TILOG_FILE_BUFFER= (2U << 20U);	//  must be power of 2 and >>=TILOG_FILE_IO_SIZE
+	constexpr static size_t TILOG_FILE_IO_SIZE= (1U << 19U);	//  must be an integer multiple of TILOG_DISK_SECTOR_SIZE and >>=TILOG_DISK_SECTOR_SIZE
+	constexpr static size_t TILOG_FILE_BUFFER= (2U << 20U);	//  must be an integer multiple of TILOG_DISK_SECTOR_SIZE and >>=TILOG_FILE_IO_SIZE
 	constexpr static size_t TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE= (64U << 20U);	// log size per file,it is not accurate,especially TILOG_DELIVER_CACHE_DEFAULT_MEMORY_BYTES is bigger
 }	 // namespace tilogspace
 
@@ -3740,6 +3740,10 @@ namespace tilogspace
 	static_assert(TILOG_MERGE_RAWDATA_QUEUE_FULL_SIZE >= TILOG_MERGE_RAWDATA_QUEUE_NEARLY_FULL_SIZE, "fatal error!too small");
 
 	static_assert(TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE > 0, "fatal err!");
+	static_assert(TILOG_DISK_SECTOR_SIZE % 512 == 0, "fatal err!");
+	static_assert(TILOG_FILE_IO_SIZE % TILOG_DISK_SECTOR_SIZE == 0 && TILOG_FILE_IO_SIZE >= TILOG_DISK_SECTOR_SIZE, "fatal err!");
+	static_assert(TILOG_FILE_BUFFER % TILOG_FILE_IO_SIZE == 0 && TILOG_FILE_BUFFER >= TILOG_FILE_IO_SIZE, "fatal err!");
+
 }	 // namespace tilogspace
 
 namespace tilogspace
