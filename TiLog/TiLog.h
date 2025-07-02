@@ -210,7 +210,7 @@ namespace tilogspace
 #else
 		constexpr static bool ON_RELEASE = false, ON_DEV = true;
 #endif
-
+	constexpr static uint16_t TILOG_SOURCE_LOCATION_MAX_SIZE = 368;
 	// interval of user mode clock sync with kernel(microseconds),should be smaller than timestamp print accuracy
 	constexpr static uint32_t TILOG_USER_MODE_CLOCK_UPDATE_US = TILOG_IS_WITH_MILLISECONDS ? 300 : 300000;
 
@@ -2209,14 +2209,6 @@ namespace tilogspace
 
 namespace tilogspace
 {
-	constexpr char LOG_PREFIX[] = "???AFEWIDV????";	   // begin ??? ,and end ???? is invalid
-	constexpr const char* const LOG_LEVELS[] = { "????????", "????????", "????????", "ALWAYS  ", "FATAL   ", "ERROR   ", "WARNING ",
-												 "INFO    ", "DEBUG   ", "VERBOSE ", "????????", "????????", "????????", "????????" };
-	constexpr size_t LOG_LEVELS_STRING_LEN = 8;
-	constexpr auto* SOURCE_LOCATION_PREFIX = LOG_LEVELS;
-	constexpr uint16_t SOURCE_LOCATION_PREFIX_SIZE = LOG_LEVELS_STRING_LEN;
-
-
 	// reserve +1 for '\0'
 	constexpr size_t TILOG_UINT16_MAX_CHAR_LEN = (5 + 1);
 	constexpr size_t TILOG_INT16_MAX_CHAR_LEN = (6 + 1);
@@ -2340,8 +2332,10 @@ namespace tilogspace
 				static_assert(N == N1 + N2, "static_string length error");
 			}
 			constexpr const char* data() const { return s; }
-			constexpr size_t size() const { return N; }
-			alignas(32) char s[N + 1];
+			constexpr size_t size() const { return str_size; }
+			constexpr const char& operator[](size_t i) const { return s[i]; }
+			size_t str_size = N;
+			char s[N + 1];
 		};
 
 		template <size_t N>
@@ -2393,6 +2387,7 @@ namespace tilogspace
 			return substr[0] == '\0' ? 0 : ((str[0] == '\0') ? -1 : (is_prefix(str, substr) ? pos : find(str + 1, substr, 1 + pos)));
 		}
 
+		using static_str_t = static_string<32, CONCAT>;
 
 		class TiLogStringView
 		{
@@ -2703,6 +2698,16 @@ namespace tilogspace
 		
 	}	 // namespace internal
 
+	constexpr char LOG_PREFIX[] = "???AFEWIDV????";	   // begin ??? ,and end ???? is invalid
+#define sc8l(s) internal::string_concat(internal::string_literal(s), internal::string_literal(""))
+	constexpr const internal::static_string<8, internal::CONCAT> LOG_LEVELS[] = {
+		sc8l("????????"), sc8l("????????"), sc8l("????????"), sc8l("ALWAYS  "), sc8l("FATAL   "), sc8l("ERROR   "), sc8l("WARNING "),
+		sc8l("INFO    "), sc8l("DEBUG   "), sc8l("VERBOSE "), sc8l("????????"), sc8l("????????"), sc8l("????????"), sc8l("????????")
+	};
+#undef sc8l
+
+	constexpr size_t LOG_LEVELS_STRING_LEN = 8;
+	constexpr auto* SOURCE_LOCATION_PREFIX = LOG_LEVELS;
 
 	namespace internal
 	{
@@ -3068,16 +3073,15 @@ namespace tilogspace
 			DEBUG_CANARY_UINT32(flag1)
 			TiLogTime tiLogTime;
 			const String* tid;
-			const char* source_location_str;  // like "ERROR a.cpp:102 foo()"
-			uint16_t source_location_size;
+			const static_str_t* source_location_str;	// like {21,"ERROR a.cpp:102 foo()"}
 			sub_sys_t subsys;
 
 			DEBUG_DECLARE(uint8_t tidlen)
-				DEBUG_CANARY_UINT64(flag3)
-				DEBUG_DECLARE(char datas[])	   //{tid}{userlog}
+			DEBUG_CANARY_UINT64(flag3)
+			DEBUG_DECLARE(char datas[])	   //{tid}{userlog}
 
 		public:
-			ELogLevelFlag level() const { return (ELogLevelFlag)source_location_str[0]; }
+			ELogLevelFlag level() const { return (ELogLevelFlag)(*source_location_str)[0]; }
 			const TiLogTime& time() const { return tiLogTime; }
 
 			TiLogTime& time() { return tiLogTime; }
@@ -3343,15 +3347,14 @@ namespace tilogspace
 
 	public:
 		// unique way to make a valid stream
-		inline TiLogStream(sub_sys_t subsys, const char* source_location_str, uint16_t source_location_size) : StringType(EPlaceHolder{})
+		inline TiLogStream(sub_sys_t subsys, const internal::static_str_t* source_location_p) : StringType(EPlaceHolder{})
 		{
 			//force store ptr in pCore, then used in do_malloc
 			pCore = (Core*)mempoolspace::tilogstream_mempool::acquire_localthread_mempool(subsys);
 			create(TILOG_SINGLE_LOG_RESERVE_LEN);
 			TiLogBean& bean = *ext();
 			bean.subsys = subsys;
-			bean.source_location_str = source_location_str;
-			bean.source_location_size = source_location_size;
+			bean.source_location_str = source_location_p;
 			const String* tidstr = tilogspace::internal::GetThreadIDString();
 			DEBUG_ASSERT(tidstr);
 			bean.tid = tidstr;
@@ -3487,8 +3490,7 @@ namespace tilogspace
 	protected:
 		inline TiLogStream& resetLogLevel(ELevel lv)
 		{
-			ext()->source_location_str = SOURCE_LOCATION_PREFIX[lv];
-			ext()->source_location_size = SOURCE_LOCATION_PREFIX_SIZE;
+			ext()->source_location_str = (internal::static_str_t*)&SOURCE_LOCATION_PREFIX[lv];
 			return *this;
 		}
 
@@ -3688,11 +3690,11 @@ namespace tilogspace
 		inline TiLogStreamEx(TiLogStreamEx&& rhs) noexcept : TiLogStreamEx() { swap(rhs); }
 		inline TiLogStreamEx& operator=(TiLogStreamEx&& rhs) noexcept { return this->stream = std::move(rhs.stream), *this; }
 
-		inline TiLogStreamEx(sub_sys_t subsys, tilogspace::internal::TiLogStringView source) : tilogspace::TiLogStreamEx()
+		inline TiLogStreamEx(sub_sys_t subsys, const internal::static_str_t* source) : tilogspace::TiLogStreamEx()
 		{
-			if (tilogspace::should_log(subsys, internal::ELogLevelChar2ELevel(source[0])))
+			if (tilogspace::should_log(subsys, internal::ELogLevelChar2ELevel(source->data()[0])))
 			{
-				new (&stream) TiLogStream(subsys, source.data(), (uint16_t)source.size());
+				new (&stream) TiLogStream(subsys, source);
 			}
 		};
 
@@ -3754,12 +3756,12 @@ namespace tilogspace
 		return SupportDynamicLevel(subsys) ? (level <= TiLog::GetSubSystemRef(subsys).GetLogLevel()) : (level <= GetDefaultLogLevel(subsys));
 	}
 
-	TILOG_FORCEINLINE TiLogStream CreateNewTiLogStream(tilogspace::internal::TiLogStringView src, sub_sys_t SUB_SYS)
-	{
-		return { SUB_SYS, src.data(), (uint16_t)src.size() };
-	}
+	TILOG_FORCEINLINE TiLogStream CreateNewTiLogStream(const internal::static_str_t* src, sub_sys_t SUB_SYS) { return { SUB_SYS, src }; }
 
-	TILOG_FORCEINLINE TiLogStreamEx CreateNewTiLogStreamEx(tilogspace::internal::TiLogStringView src, sub_sys_t SUB_SYS) { return { SUB_SYS, src }; }
+	TILOG_FORCEINLINE TiLogStreamEx CreateNewTiLogStreamEx(const internal::static_str_t* src, sub_sys_t SUB_SYS)
+	{ 
+		return { SUB_SYS, src };
+	}
 }	 // namespace tilogspace
 
 namespace tilogspace
@@ -3800,7 +3802,7 @@ namespace tilogspace
 		template <ELevel LV>
 		constexpr inline static_string<LOG_LEVELS_STRING_LEN, LITERAL> tilog_level()
 		{
-			return static_string<LOG_LEVELS_STRING_LEN, LITERAL>(LOG_LEVELS[LV], nullptr);
+			return static_string<LOG_LEVELS_STRING_LEN, LITERAL>(LOG_LEVELS[LV].data(), nullptr);
 		}
 
 		constexpr int tilog_funcl(const char* func, size_t memsize, int m)
@@ -3901,13 +3903,13 @@ namespace tilogspace
 #define TILOG_GET_LEVEL_SOURCE_LOCATION(lv)                                                                                                \
 	[] {                                                                                                                                   \
 		constexpr static auto source = tilogspace::internal::tiLog_level_source<lv>(TILOG_INTERNAL_GET_SOURCE_LOCATION_STRING);            \
-		return tilogspace::internal::TiLogStringView(source.data(), source.size());                                                        \
+		return (tilogspace::internal::static_str_t*)&source;                                                                               \
 	}()
 
 #define TILOG_GET_LEVEL_SOURCE_LOCATION_DLV(lv)                                                                                            \
 	[](ELevel elv) {                                                                                                                       \
 		constexpr static auto sources = tilogspace::internal::tiLog_level_sources(TILOG_INTERNAL_GET_SOURCE_LOCATION_STRING);              \
-		return tilogspace::internal::TiLogStringView(sources[elv].data(), sources[elv].size());                                            \
+		return (tilogspace::internal::static_str_t*)&sources[elv];                                                                         \
 	}(lv)
 
 // clang-format on

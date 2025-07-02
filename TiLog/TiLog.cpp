@@ -187,9 +187,9 @@ namespace tilogspace
 
 		struct TiLogStreamInner
 		{
-			inline TiLogStreamInner(tilogspace::internal::TiLogStringView source)
+			inline TiLogStreamInner(const static_str_t* source)
 			{
-				new (&stream) TiLogStream(ETiLogSubSysID(TILOG_SUB_SYSTEM_INTERNAL), source.data(), (uint16_t)source.size());
+				new (&stream) TiLogStream(ETiLogSubSysID(TILOG_SUB_SYSTEM_INTERNAL), source);
 			}
 			~TiLogStreamInner();
 			inline TiLogStream* Stream() noexcept { return &stream; }
@@ -330,6 +330,34 @@ namespace tiloghelperspace
 
 using namespace tiloghelperspace;
 
+namespace tilogspace
+{
+	/*
+	all static_string<> have some offset, can forse cast to static_str_t
+	*/
+	template <uint16_t N>
+	struct static_string_concat_helper;
+
+	template <uint16_t N>
+	struct static_string_concat_helper
+	{
+		using base = static_string<N, CONCAT>;
+		constexpr static uint32_t value_offset_s = offsetof(base, s);
+		static_assert(value_offset_s == static_string_concat_helper<N + 1>::value_offset_s, "fatal");
+		constexpr static size_t offset_str() { return static_string_concat_helper<N + 1>::offset_str(); }
+	};
+
+	template <>
+	struct static_string_concat_helper<TILOG_SOURCE_LOCATION_MAX_SIZE>
+	{
+		using base = static_string<UINT16_MAX, CONCAT>;
+		constexpr static uint32_t value_offset_s = offsetof(base, s);
+		constexpr static size_t offset_str() { return value_offset_s; }
+	};
+	constexpr static size_t static_string_concat_offset_str = static_string_concat_helper<0>::offset_str();
+	
+
+}	 // namespace tilogspace
 
 namespace tilogspace
 {
@@ -2609,7 +2637,7 @@ namespace tilogspace
 			TiLogStringView logsv {bean.buf(),bean.size};
 			auto& logs = mDeliver.mIoBean;
 			auto preSize = logs.size();
-			auto source_location_size = bean.ext.source_location_size;
+			auto source_location_size = bean.ext.source_location_str->size();
 			auto beanSVSize = logsv.size();
 			size_t L2 = (source_location_size + bean.ext.tid->size() + beanSVSize);
 			size_t append_size = L2 + TILOG_RESERVE_LEN_L1;
@@ -2632,7 +2660,7 @@ namespace tilogspace
 #endif
 			}
 			logs.writend(mDeliver.mlogprefix, sizeof(mDeliver.mlogprefix));
-			logs.writend(bean.ext.source_location_str,source_location_size);
+			logs.writend(bean.ext.source_location_str->data(), source_location_size);
 			logs.writend(bean.ext.tid->c_str(), bean.ext.tid->size());
 			logs.writend(logsv.data(), beanSVSize);			 //-----logsv.size()
 													   // clang-format off
