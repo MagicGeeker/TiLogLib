@@ -1124,7 +1124,8 @@ namespace tilogspace
 		{
 			using mutex_type = OptimisticMutex;
 			constexpr static uint32_t MAX_SIZE = TILOG_IO_STRING_DATA_POOL_SIZE;
-			inline static void recreate(IOBean* p) { p->clear(); }
+			inline static void onrelease(IOBean* p) { p->clear(); }
+			inline static void recreate(IOBean* p) {}
 		};
 
 		struct SyncedIOBeanPool : TiLogSyncedObjectPool<IOBean, IOBeanPoolFeat>
@@ -1139,6 +1140,48 @@ namespace tilogspace
 						runnable(p);
 					}
 				}
+			}
+		};
+
+
+		struct iobean_statics_vec_t : PodCircularQueue<size_t, 8>
+		{
+			SyncedIOBeanPool* mIOBeanPool;
+			size_t mIoBeanSizeSum{};
+			uint64_t mShrinkCount{};
+			std::chrono::steady_clock::time_point mLastShrink{ std::chrono::steady_clock::now() };
+			iobean_statics_vec_t(SyncedIOBeanPool* pool) : mIOBeanPool(pool)
+			{
+				for (size_t i = 0; i < capacity(); i++)
+				{
+					emplace_back(0);
+				}
+			}
+			void ShrinkIoBeansMem(IOBean* curr)
+			{
+				size_t currSize = curr == nullptr ? 0 : curr->size();
+				DEBUG_ASSERT(full());
+				if (currSize > 32)
+				{
+					size_t oldestSize = front();
+					pop_front();
+					emplace_back(currSize);
+					mIoBeanSizeSum = mIoBeanSizeSum + currSize - oldestSize;
+				}
+				double avgSize = (double)mIoBeanSizeSum / capacity();
+				// char test_str[32];
+				// snprintf(test_str, 32, "test printf lf %lf\n", 1.0);	// may deadlock in mingw64/Windows
+				auto nt = std::chrono::steady_clock::now();
+				if (mLastShrink + std::chrono::milliseconds(TILOG_MEM_TRIM_LEAST_MS) > nt) { return; }
+				mLastShrink = nt;
+
+				auto shrink_mem_func = [&](IOBean* pBean) {
+					size_t oldCap = pBean->capacity();
+					int64_t newCap = pBean->shrink_to_fit((size_t)avgSize);
+					mShrinkCount += (newCap > 0 ? 1 : 0);
+				};
+				if (curr != nullptr) { shrink_mem_func(curr); }
+				if (mIOBeanPool) { mIOBeanPool->for_each(shrink_mem_func); }
 			}
 		};
 
@@ -1313,10 +1356,7 @@ namespace tilogspace
 			SyncedIOBeanPool mIOBeanPool;
 			uint64_t mPushLogCount{};
 			uint64_t mPushLogBlockCount{};
-			PodCircularQueue<size_t, 16> mIoBeanSizes;
-			size_t mIoBeanSizeSum{};
-			std::chrono::steady_clock::time_point mLastShrink{ std::chrono::steady_clock::now() };
-			uint64_t mShrinkCount{};
+			iobean_statics_vec_t mBeanShrinker{&mIOBeanPool};
 			static_assert(sizeof(mlogprefix) == TILOG_PREFIX_LOG_SIZE, "fatal");
 			DeliverStru();
 		} ;
@@ -1367,8 +1407,6 @@ namespace tilogspace
 			TiLogTime mergeLogsToOneString(VecLogCache& deliverCache);
 
 			void pushLogsToPrinters(IOBean* pIObean);
-
-			inline void ShrinkDeliverIoBeanMem();
 
 			inline void DeliverLogs();
 
@@ -1585,8 +1623,6 @@ namespace tilogspace
 		class TiLogPrinterManager : public TiLogObject
 		{
 
-			friend class TiLogCore;
-
 			friend class tilogspace::TiLogStream;
 
 		public:
@@ -1610,11 +1646,11 @@ namespace tilogspace
 		public:	   // internal public
 			bool Prepared();
 			void addPrinter(TiLogPrinter* printer);
-			void pushLogsToPrinters(IOBean* p);
-			void pushLogsToPrinters(IOBeanSharedPtr spLogs);
-			void pushLogsToPrinters(IOBeanSharedPtr spLogs, const printer_ids_t& printerIds);
-			void sync(bool withlock = false);
-			void fsync(bool withlock = false);
+			/* must call from TiLogCore/TiLogDaemon and locked mScheduler，or TiLogDaemon in dtor*/
+			/**/ void pushLogsToPrinters(IOBean* p); /**/
+			/**/ void sync();						 /**/
+			/**/ void fsync();						 /**/
+			/*******************************************/
 			void waitForIO();
 
 		public:
@@ -1625,15 +1661,18 @@ namespace tilogspace
 			Vector<TiLogPrinter*> getPrinters(printer_ids_t dest);
 
 		protected:
+			void pushLogsToPrinters(IOBeanSharedPtr spLogs);
+			void pushLogsToPrinters(IOBeanSharedPtr spLogs, const printer_ids_t& printerIds);
+
 			constexpr static uint32_t GetPrinterNum() { return GetArgsNum<TILOG_REGISTER_PRINTERS>(); }
 
 			constexpr static int32_t GetIndexFromPUID(EPrinterID e) { return e > 128 ? _ : log2table[(uint32_t)e]; }
 
 		private:
 			TILOG_MUTEXABLE_CLASS_MACRO(std::mutex, mtx)
-			size_t m_cached_bytes;
 			SyncedIOBeanPool m_IOBeanPool;
 			IOBean m_bigBean;
+			iobean_statics_vec_t mBeanShrinker{&m_IOBeanPool};
 			TiLogEngine* m_engine;
 			Vector<TiLogPrinter*> m_printers;
 			std::atomic<printer_ids_t> m_dest;
@@ -1988,12 +2027,10 @@ namespace tilogspace
 		}
 		void TiLogPrinterManager::pushLogsToPrinters(IOBean* p)
 		{
+			if (m_bigBean.size() >= TILOG_FILE_BUFFER) { sync(); }
 			if (m_bigBean.empty()) { m_bigBean.mTime = p->mTime; }
 			m_bigBean.append_aa((*p));
 			m_bigBean.make_aligned_to_simd();
-			m_cached_bytes += p->size();
-
-			if (m_cached_bytes >= TILOG_FILE_BUFFER) { sync(); }
 		}
 
 		void TiLogPrinterManager::pushLogsToPrinters(IOBeanSharedPtr spLogs) { pushLogsToPrinters(spLogs, GetPrinters()); }
@@ -2008,22 +2045,18 @@ namespace tilogspace
 			}
 		}
 
-		void TiLogPrinterManager::fsync(bool withlock)
+		void TiLogPrinterManager::fsync()
 		{
-			std::unique_lock<std::mutex> lk(mtx, std::defer_lock);
-			if (withlock) { lk.lock(); }
 			sync();
 			waitForIO();
 		}
-		void TiLogPrinterManager::sync(bool withlock)
+		void TiLogPrinterManager::sync()
 		{
-			std::unique_lock<std::mutex> lk(mtx, std::defer_lock);
-			if (withlock) { lk.lock(); }
+			mBeanShrinker.ShrinkIoBeansMem(&m_bigBean);
 			if (m_bigBean.empty()) { return; }
 			m_bigBean.make_aligned_to_sector();
 			IOBean* for_push = m_IOBeanPool.acquire();
 			swap(*for_push, m_bigBean);	   // m_bigBean clear
-			m_cached_bytes = 0;			   // clear m_cached_bytes counter
 			pushLogsToPrinters({ for_push, [this](IOBean* b) { m_IOBeanPool.release(b); } });
 		}
 		void TiLogPrinterManager::waitForIO()
@@ -2108,10 +2141,7 @@ namespace tilogspace
 			  mTiLogMap(&TiLogEngines::getRInstance().tilogmap), mID(id)
 		{
 			DEBUG_PRINTA("TiLogCore::TiLogCore %p\n", this);
-			for (size_t i = 0; i < mDeliver.mIoBeanSizes.capacity(); i++)
-			{
-				mDeliver.mIoBeanSizes.emplace_back(0);
-			}
+			
 			mThread = mTiLogDaemon->CreateCoreThread(*this, this);
 		}
 
@@ -2152,7 +2182,7 @@ namespace tilogspace
 				}
 				{
 					DeliverLogs();
-					ShrinkDeliverIoBeanMem();
+					mDeliver.mBeanShrinker.ShrinkIoBeansMem(mDeliver.mIoBeanForPush);
 					++mDeliver.mDeliveredTimes;
 					mDeliver.mDeliverCache.clear();
 				}
@@ -2189,9 +2219,9 @@ namespace tilogspace
 			DEBUG_PRINTA(
 				"mMerge.mMergedSize %llu mDeliver{ mPushLogCount %llu mPushLogBlockCount %llu mShrinkCount %llu no-block "
 				"rate %4.1f%% no-shrink rate %4.1f%% }\n",
-				(llu)mMerge.mMergedSize, (llu)mDeliver.mPushLogCount, (llu)mDeliver.mPushLogBlockCount, (llu)mDeliver.mShrinkCount,
+				(llu)mMerge.mMergedSize, (llu)mDeliver.mPushLogCount, (llu)mDeliver.mPushLogBlockCount, (llu)mDeliver.mBeanShrinker.mShrinkCount,
 				100.0 - 100.0 * mDeliver.mPushLogBlockCount / mDeliver.mPushLogCount,
-				100.0 - 100.0 * mDeliver.mShrinkCount / mDeliver.mPushLogCount);
+				100.0 - 100.0 * mDeliver.mBeanShrinker.mShrinkCount / mDeliver.mPushLogCount);
 			TiLogCore* core = nullptr;
 			auto& schd = mTiLogDaemon->mScheduler;
 			synchronized(schd)
@@ -2339,7 +2369,7 @@ namespace tilogspace
 				{
 					if (mScheduler.mHandledSeq > seq)
 					{
-						mTiLogPrinterManager->sync(true);
+						mTiLogPrinterManager->sync();
 						return;
 					}
 				}
@@ -2739,32 +2769,6 @@ namespace tilogspace
 			mDeliver.mIOBeanPool.release(pIObean);
 		}
 
-		void TiLogCore::ShrinkDeliverIoBeanMem()
-		{
-			size_t currSize = mDeliver.mIoBeanForPush == nullptr ? 0 : mDeliver.mIoBeanForPush->size();
-			DEBUG_ASSERT(mDeliver.mIoBeanSizes.full());
-			size_t oldestSize = mDeliver.mIoBeanSizes.front();
-			mDeliver.mIoBeanSizes.pop_front();
-			mDeliver.mIoBeanSizes.emplace_back(currSize);
-			mDeliver.mIoBeanSizeSum = mDeliver.mIoBeanSizeSum + currSize - oldestSize;
-			double avgSize = (double)mDeliver.mIoBeanSizeSum / mDeliver.mIoBeanSizes.capacity();
-			// DEBUG_PRINTA("test printf lf %lf\n",1.0);  //may deadlock in mingw64/Windows
-			auto nt = std::chrono::steady_clock::now();
-			if (mDeliver.mLastShrink + std::chrono::milliseconds(TILOG_DELIVER_CACHE_CAPACITY_ADJUST_LEAST_MS) > nt) { return; }
-			mDeliver.mLastShrink = nt;
-
-			auto shrink_mem_func = [&](IOBean* pBean) {
-				size_t oldCap = pBean->capacity();
-				int64_t newCap = pBean->shrink_to_fit((size_t)avgSize);
-				DEBUG_PRINTI(
-					"shrink %p currSize %llu avgSize %.2lf oldCap %llu newCap %lld\n", pBean, (long long unsigned)currSize, avgSize,
-					(long long unsigned)oldCap, (long long)newCap);
-				mDeliver.mShrinkCount += (newCap > 0 ? 1 : 0);
-			};
-			if (mDeliver.mIoBeanForPush != nullptr) { shrink_mem_func(mDeliver.mIoBeanForPush); }
-			shrink_mem_func(&mDeliver.mIoBean);
-			mDeliver.mIOBeanPool.for_each(shrink_mem_func);
-		}
 
 		inline void TiLogCore::DeliverLogs()
 		{
@@ -2865,6 +2869,18 @@ namespace tilogspace
 				{
 					mPoll.mLastPolltime = nowTime;
 					mempoolspace::tilogstream_mempool::trim();
+					for (TiLogCore* core : mScheduler.mCoreArr)
+					{
+						{
+							auto lk = GetCoreThrdLock(*core);
+							core->mNeedWoking = true;
+						}
+						core->mCV.notify_one();
+					}
+					synchronized(mScheduler){
+						mTiLogPrinterManager->sync();
+					}
+					DEBUG_PRINTA("creae inno log for trim mem");
 				}
 				// try lock when first run or deliver complete recently
 				// force lock if in TiLogCore exit or exist dying threads or pool internal > TILOG_POLL_THREAD_MAX_SLEEP_MS
@@ -3088,6 +3104,7 @@ namespace tilogspace
 			{
 				SetThreadName((thrd_t)-1, "InnoLoger");
 				DeliverStru mDeliver;
+				iobean_statics_vec_t mBeanShrinker{nullptr};
 				Vector<TiLogCompactString*> to_free;
 				while (1)
 				{
@@ -3116,6 +3133,7 @@ namespace tilogspace
 					}
 					to_free.clear();
 					mCaches.clear();
+					mBeanShrinker.ShrinkIoBeansMem(&mDeliver.mIoBean);
 					if (mPollPeriodMs > std::max(TILOG_POLL_THREAD_SLEEP_MS_IF_EXIST_THREAD_DYING, TILOG_POLL_THREAD_SLEEP_MS_IF_SYNC)
 						&& mDeliver.mIoBean.size() <= TILOG_FILE_BUFFER)
 					{

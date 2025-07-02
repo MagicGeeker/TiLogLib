@@ -14,6 +14,7 @@
 #include <type_traits>
 #include <iostream>
 #include <algorithm>
+#include <chrono>
 
 #include <string>
 #if __cplusplus >= 201703L
@@ -221,7 +222,7 @@ namespace tilogspace
 	constexpr static uint32_t TILOG_POLL_THREAD_SLEEP_MS_IF_TO_EXIT = 1;	// poll period if some user threads are dying
 	constexpr static uint32_t TILOG_POLL_THREAD_SLEEP_MS_IF_SYNC = 2;	// poll period if sync or fsync
 	constexpr static uint32_t TILOG_POLL_MS_ADJUST_PERCENT_RATE = 75;	// range(0,100),a percent number to adjust poll time
-	constexpr static uint32_t TILOG_DELIVER_CACHE_CAPACITY_ADJUST_LEAST_MS = 500;	// range(0,) adjust deliver cache capacity least internal
+	constexpr static uint32_t TILOG_MEM_TRIM_LEAST_MS = 500;	// range(0,) adjust mem least internal
 
 	constexpr static size_t TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE = ((size_t)1 << 8U);			 // single thread cache queue max length
 	
@@ -1619,6 +1620,7 @@ namespace tilogspace
 		using mutex_type = std::mutex;
 		constexpr static uint32_t MAX_SIZE = 32;
 		inline static OType* create() { return new OType{}; }
+		inline static void onrelease(OType* p) {}
 		inline static void recreate(OType* p) { *p = OType{}; }
 		inline static void Destroy(OType* p) { delete p; }
 	};
@@ -1658,6 +1660,7 @@ namespace tilogspace
 
 		void release(ObjectPtr p)
 		{
+			FeatType::onrelease(p);
 			synchronized(mtx)
 			{
 				if (size >= SIZE)
@@ -2634,7 +2637,7 @@ namespace tilogspace
 
 			inline void ensureCapNoCheck(size_type ensure_cap)
 			{
-				size_type new_cap = ensure_cap * 3 / 2;
+				size_type new_cap = ensure_cap * 8 / 7;
 				// you must ensure (ensure_cap * RESERVE_RATE_DEFAULT) will not over-flow size_type max
 				DEBUG_ASSERT2(new_cap > ensure_cap, new_cap, ensure_cap);
 				realloc(new_cap);
