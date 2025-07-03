@@ -1673,6 +1673,7 @@ namespace tilogspace
 			SyncedIOBeanPool m_IOBeanPool;
 			IOBean m_bigBean;
 			iobean_statics_vec_t mBeanShrinker{&m_IOBeanPool};
+			SteadyTimePoint mLastSync{ SteadyClock::now() };
 			TiLogEngine* m_engine;
 			Vector<TiLogPrinter*> m_printers;
 			std::atomic<printer_ids_t> m_dest;
@@ -2027,7 +2028,9 @@ namespace tilogspace
 		}
 		void TiLogPrinterManager::pushLogsToPrinters(IOBean* p)
 		{
-			if (m_bigBean.size() >= TILOG_FILE_BUFFER) { sync(); }
+			SteadyTimePoint tp = SteadyClock::now();
+			auto ms = chrono::duration_cast<chrono::milliseconds>(tp - mLastSync).count();
+			if (m_bigBean.size() >= TILOG_FILE_BUFFER || ms >= TILOG_SYNC_MAX_INTERVAL_MS) { sync(); }
 			if (m_bigBean.empty()) { m_bigBean.mTime = p->mTime; }
 			m_bigBean.append_aa((*p));
 			m_bigBean.make_aligned_to_simd();
@@ -2052,6 +2055,7 @@ namespace tilogspace
 		}
 		void TiLogPrinterManager::sync()
 		{
+			mLastSync = SteadyClock::now();
 			mBeanShrinker.ShrinkIoBeansMem(&m_bigBean);
 			if (m_bigBean.empty()) { return; }
 			m_bigBean.make_aligned_to_sector();
