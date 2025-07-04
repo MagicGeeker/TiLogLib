@@ -430,6 +430,10 @@ namespace tilogspace
 	{
 	} tilog_align_val_t;
 
+
+	inline size_t round_up(size_t size, size_t align) { return (size + align - 1) / align * align; }
+	inline size_t round_down(size_t size, size_t align) { return size / align * align; }
+
 	struct TiLogCppMemoryManager
 	{
 		// placement new delete
@@ -558,7 +562,7 @@ namespace tilogspace
 namespace tilogspace
 {
 	// src dest MUST BE aligned to 128bit(16 byte)
-	inline void sse128_memcpy_aa(void* dest, const void* src, size_t size)
+	inline void* sse128_memcpy_aa(void* dest, const void* src, size_t size)
 	{
 		DEBUG_ASSERT(((uintptr_t)src) % 16 == 0);
 		DEBUG_ASSERT(((uintptr_t)dest) % 16 == 0);
@@ -585,6 +589,7 @@ namespace tilogspace
 		DEBUG_ASSERT(src_ptr == src_end);
 		size_t remaining = (char*)src + size - (char*)src_end;
 		if (remaining > 0) { memcpy(dest_ptr, src_ptr, remaining); }
+		return dest;
 	}
 
 
@@ -592,7 +597,7 @@ namespace tilogspace
 #else
 namespace tilogspace
 {
-	inline void sse128_memcpy_aa(void* dest, const void* src, size_t size) { memcpy(dest, src, size); }
+	inline void* sse128_memcpy_aa(void* dest, const void* src, size_t size) { return memcpy(dest, src, size); }
 }	 // namespace tilogspace
 #endif
 
@@ -602,7 +607,7 @@ namespace tilogspace
 namespace tilogspace
 {
 	// src dest MUST BE aligned to 256bit(32 byte)
-	inline void avx256_memcpy_aa(void* dest, const void* src, size_t size)
+	inline void* avx256_memcpy_aa(void* dest, const void* src, size_t size)
 	{
 		DEBUG_ASSERT(((uintptr_t)src) % 32 == 0);
 		DEBUG_ASSERT(((uintptr_t)dest) % 32 == 0);
@@ -629,22 +634,25 @@ namespace tilogspace
 		DEBUG_ASSERT(src_ptr == src_end);
 		size_t remaining = (char*)src + size - (char*)src_end;
 		if (remaining > 0) { memcpy(dest_ptr, src_ptr, remaining); }
+		return dest;
 	}
 }	 // namespace tilogspace
 #else
 namespace tilogspace
 {
-	inline void avx256_memcpy_aa(void* dest, const void* src, size_t size) { memcpy(dest, src, size); }
+	inline void* avx256_memcpy_aa(void* dest, const void* src, size_t size) { return memcpy(dest, src, size); }
 }	 // namespace tilogspace
 #endif
 
 namespace tilogspace
 {
-	inline void adapt_memcpy(void* dest, const void* src, size_t size) { 
+	inline void* adapt_memcpy(void* dest, const void* src, size_t size) { 
 		#if TILOG_ENABLE_AVX
-		avx256_memcpy_aa(dest, src, size);
+		return avx256_memcpy_aa(dest, src, size);
 		#elif TILOG_ENABLE_SSE_4_1
-		sse128_memcpy_aa(dest, src, size);
+		return sse128_memcpy_aa(dest, src, size);
+		#else
+		return memcpy(dest, src, size);
 		#endif
 	}
 }	 // namespace tilogspace

@@ -649,16 +649,20 @@ namespace tilogspace
 		template <typename T, size_t CAPACITY>
 		class PodCircularQueue : public TiLogObject
 		{
-			static_assert(std::is_pod<T>::value, "fatal error");
+
+			static_assert(
+				std::is_trivially_copy_constructible<T>::value && std::is_trivially_copy_assignable<T>::value
+					&& std::is_trivially_move_assignable<T>::value && std::is_trivially_destructible<T>::value,
+				"fatal error");
 
 		public:
 			using iterator = T*;
 			using const_iterator = const T*;
 
-			explicit PodCircularQueue() : pMem((T*)timalloc((1 + CAPACITY) * sizeof(T))), pMemEnd(pMem + 1 + CAPACITY)
-			{
-				pFirst = pEnd = pMem;
-			}
+
+			explicit PodCircularQueue(T* mem) : pMem(mem), pMemEnd(pMem + CAPACITY) { pFirst = pEnd = pMem; }
+
+			explicit PodCircularQueue() : PodCircularQueue((T*)timalloc(CAPACITY * sizeof(T))) {}
 
 			PodCircularQueue(const PodCircularQueue& rhs) : PodCircularQueue()
 			{
@@ -667,6 +671,7 @@ namespace tilogspace
 				memcpy(pMem, rhs.first_sub_queue_begin(), sz1 * sizeof(T));
 				memcpy(pMem + sz1, rhs.second_sub_queue_begin(), sz2 * sizeof(T));
 				pEnd = pMem + (sz1 + sz2);
+				q_size = rhs.q_size;
 			}
 			PodCircularQueue(PodCircularQueue&& rhs)
 			{
@@ -675,6 +680,7 @@ namespace tilogspace
 				this->pFirst = rhs.pFirst;
 				this->pEnd = rhs.pEnd;
 				rhs.pMem = nullptr;
+				this->q_size = rhs.q_size;
 			}
 
 			PodCircularQueue& operator=(PodCircularQueue rhs) noexcept
@@ -685,7 +691,7 @@ namespace tilogspace
 
 			~PodCircularQueue() { tifree(pMem); }
 
-			bool empty() const { return pFirst == pEnd; }
+			bool empty() const { return q_size == 0; }
 
 			bool full() const
 			{
@@ -695,12 +701,14 @@ namespace tilogspace
 
 			size_t size() const
 			{
-				size_t sz = normalized() ? pEnd - pFirst : ((pMemEnd - pFirst) + (pEnd - pMem));
+				size_t sz = q_size;
 				DEBUG_ASSERT4(sz <= capacity(), pMem, pMemEnd, pFirst, pEnd);
 				return sz;
 			}
 
 			constexpr size_t capacity() const { return CAPACITY; }
+
+			size_t available_size() const { return capacity() - size(); }
 
 			bool normalized() const
 			{
@@ -708,16 +716,16 @@ namespace tilogspace
 				DEBUG_ASSERT2(pFirst < pMemEnd, pFirst, pMemEnd);
 				DEBUG_ASSERT2(pMem <= pEnd, pMem, pEnd);
 				DEBUG_ASSERT2(pEnd <= pMemEnd, pEnd, pMemEnd);
-				return pEnd >= pFirst;
+				return pEnd > pFirst || q_size == 0;
 			}
 
-			T front() const
+			T& front() const
 			{
 				DEBUG_ASSERT(!empty());
 				return *pFirst;
 			}
 
-			T back() const
+			T& back() const
 			{
 				DEBUG_ASSERT(pEnd >= pMem);
 				return pEnd > pMem ? *(pEnd - 1) : *(pMemEnd - 1);
@@ -741,6 +749,7 @@ namespace tilogspace
 			void clear()
 			{
 				pEnd = pFirst = pMem;
+				q_size = 0;
 				DEBUG_RUN(memset(pMem, 0, mem_size()));
 			}
 
@@ -750,6 +759,7 @@ namespace tilogspace
 				if (pEnd == pMemEnd) { pEnd = pMem; }
 				*pEnd = t;
 				pEnd++;
+				q_size++;
 			}
 
 			void pop_front()
@@ -762,6 +772,61 @@ namespace tilogspace
 				{
 					pFirst++;
 				}
+				q_size--;
+			}
+
+			bool emplace_back(const T t[], size_t n, void* (*copyfun)(void*, const void*, size_t) = memcpy)
+			{
+				if (size() + n > capacity()) { return false; }
+				if (pEnd == pMemEnd) { pEnd = pMem; }
+				if (!normalized())
+				{
+					copyfun(pEnd, t, n * sizeof(T));
+					pEnd += n;
+				} else
+				{
+					size_t sz1 = std::min(size_t(pMemEnd - pEnd), n);
+					copyfun(pEnd, t, sz1 * sizeof(T));
+					if (sz1 >= n)
+					{
+						pEnd += n;
+					} else
+					{
+						size_t sz2 = n - sz1;
+						copyfun(pMem, t + sz1, sz2 * sizeof(T));
+						pEnd = pMem + sz2;
+					}
+				}
+				q_size += n;
+				return true;
+			}
+
+			void pop_front(size_t n)
+			{
+				DEBUG_ASSERT2(n <= size(), size(), n);
+				if (normalized())
+				{
+					pFirst += n;
+				} else
+				{
+					size_t sz1 = pMemEnd - pFirst;
+					if (sz1 >= n)
+					{
+						pFirst += n;
+					} else
+					{
+						size_t sz2 = n - sz1;
+						pFirst = pMem + sz2;
+					}
+				}
+				if (pFirst == pMemEnd) { pFirst = pMem; }
+				q_size -= n;
+			}
+			iterator next(iterator it)
+			{
+				if (it == pMemEnd) { return pMem + 1; }
+				if (it + 1 == pMemEnd) { return pMem; }
+				return it + 1;
 			}
 
 			// exclude _to
@@ -771,9 +836,17 @@ namespace tilogspace
 				{
 					DEBUG_ASSERT(pFirst <= _to);
 					DEBUG_ASSERT(_to <= pEnd);
+					q_size = pEnd - _to;
 				} else
 				{
 					DEBUG_ASSERT((pFirst <= _to && _to <= pMemEnd) || (pMem <= _to && _to <= pEnd));
+					if (pFirst <= _to && _to <= pMemEnd)
+					{
+						q_size -= (_to - pFirst);
+					} else
+					{
+						q_size = pEnd - _to;
+					}
 				}
 
 				if (_to == pMemEnd)
@@ -824,18 +897,14 @@ namespace tilogspace
 				v.insert(v.end(), _beg, _end);
 			}
 
-		private:
 			size_t mem_size() const { return (pMemEnd - pMem) * sizeof(T); }
-			iterator begin() { return pFirst; }
-			iterator end() { return pEnd; }
-			const_iterator begin() const { return pFirst; }
-			const_iterator end() const { return pEnd; }
 
-		private:
 			T* pMem;
 			T* pMemEnd;
 			T* pFirst;
 			T* pEnd;
+			size_t q_size = 0;
+			DEBUG_DECLARE(T (*pDbgMemArr)[CAPACITY] = (T(*)[CAPACITY])pMem);
 		};
 
 #endif
@@ -892,6 +961,11 @@ namespace tilogspace
 			V  emptyV;
 		};
 #endif
+
+		template <typename MutexType = std::mutex, typename task_t = std::function<void()>>
+		class TiLogTaskQueueBasic;
+		
+		using TiLogPrinterTaskQueue  = TiLogTaskQueueBasic<>;
 
 
 #ifdef TILOG_OS_WIN
@@ -989,7 +1063,7 @@ namespace tilogspace
 		};
 
 
-		using CrcQueueLogCache = PodCircularQueue<TiLogCompactString*, TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE - 1>;
+		using CrcQueueLogCache = PodCircularQueue<TiLogCompactString*, TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE>;
 		using TiLogCoreString = TiLogString;
 
 		using ThreadLocalSpinMutex = OptimisticMutex;
@@ -1213,7 +1287,7 @@ namespace tilogspace
 		};
 		using VecLogCachePool = TiLogObjectPool<VecLogCache, VecLogCacheFeat>;
 
-		template <typename MutexType = std::mutex, typename task_t = std::function<void()>>
+		template <typename MutexType, typename task_t>
 		class TiLogTaskQueueBasic
 		{
 		public:
@@ -1611,13 +1685,12 @@ namespace tilogspace
 
 		private:
 			using buf_t = TiLogPrinter::buf_t;
-			using TiLogPrinterTask = TiLogTaskQueueBasic<std::mutex>;
 
 			atomic_bool mPrinterCtorCompleted{ false };
 			atomic_bool mTaskQThrdCreated{ false };
 			TiLogEngine* mpEngine;
 			TiLogPrinter* mpPrinter;
-			TiLogPrinterTask mTaskQueue;
+			TiLogPrinterTaskQueue mTaskQueue;
 		};
 
 		class TiLogPrinterManager : public TiLogObject
