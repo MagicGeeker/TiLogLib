@@ -34,6 +34,7 @@
 #define __________________________________________________TiLogFile__________________________________________________
 #define __________________________________________________TiLogNonePrinter__________________________________________________
 #define __________________________________________________TiLogTerminalPrinter__________________________________________________
+#define __________________________________________________TiLogFileRotater__________________________________________________
 #define __________________________________________________TiLogFilePrinter__________________________________________________
 #define __________________________________________________TiLogPrinterManager__________________________________________________
 #define __________________________________________________TiLogCore__________________________________________________
@@ -1031,6 +1032,38 @@ namespace tilogspace
 			TiLogTerminalPrinter();
 		};
 
+		struct TiLogFileRotater
+		{
+			~TiLogFileRotater()
+			{
+				if (mPrintedBytesOnFile < TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE)
+				{
+					DEBUG_ASSERT(singleFilePrintedLogSize % TILOG_DISK_SECTOR_SIZE == 0);
+					file().trunc(mPrintedBytesOnFile);
+				};
+			}
+
+			TiLogFileRotater(String folderPath0, TiLogFile& file) : mFolderPath(std::move(folderPath0)), mFile(file)
+			{
+				if (mFolderPath.empty() || mFolderPath.back() != '/') { std::abort(); }
+			}
+
+			void onAcceptLogs(TiLogPrinter::MetaData metaData);
+
+			void CreateNewFile(TiLogPrinter::MetaData metaData);
+			TiLogFile& file() { return mFile; }
+
+			size_t mPrintedBytesOnFile = SIZE_MAX;
+			uint64_t sPrintedBytesTotal = 0;
+
+		protected:
+			const String mFolderPath;
+			TiLogFile& mFile;
+			uint32_t mFileIndex = 0;
+			char mPreTimeStr[TILOG_CTIME_MAX_LEN]{};
+			uint64_t mIndex = 1;
+		};
+
 		class TiLogFilePrinter : public TiLogFile, public TiLogPrinter	  // TiLogFile must dtor after TiLogPrinter
 		{
 			friend class TiLogPrinterManager;
@@ -1047,19 +1080,11 @@ namespace tilogspace
 		protected:
 			TiLogFilePrinter(String folderPath);
 			TiLogFilePrinter(TiLogEngine* e, String folderPath);
-			void ctor_check();
-
 			~TiLogFilePrinter() override;
-			void CreateNewFile(MetaData metaData);
 			TiLogFile& file() { return *this; }
-			size_t singleFilePrintedLogSize = SIZE_MAX;
-			uint64_t s_printedLogsLength = 0;
 
 		protected:
-			const String folderPath;
-			uint32_t mFileIndex = 0;
-			char mPreTimeStr[TILOG_CTIME_MAX_LEN]{};
-			uint64_t index = 1;
+			TiLogFileRotater mRotater;
 		};
 
 
@@ -1926,57 +1951,25 @@ namespace tilogspace
 #endif
 
 
-#ifdef __________________________________________________TiLogFilePrinter__________________________________________________
+#ifdef __________________________________________________TiLogFileRotater__________________________________________________
 
-		TiLogFilePrinter::TiLogFilePrinter(String folderPath0) : TiLogPrinter(), folderPath(std::move(folderPath0)) { ctor_check(); }
-		TiLogFilePrinter::TiLogFilePrinter(TiLogEngine* e, String folderPath0) : TiLogPrinter(e), folderPath(std::move(folderPath0))
+		void TiLogFileRotater::onAcceptLogs(TiLogPrinter::MetaData metaData)
 		{
-			ctor_check();
-		}
-		void TiLogFilePrinter::ctor_check()
-		{
-			DEBUG_PRINTA("file printer %p path %s\n", this, folderPath.c_str());
-			if (folderPath.empty() || folderPath.back() != '/') { std::abort(); }
-		}
-
-		TiLogFilePrinter::~TiLogFilePrinter()
-		{
-			auto runnable = [this] {
-				if (singleFilePrintedLogSize < TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE)
-				{
-					DEBUG_ASSERT(singleFilePrintedLogSize % TILOG_DISK_SECTOR_SIZE == 0);
-					file().trunc(singleFilePrintedLogSize);
-				};
-			};
-			if (isSyncIO())
-			{
-				runnable();
-			} else
-			{
-				mData->pushTask(runnable);
-			}
-		}
-
-		void TiLogFilePrinter::onAcceptLogs(MetaData metaData)
-		{
-			if (singleFilePrintedLogSize > TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE)
+			if (mPrintedBytesOnFile > TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE)
 			{
 				{
-					s_printedLogsLength += singleFilePrintedLogSize;
-					singleFilePrintedLogSize = 0;
+					sPrintedBytesTotal += mPrintedBytesOnFile;
+					mPrintedBytesOnFile = 0;
 					file().close();
-					DEBUG_PRINTV("sync and write index=%u \n", (unsigned)index);
+					DEBUG_PRINTV("sync and write index=%u \n", (unsigned)mIndex);
 				}
 
 				CreateNewFile(metaData);
 			}
-			{
-				file().write(TiLogStringView{ metaData->logs, metaData->logs_size });
-				singleFilePrintedLogSize += metaData->logs_size;
-			}
+			mPrintedBytesOnFile += metaData->logs_size;
 		}
 
-		void TiLogFilePrinter::CreateNewFile(MetaData metaData)
+		void TiLogFileRotater::CreateNewFile(TiLogFilePrinter::MetaData metaData)
 		{
 			char timeStr[TILOG_CTIME_MAX_LEN];
 			size_t size = TimePointToTimeCStr(timeStr, metaData->logTime.get_origin_time());
@@ -2002,16 +1995,31 @@ namespace tilogspace
 				constexpr size_t LOG_FILE_MIN = (1U << 10U);
 #endif
 				static_assert(TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE >= LOG_FILE_MIN, "too small file size,logs may overlap");
-				s.append(folderPath).append(fileName, size).append(indexs).append(".log", 4);
+				s.append(mFolderPath).append(fileName, size).append(indexs).append(".log", 4);
 			} else
 			{
 				char indexs[9];
-				snprintf(indexs, 9, "%07llu_", (unsigned long long)index);
-				s = folderPath + indexs;
-				index++;
+				snprintf(indexs, 9, "%07llu_", (unsigned long long)mIndex);
+				s = mFolderPath + indexs;
+				mIndex++;
 			}
 
 			file().open({ s.data(), s.size() });
+		}
+#endif
+
+#ifdef __________________________________________________TiLogFilePrinter__________________________________________________
+		TiLogFilePrinter::TiLogFilePrinter(String folderPath0) : TiLogPrinter(), mRotater(std::move(folderPath0), *this) {}
+		TiLogFilePrinter::TiLogFilePrinter(TiLogEngine* e, String folderPath0) : TiLogPrinter(e), mRotater(std::move(folderPath0), *this) {}
+
+		TiLogFilePrinter::~TiLogFilePrinter()
+		{
+			// TODO
+		}
+		void TiLogFilePrinter::onAcceptLogs(MetaData metaData)
+		{
+			mRotater.onAcceptLogs(metaData);
+			file().write(TiLogStringView{ metaData->logs, metaData->logs_size });
 		}
 
 		void TiLogFilePrinter::sync() { file().sync(); }
