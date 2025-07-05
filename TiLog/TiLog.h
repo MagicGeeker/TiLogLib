@@ -3157,11 +3157,13 @@ namespace tilogspace
 			const char* logs;
 			size_t logs_size;
 			TiLogTime logTime;
+			const char* data()const {return logs;}
+			size_t size()const {return logs_size;}
 		};
 		using MetaData = const buf_t*;
 
 	public:
-		// accept logs with size,logs and NOT end with '\0'
+		// synchronized accept logs with size,logs and NOT end with '\0'
 		virtual void onAcceptLogs(MetaData metaData) = 0;
 
 		// sync with printer's dest

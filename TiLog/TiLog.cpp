@@ -1032,6 +1032,34 @@ namespace tilogspace
 			TiLogTerminalPrinter();
 		};
 
+		struct IOBean;
+		using buf_t = TiLogPrinter::buf_t;
+		struct FilePrinterCrcQueue
+		{
+			constexpr static size_t CAPACITY = TILOG_FILE_BUFFER;
+
+			alignas(TILOG_DISK_SECTOR_SIZE) char datamem[CAPACITY];
+			PodCircularQueue<char, CAPACITY> datas{ datamem };	  // meta never full before data
+			// PodCircularQueue<buf_t, CAPACITY / TILOG_DISK_SECTOR_SIZE> metas;
+
+			~FilePrinterCrcQueue() { datas.pMem = nullptr; }
+			bool emplace_back(const buf_t& p)
+			{
+				size_t aligned_size = round_up(p.size(), TILOG_DISK_SECTOR_SIZE);
+				if (aligned_size <= datas.available_size())
+				{
+					bool succ = datas.emplace_back(p.data(), p.size(), adapt_memcpy);
+					DEBUG_ASSERT(succ);
+					succ = datas.emplace_back(TILOG_BLANK_BUFFER, aligned_size - p.size());
+					DEBUG_ASSERT(succ);
+					// metas.emplace_back(p);
+					return true;
+				}
+				return false;
+			}
+		};
+
+
 		struct TiLogFileRotater
 		{
 			~TiLogFileRotater()
@@ -1064,12 +1092,13 @@ namespace tilogspace
 			uint64_t mIndex = 1;
 		};
 
-		class TiLogFilePrinter : public TiLogFile, public TiLogPrinter	  // TiLogFile must dtor after TiLogPrinter
+		class TiLogFilePrinter : public TiLogPrinter
 		{
 			friend class TiLogPrinterManager;
 			friend struct TiLogInnerLogMgrImpl;
 
 		public:
+			TILOG_ALIGNED_OPERATORS(alignof(FilePrinterCrcQueue))
 			bool isSyncIO() { return mData == nullptr; }
 			void onAcceptLogs(MetaData metaData) override;
 			void sync() override;
@@ -1081,10 +1110,28 @@ namespace tilogspace
 			TiLogFilePrinter(String folderPath);
 			TiLogFilePrinter(TiLogEngine* e, String folderPath);
 			~TiLogFilePrinter() override;
-			TiLogFile& file() { return *this; }
+
+			void pop();
+			void push(const buf_t& b);
+			void push_big_str(const buf_t& metaData);
 
 		protected:
+			TiLogFile mFile;
 			TiLogFileRotater mRotater;
+
+			std::unique_ptr<TiLogPrinterTaskQueue> mTaskQueue;
+			using MutexType = std::mutex;
+			struct loop_ctx_t
+			{
+				TILOG_MUTEXABLE_CLASS_MACRO_WITH_CV(MutexType, mtx, CondType, cv)
+			} loop_ctx;
+			struct wait_ctx_t
+			{
+				size_t acquire_size{};
+				TILOG_MUTEXABLE_CLASS_MACRO_WITH_CV(MutexType, mtx, CondType, cv)
+			} wait_ctx{};
+
+			FilePrinterCrcQueue buffer;
 		};
 
 
@@ -1360,6 +1407,22 @@ namespace tilogspace
 				cv.notify_one();
 			}
 
+			void pushTaskSynced(task_t p)
+			{
+				bool ok = false;
+				std::condition_variable wait_cv;
+				std::mutex wait_mtx;
+
+				pushTask([&] {
+					p();
+					synchronized(wait_mtx) { ok = true; }
+					wait_cv.notify_one();
+				});
+
+				std::unique_lock<std::mutex> lk_wait(wait_mtx);
+				wait_cv.wait(lk_wait, [&ok] { return ok; });
+			}
+
 		private:
 			void loop()
 			{
@@ -1615,7 +1678,7 @@ namespace tilogspace
 				atomic<uint64_t> mCoreWaitCount{};
 
 				Map<core_seq_t, IOBeanTracker> mWaitPushLogs;
-				TILOG_MUTEXABLE_CLASS_MACRO_WITH_CV(OptimisticMutex, mtx, cv_type, cv)
+				TILOG_MUTEXABLE_CLASS_MACRO_WITH_CV(std::mutex, mtx, cv_type, cv)
 			} mScheduler;
 
 
@@ -1759,7 +1822,6 @@ namespace tilogspace
 			Vector<TiLogPrinter*> getPrinters(printer_ids_t dest);
 
 		protected:
-			void pushLogsToPrinters(IOBeanSharedPtr spLogs);
 			void pushLogsToPrinters(IOBeanSharedPtr spLogs, const printer_ids_t& printerIds);
 
 			constexpr static uint32_t GetPrinterNum() { return GetArgsNum<TILOG_REGISTER_PRINTERS>(); }
@@ -1768,9 +1830,7 @@ namespace tilogspace
 
 		private:
 			TILOG_MUTEXABLE_CLASS_MACRO(std::mutex, mtx)
-			SyncedIOBeanPool m_IOBeanPool;
-			IOBean m_bigBean;
-			iobean_statics_vec_t mBeanShrinker{&m_IOBeanPool};
+			size_t m_pushedLogBytes{};
 			SteadyTimePoint mLastSync{ SteadyClock::now() };
 			TiLogEngine* m_engine;
 			Vector<TiLogPrinter*> m_printers;
@@ -2009,23 +2069,89 @@ namespace tilogspace
 #endif
 
 #ifdef __________________________________________________TiLogFilePrinter__________________________________________________
-		TiLogFilePrinter::TiLogFilePrinter(String folderPath0) : TiLogPrinter(), mRotater(std::move(folderPath0), *this) {}
-		TiLogFilePrinter::TiLogFilePrinter(TiLogEngine* e, String folderPath0) : TiLogPrinter(e), mRotater(std::move(folderPath0), *this) {}
+
+		TiLogFilePrinter::TiLogFilePrinter(TiLogEngine* e, String folderPath0)
+			: TiLogPrinter(e), mFile(), mRotater(folderPath0, mFile), mTaskQueue(new TiLogPrinterTaskQueue())
+		{
+			DEBUG_PRINTA("file printer %p path %s\n", this, folderPath0.c_str());
+		}
+
+		TiLogFilePrinter::TiLogFilePrinter(String folderPath0) : TiLogFilePrinter(nullptr, std::move(folderPath0)) {}
 
 		TiLogFilePrinter::~TiLogFilePrinter()
 		{
 			// TODO
+			sync();
 		}
+
 		void TiLogFilePrinter::onAcceptLogs(MetaData metaData)
 		{
 			mRotater.onAcceptLogs(metaData);
-			file().write(TiLogStringView{ metaData->logs, metaData->logs_size });
+			if (metaData->logs_size <= TILOG_FILE_BUFFER)
+			{
+				push(*metaData);
+			} else	  // big string,write through
+			{
+				push_big_str(*metaData);
+			}
 		}
 
-		void TiLogFilePrinter::sync() { file().sync(); }
+		void TiLogFilePrinter::sync()
+		{
+			// TOOD
+		}
 		EPrinterID TiLogFilePrinter::getUniqueID() const { return PRINTER_TILOG_FILE; }
 #endif
 
+		// small str,write async
+		void TiLogFilePrinter::push(const buf_t& b)
+		{
+			bool ret = false;
+			do
+			{
+				std::unique_lock<MutexType> lk(loop_ctx.mtx);
+				ret = buffer.emplace_back(b);	 // copy str to cache
+				if (!ret)
+				{
+					lk.unlock();
+					loop_ctx.cv.notify_one();
+					std::unique_lock<MutexType> lk_wait(wait_ctx.mtx);
+					wait_ctx.acquire_size = b.size();
+					wait_ctx.cv.wait_for(lk_wait, std::chrono::microseconds(1));
+				}
+			} while (!ret);
+
+			mTaskQueue->pushTask([this] { pop(); });
+		}
+
+		// big str,write through
+		void TiLogFilePrinter::push_big_str(const buf_t& metaData)
+		{
+			mTaskQueue->pushTaskSynced([&metaData, this] { mFile.write(TiLogStringView{ metaData.logs, metaData.logs_size }); });
+		}
+
+		void TiLogFilePrinter::pop()
+		{
+			std::unique_lock<MutexType> lk(loop_ctx.mtx);
+			size_t data_size = buffer.datas.first_sub_queue_size();
+			char* data_begin = buffer.datas.first_sub_queue_begin();
+			mFile.write(TiLogStringView{ data_begin, data_size });
+			data_size = buffer.datas.second_sub_queue_size();
+			data_begin = buffer.datas.second_sub_queue_begin();
+			mFile.write(TiLogStringView{ data_begin, data_size });
+			buffer.datas.clear();
+
+			lk.unlock();
+			if (buffer.datas.available_size() >= wait_ctx.acquire_size)
+			{
+				std::unique_lock<MutexType> lk_wait(wait_ctx.mtx);
+				if (buffer.datas.available_size() >= wait_ctx.acquire_size)
+				{
+					lk_wait.unlock();
+					wait_ctx.cv.notify_one();
+				}
+			}
+		}
 
 #ifdef __________________________________________________TiLogPrinterManager__________________________________________________
 		void TiLogPrinterManager::MarkPrinterCtorComplete(TiLogPrinter* p)
@@ -2107,17 +2233,27 @@ namespace tilogspace
 			DEBUG_ASSERT2(u < PRINTER_ID_MAX, e, u);
 			m_printers[u] = printer;
 		}
-		void TiLogPrinterManager::pushLogsToPrinters(IOBean* p)
+		void TiLogPrinterManager::pushLogsToPrinters(IOBean* bufPtr)
 		{
 			SteadyTimePoint tp = SteadyClock::now();
 			auto ms = chrono::duration_cast<chrono::milliseconds>(tp - mLastSync).count();
-			if (m_bigBean.size() >= TILOG_FILE_BUFFER || ms >= TILOG_SYNC_MAX_INTERVAL_MS) { sync(); }
-			if (m_bigBean.empty()) { m_bigBean.mTime = p->mTime; }
-			m_bigBean.append_aa((*p));
-			m_bigBean.make_aligned_to_simd();
+			if (ms >= TILOG_SYNC_MAX_INTERVAL_MS) { sync(); }
+			
+			auto printerIds = GetPrinters();
+			Vector<TiLogPrinter*> printers = TiLogPrinterManager::getPrinters(printerIds);
+			if (printers.empty()) { return; }
+			bufPtr->make_aligned_to_sector();
+			DEBUG_PRINTI("prepare to push %u bytes\n", (unsigned)bufPtr->size());
+			m_pushedLogBytes+=bufPtr->size();
+
+			for (TiLogPrinter* printer : printers)
+			{
+				size_t size = printer->isAlignedOutput() ? bufPtr->size() : bufPtr->unaligned_size();
+				TiLogPrinter::buf_t buf{ bufPtr->data(), size, bufPtr->mTime };
+				printer->onAcceptLogs(TiLogPrinter::MetaData{ &buf });
+			}
 		}
 
-		void TiLogPrinterManager::pushLogsToPrinters(IOBeanSharedPtr spLogs) { pushLogsToPrinters(spLogs, GetPrinters()); }
 		void TiLogPrinterManager::pushLogsToPrinters(IOBeanSharedPtr spLogs, const printer_ids_t& printerIds)
 		{
 			Vector<TiLogPrinter*> printers = TiLogPrinterManager::getPrinters(printerIds);
@@ -2136,13 +2272,7 @@ namespace tilogspace
 		}
 		void TiLogPrinterManager::sync()
 		{
-			mLastSync = SteadyClock::now();
-			mBeanShrinker.ShrinkIoBeansMem(&m_bigBean);
-			if (m_bigBean.empty()) { return; }
-			m_bigBean.make_aligned_to_sector();
-			IOBean* for_push = m_IOBeanPool.acquire();
-			swap(*for_push, m_bigBean);	   // m_bigBean clear
-			pushLogsToPrinters({ for_push, [this](IOBean* b) { m_IOBeanPool.release(b); } });
+			//TODO
 		}
 		void TiLogPrinterManager::waitForIO()
 		{
@@ -2150,28 +2280,7 @@ namespace tilogspace
 			if (printers.empty()) { return; }
 			DEBUG_PRINTI("prepare to wait for io");
 
-			size_t count = printers.size();
-			mutex mtx;
-			condition_variable cv;
-
-			for (TiLogPrinter* printer : printers)
-			{
-				printer->mData->pushTask([printer, &mtx, &count, &cv] {
-					printer->sync();
-					bool zero = false;
-					synchronized(mtx)
-					{
-						count--;
-						if (count == 0) { zero = true; }
-					}
-					if (zero) { cv.notify_one(); }
-				});
-			}
-
-			synchronized_u(lk, mtx)
-			{
-				cv.wait(lk, [&count] { return count == 0; });
-			}
+			//TODO
 		}
 
 		void TiLogPrinterManager::SetLogLevel(ELevel level) { m_level = level; }
@@ -3164,7 +3273,7 @@ namespace tilogspace
 		struct TiLogInnerLogMgrImpl
 		{
 			PodCircularQueue<TiLogCompactString*, TILOG_INNO_LOG_QUEUE_FULL_SIZE> mCaches;
-			TiLogFilePrinter mFilePriter{ TILOG_STATIC_SUB_SYS_CFGS[TILOG_SUB_SYSTEM_INTERNAL].data };
+			//TODO TiLogFilePrinter mFilePriter{ TILOG_STATIC_SUB_SYS_CFGS[TILOG_SUB_SYSTEM_INTERNAL].data };
 			enum
 			{
 				RUN,
@@ -3231,7 +3340,7 @@ namespace tilogspace
 					{
 						TiLogPrinter::buf_t buf{ sv.data(), sv.size(), mDeliver.mIoBean.mTime };
 						TiLogPrinter::MetaData metaData{ &buf };
-						mFilePriter.onAcceptLogs(metaData);
+						//mFilePriter.onAcceptLogs(metaData);
 					}
 					mDeliver.mIoBean.clear();
 				}
@@ -3269,9 +3378,10 @@ namespace tilogspace
 
 		TiLogInnerLogMgr::TiLogInnerLogMgr()
 		{
-			static_assert(sizeof(TiLogInnerLogMgrImpl) <= sizeof(data), "fatal,placement new will over size");
-			static_assert(alignof(TiLogInnerLogMgrImpl) <= alignof(TiLogInnerLogMgr), "fatal,align not enough");
-			new (data) TiLogInnerLogMgrImpl();
+			//TODO
+			 static_assert(sizeof(TiLogInnerLogMgrImpl) <= sizeof(data), "fatal,placement new will over size");
+			 static_assert(alignof(TiLogInnerLogMgrImpl) <= alignof(TiLogInnerLogMgr), "fatal,align not enough");
+			 new (data) TiLogInnerLogMgrImpl();
 		}
 
 		TiLogInnerLogMgr::~TiLogInnerLogMgr() { Impl().~TiLogInnerLogMgrImpl(); }
