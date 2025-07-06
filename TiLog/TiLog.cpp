@@ -993,6 +993,7 @@ namespace tilogspace
 			inline bool open(TiLogStringView fpath);
 			inline void close();
 			inline void sync();
+			inline void fsync() { sync(); }
 			inline int64_t write(TiLogStringView buf);
 			inline void trunc(size_t size);
 
@@ -1010,6 +1011,7 @@ namespace tilogspace
 			bool isSingleInstance() const override { return true; }
 			void onAcceptLogs(MetaData metaData) override {}
 			void sync() override{};
+			void fsync() override{};
 
 		protected:
 			TiLogNonePrinter() = default;
@@ -1025,6 +1027,7 @@ namespace tilogspace
 
 			void onAcceptLogs(MetaData metaData) override;
 			void sync() override;
+			void fsync() override { sync(); }
 			EPrinterID getUniqueID() const override;
 			bool isSingleInstance() const override { return true; }
 
@@ -1102,6 +1105,7 @@ namespace tilogspace
 			bool isSyncIO() { return mData == nullptr; }
 			void onAcceptLogs(MetaData metaData) override;
 			void sync() override;
+			void fsync() override;
 			EPrinterID getUniqueID() const override;
 			bool isSingleInstance() const override{ return false; }
 			bool isAlignedOutput() override { return true; }
@@ -1614,7 +1618,8 @@ namespace tilogspace
 
 			inline void ClearPrintedLogsNumber();
 
-			inline void Sync();
+			inline void Sync(bool andfsync=false);
+			inline void FSync();
 
 			inline void MarkThreadDying(ThreadStru* pStru);
 
@@ -1812,7 +1817,6 @@ namespace tilogspace
 			/**/ void sync();						 /**/
 			/**/ void fsync();						 /**/
 			/*******************************************/
-			void waitForIO();
 
 		public:
 			void SetLogLevel(ELevel level);
@@ -2080,8 +2084,7 @@ namespace tilogspace
 
 		TiLogFilePrinter::~TiLogFilePrinter()
 		{
-			// TODO
-			sync();
+			fsync();
 		}
 
 		void TiLogFilePrinter::onAcceptLogs(MetaData metaData)
@@ -2098,8 +2101,14 @@ namespace tilogspace
 
 		void TiLogFilePrinter::sync()
 		{
-			// TOOD
+			mTaskQueue->pushTaskSynced([] {});
+			// do nothing, only wait for mTaskQueue to handle previous tasks
 		}
+		void TiLogFilePrinter::fsync()
+		{
+			mTaskQueue->pushTaskSynced([this] { mFile.fsync(); });
+		}
+
 		EPrinterID TiLogFilePrinter::getUniqueID() const { return PRINTER_TILOG_FILE; }
 #endif
 
@@ -2267,20 +2276,17 @@ namespace tilogspace
 
 		void TiLogPrinterManager::fsync()
 		{
-			sync();
-			waitForIO();
+			for (TiLogPrinter* printer : m_printers)
+			{
+				printer->fsync();
+			}
 		}
 		void TiLogPrinterManager::sync()
 		{
-			//TODO
-		}
-		void TiLogPrinterManager::waitForIO()
-		{
-			Vector<TiLogPrinter*> printers = TiLogPrinterManager::getAllValidPrinters();
-			if (printers.empty()) { return; }
-			DEBUG_PRINTI("prepare to wait for io");
-
-			//TODO
+			for (TiLogPrinter* printer : m_printers)
+			{
+				printer->sync();
+			}
 		}
 
 		void TiLogPrinterManager::SetLogLevel(ELevel level) { m_level = level; }
@@ -2552,7 +2558,7 @@ namespace tilogspace
 			DEBUG_PRINTA("WaitPrepared: end\n");
 		}
 
-		inline void TiLogDaemon::Sync()
+		inline void TiLogDaemon::Sync(bool andfsync)
 		{
 			core_seq_t seq;
 			synchronized(mScheduler) { seq = mScheduler.mPollSeq; }
@@ -2563,7 +2569,13 @@ namespace tilogspace
 				{
 					if (mScheduler.mHandledSeq > seq)
 					{
-						mTiLogPrinterManager->sync();
+						if (!andfsync)
+						{
+							mTiLogPrinterManager->sync();
+						} else
+						{
+							mTiLogPrinterManager->fsync();
+						}
 						return;
 					}
 				}
@@ -2571,6 +2583,7 @@ namespace tilogspace
 				std::this_thread::sleep_for(std::chrono::milliseconds(TILOG_POLL_THREAD_SLEEP_MS_IF_SYNC));
 			}
 		}
+		inline void TiLogDaemon::FSync() { Sync(true); }
 
 		void TiLogDaemon::PushLog(TiLogCompactString* pBean)
 		{
@@ -3449,11 +3462,7 @@ namespace tilogspace
 	uint64_t TiLogSubSystem::GetPrintedLogs() { return engine->tiLogDaemon.GetPrintedLogs(); }
 	void TiLogSubSystem::ClearPrintedLogsNumber() { engine->tiLogDaemon.ClearPrintedLogsNumber(); }
 
-	void TiLogSubSystem::FSync()
-	{
-		engine->tiLogDaemon.Sync();
-		engine->tiLogPrinterManager.waitForIO();
-	}
+	void TiLogSubSystem::FSync() { engine->tiLogDaemon.FSync(); }
 	printer_ids_t TiLogSubSystem::GetPrinters() { return engine->tiLogPrinterManager.GetPrinters(); }
 	bool TiLogSubSystem::IsPrinterInPrinters(EPrinterID p, printer_ids_t ps)
 	{

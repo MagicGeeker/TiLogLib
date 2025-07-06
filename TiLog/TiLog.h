@@ -3169,6 +3169,8 @@ namespace tilogspace
 		// sync with printer's dest
 		virtual void sync() = 0;
 
+		virtual void fsync() = 0;
+
 		virtual EPrinterID getUniqueID() const = 0;
 
 		virtual bool isSingleInstance() const = 0;
@@ -3207,9 +3209,9 @@ namespace tilogspace
 
 	public:
 		TILOG_COMPLEXITY_FOR_THESE_FUNCTIONS(TILOG_TIME_COMPLEXITY_O(n), TILOG_SPACE_COMPLEXITY_O(n))
-		// sync the cached log(timestamp<=now) to printers's task queue,but NOT wait for IO
+		// sync the cached log(timestamp<=now) to all(include now disabled but enable previously) printers,but NOT wait for IO
 		void Sync();
-		// sync the cached logtimestamp<=now) to printers's task queue,and wait for IO
+		// sync the cached logtimestamp<=now) to all(include now disabled but enable previously) printers,and wait for IO
 		void FSync();
 
 		// printer must be always valid,so it can NOT be removed but can be disabled
