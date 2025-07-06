@@ -1069,7 +1069,7 @@ namespace tilogspace
 			{
 				if (mPrintedBytesOnFile < TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE)
 				{
-					DEBUG_ASSERT(singleFilePrintedLogSize % TILOG_DISK_SECTOR_SIZE == 0);
+					DEBUG_ASSERT(mPrintedBytesOnFile % TILOG_DISK_SECTOR_SIZE == 0);
 					file().trunc(mPrintedBytesOnFile);
 				};
 			}
@@ -3286,7 +3286,8 @@ namespace tilogspace
 		struct TiLogInnerLogMgrImpl
 		{
 			PodCircularQueue<TiLogCompactString*, TILOG_INNO_LOG_QUEUE_FULL_SIZE> mCaches;
-			//TODO TiLogFilePrinter mFilePriter{ TILOG_STATIC_SUB_SYS_CFGS[TILOG_SUB_SYSTEM_INTERNAL].data };
+			TiLogFile mFile{};
+			TiLogFileRotater mRotater{ TILOG_STATIC_SUB_SYS_CFGS[TILOG_SUB_SYSTEM_INTERNAL].data, mFile };
 			enum
 			{
 				RUN,
@@ -3316,7 +3317,6 @@ namespace tilogspace
 				while (1)
 				{
 					unique_lock<OptimisticMutex> lk(mtx);
-					if (stat == TO_STOP) { break; }
 					cv.wait_for(lk, chrono::milliseconds(mPollPeriodMs));
 					++mPoolSeq;
 
@@ -3342,7 +3342,7 @@ namespace tilogspace
 					mCaches.clear();
 					mBeanShrinker.ShrinkIoBeansMem(&mDeliver.mIoBean);
 					if (mPollPeriodMs > std::max(TILOG_POLL_THREAD_SLEEP_MS_IF_EXIST_THREAD_DYING, TILOG_POLL_THREAD_SLEEP_MS_IF_SYNC)
-						&& mDeliver.mIoBean.size() <= TILOG_FILE_BUFFER)
+						&& mDeliver.mIoBean.size() <= TILOG_FILE_BUFFER && stat != TO_STOP)
 					{
 						continue;
 					}
@@ -3353,9 +3353,11 @@ namespace tilogspace
 					{
 						TiLogPrinter::buf_t buf{ sv.data(), sv.size(), mDeliver.mIoBean.mTime };
 						TiLogPrinter::MetaData metaData{ &buf };
-						//mFilePriter.onAcceptLogs(metaData);
+						mRotater.onAcceptLogs(metaData);
+						mFile.write(TiLogStringView{metaData->data(),metaData->size()});
 					}
 					mDeliver.mIoBean.clear();
+					if (stat == TO_STOP) { break; }
 				}
 				stat = STOP;
 			}
@@ -3391,10 +3393,9 @@ namespace tilogspace
 
 		TiLogInnerLogMgr::TiLogInnerLogMgr()
 		{
-			//TODO
-			 static_assert(sizeof(TiLogInnerLogMgrImpl) <= sizeof(data), "fatal,placement new will over size");
-			 static_assert(alignof(TiLogInnerLogMgrImpl) <= alignof(TiLogInnerLogMgr), "fatal,align not enough");
-			 new (data) TiLogInnerLogMgrImpl();
+			static_assert(sizeof(TiLogInnerLogMgrImpl) <= sizeof(data), "fatal,placement new will over size");
+			static_assert(alignof(TiLogInnerLogMgrImpl) <= alignof(TiLogInnerLogMgr), "fatal,align not enough");
+			new (data) TiLogInnerLogMgrImpl();
 		}
 
 		TiLogInnerLogMgr::~TiLogInnerLogMgr() { Impl().~TiLogInnerLogMgrImpl(); }
