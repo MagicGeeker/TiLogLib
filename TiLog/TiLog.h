@@ -873,7 +873,7 @@ namespace tilogspace
 			int idx_raw = index % 64;
 
 			bit_unit_t& unitL2 = searchL2[idx_L2];
-			if (!unitL2.bitget(idx_raw)) { return false; };
+			if (!unitL2.bitget(idx_raw)) { return false; }
 			if (unitL2.val == 0) { searchL1.bitset0(idx_L2); }
 			unitL2.bitset0(idx_raw);
 			bit1_cnt--;
@@ -1321,7 +1321,7 @@ namespace tilogspace
 		{
 			std::unique_lock<std::mutex> lk(mtx);
 
-			while (1)
+			while (true)
 			{
 				if (!free_local_pool.empty())
 				{
@@ -3238,7 +3238,6 @@ namespace tilogspace
 		ELevel GetLogLevel();
 	public:
 		// usually only use internally
-		void PushLog(internal::TiLogBean* pBean);
 		void PushLog(internal::TiLogCompactString* str);
 
 	protected:
@@ -3422,7 +3421,7 @@ namespace tilogspace
 		}
 
 	public:
-		inline constexpr operator bool() const { return true; }
+		inline constexpr explicit operator bool() const { return true; }
 		inline TiLogStream& operator<<(bool b) { return (b ? append("true", 4) : append("false", 5)), *this; }
 		inline TiLogStream& operator<<(unsigned char c) { return append(c), *this; }
 		inline TiLogStream& operator<<(signed char c) { return append(c), *this; }

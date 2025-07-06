@@ -988,7 +988,7 @@ namespace tilogspace
 			inline TiLogFile() = default;
 			inline ~TiLogFile();
 			inline TiLogFile(TiLogStringView fpath);
-			inline operator bool() const;
+			explicit inline operator bool() const;
 			inline bool valid() const;
 			inline bool open(TiLogStringView fpath);
 			inline void close();
@@ -1071,7 +1071,7 @@ namespace tilogspace
 				{
 					DEBUG_ASSERT(mPrintedBytesOnFile % TILOG_DISK_SECTOR_SIZE == 0);
 					file().trunc(mPrintedBytesOnFile);
-				};
+				}
 			}
 
 			TiLogFileRotater(String folderPath0, TiLogFile& file) : mFolderPath(std::move(folderPath0)), mFile(file)
@@ -1169,8 +1169,8 @@ namespace tilogspace
 			ThreadLocalSpinMutex spinMtx;	 // protect cache
 
 			mempoolspace::linear_mem_pool_list* lmempoolist;
-			core_seq_t pollseq_when_thrd_dead = core_seq_t::SEQ_INVALID;			
-			core_seq_t inno_pollseq_when_thrd_dead = core_seq_t::SEQ_INVALID;			
+			core_seq_t pollseq_when_thrd_dead = core_seq_t::SEQ_INVALID;
+			core_seq_t inno_pollseq_when_thrd_dead = core_seq_t::SEQ_INVALID;
 			const String* tid;
 			std::mutex thrdExistMtx;
 			std::condition_variable thrdExistCV;
@@ -1560,7 +1560,7 @@ namespace tilogspace
 			bool IsBusy() override { return mNeedWoking; };
 
 			inline explicit TiLogCore(TiLogDaemon* d, uint32_t id);
-			inline ~TiLogCore() final;
+			inline ~TiLogCore() override final;
 
 		private:
 
@@ -1948,7 +1948,7 @@ namespace tilogspace
 			for (size_t j = 0; j < buf.size(); j += B)
 			{
 				DWORD r = 0;
-				DWORD cnt = (j + B) < buf.size() ? B : (buf.size() - j);
+				DWORD cnt = static_cast<DWORD>((j + B) < buf.size() ? B : (buf.size() - j));
 				WriteFile(fd, &buf[j], cnt, &r, 0);
 				ret += r;
 			}
@@ -3225,7 +3225,6 @@ namespace tilogspace
 			auto core = mScheduler.mCoreMap.begin()->core;
 			mScheduler.unlock();
 			AtInternalThreadExit(&mPoll, core);
-			return;
 		}
 
 		inline void TiLogDaemon::InitCoreThreadBeforeRun(const char* tag)
@@ -3235,7 +3234,6 @@ namespace tilogspace
 			{
 				this_thread::yield();
 			}
-			return;
 		}
 
 		inline void TiLogDaemon::AtInternalThreadExit(CoreThrdStru* thrd, CoreThrdStru* nextExitThrd)
@@ -3314,7 +3312,7 @@ namespace tilogspace
 				DeliverStru mDeliver;
 				iobean_statics_vec_t mBeanShrinker{nullptr};
 				Vector<TiLogCompactString*> to_free;
-				while (1)
+				while (true)
 				{
 					unique_lock<OptimisticMutex> lk(mtx);
 					cv.wait_for(lk, chrono::milliseconds(mPollPeriodMs));
@@ -3465,10 +3463,7 @@ namespace tilogspace
 
 	void TiLogSubSystem::FSync() { engine->tiLogDaemon.FSync(); }
 	printer_ids_t TiLogSubSystem::GetPrinters() { return engine->tiLogPrinterManager.GetPrinters(); }
-	bool TiLogSubSystem::IsPrinterInPrinters(EPrinterID p, printer_ids_t ps)
-	{
-		return engine->tiLogPrinterManager.IsPrinterInPrinters(p, ps);
-	}
+	bool TiLogSubSystem::IsPrinterInPrinters(EPrinterID p, printer_ids_t ps) { return TiLogPrinterManager::IsPrinterInPrinters(p, ps); }
 	bool TiLogSubSystem::IsPrinterActive(EPrinterID printer) { return engine->tiLogPrinterManager.IsPrinterActive(printer); }
 	void TiLogSubSystem::EnablePrinter(EPrinterID printer)
 	{
