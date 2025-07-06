@@ -1370,19 +1370,16 @@ namespace tilogspace
 			TiLogTaskQueueBasic(const TiLogTaskQueueBasic& rhs) = delete;
 			TiLogTaskQueueBasic(TiLogTaskQueueBasic&& rhs) = delete;
 
-			explicit TiLogTaskQueueBasic(bool runAtOnce = true)
+			explicit TiLogTaskQueueBasic(EPlaceHolder, task_t initerFunc, bool runAtOnce = true)
 			{
+				this->initerFunc = initerFunc;
 				stat = RUN;
-				DEBUG_PRINTI("Create TiLogTaskQueueBasic %p\n", this);
+				creator_tid = GetNewThreadIDString();
+				DEBUG_PRINTI("Create TiLogTaskQueueBasic %p by thread %s\n", this, creator_tid.data());
 				if (runAtOnce) { start(); }
 			}
-			explicit TiLogTaskQueueBasic(EPlaceHolder,task_t initerFunc,bool runAtOnce = true)
-			{
-				this->initerFunc=initerFunc;
-				stat = RUN;
-				DEBUG_PRINTI("Create TiLogTaskQueueBasic %p\n", this);
-				if (runAtOnce) { start(); }
-			}
+			explicit TiLogTaskQueueBasic(bool runAtOnce = true) : TiLogTaskQueueBasic({}, {}, runAtOnce) {}
+
 			~TiLogTaskQueueBasic() { wait_stop(); }
 			void start()
 			{
@@ -1453,6 +1450,7 @@ namespace tilogspace
 			task_t initerFunc;
 			Deque<task_t> taskDeque;
 			String looptid;
+			String creator_tid;
 			TILOG_MUTEXABLE_CLASS_MACRO_WITH_CV(MutexType, mtx, CondType, cv)
 			enum
 			{
@@ -1460,10 +1458,6 @@ namespace tilogspace
 				TO_STOP,
 				STOP
 			} stat;
-		};
-
-		class TiLogTaskQueue : public TiLogTaskQueueBasic<OptimisticMutex>
-		{
 		};
 
 		class TiLogCore;
@@ -1670,7 +1664,6 @@ namespace tilogspace
 			atomic<uint64_t> mCoreLoopCount{};
 
 			ThreadStruQueue mThreadStruQueue;
-			TiLogTaskQueue mTaskQueue;
 
 			struct
 			{
@@ -1751,39 +1744,15 @@ namespace tilogspace
 		{
 			friend class TiLogPrinterManager;
 			friend class tilogspace::TiLogPrinter;
-			using task_t = std::function<void()>;
 
 		public:
-			explicit TiLogPrinterData(TiLogEngine* e, TiLogPrinter* p) : mpEngine(e), mpPrinter(p), mTaskQueue({}, [this] { this->init(); })
-			{
-			}
+			explicit TiLogPrinterData(TiLogEngine* e, TiLogPrinter* p) : mpEngine(e), mpPrinter(p) {}
 
-			// call after mPrinterInited==true
-			void init();
-
-			inline void pushTask(task_t&& task)
-			{
-				mTaskQueue.pushTask(task);
-			}
-
-			inline void pushLogs(IOBeanSharedPtr bufPtr)
-			{
-				auto printTask = [this, bufPtr] {
-					size_t size = mpPrinter->isAlignedOutput() ? bufPtr->size() : bufPtr->unaligned_size();
-					TiLogPrinter::buf_t buf{ bufPtr->data(), size, bufPtr->mTime };
-					mpPrinter->onAcceptLogs(TiLogPrinter::MetaData{ &buf });
-				};
-				mTaskQueue.pushTask(printTask);
-			}
+			void SetPrinterThreadName();
 
 		private:
-			using buf_t = TiLogPrinter::buf_t;
-
-			atomic_bool mPrinterCtorCompleted{ false };
-			atomic_bool mTaskQThrdCreated{ false };
 			TiLogEngine* mpEngine;
 			TiLogPrinter* mpPrinter;
-			TiLogPrinterTaskQueue mTaskQueue;
 		};
 
 		class TiLogPrinterManager : public TiLogObject
@@ -1796,7 +1765,6 @@ namespace tilogspace
 			printer_ids_t GetPrinters();
 			bool IsPrinterActive(EPrinterID printer);
 
-			static void MarkPrinterCtorComplete(TiLogPrinter* p);
 			static TiLogPrinter* CreatePrinter(TiLogEngine* e,EPrinterID id);
 			static bool IsPrinterInPrinters(EPrinterID printer, printer_ids_t printers);
 			static void EnablePrinterForPrinters(EPrinterID printer, printer_ids_t& printers);
@@ -1826,8 +1794,6 @@ namespace tilogspace
 			Vector<TiLogPrinter*> getPrinters(printer_ids_t dest);
 
 		protected:
-			void pushLogsToPrinters(IOBeanSharedPtr spLogs, const printer_ids_t& printerIds);
-
 			constexpr static uint32_t GetPrinterNum() { return GetArgsNum<TILOG_REGISTER_PRINTERS>(); }
 
 			constexpr static int32_t GetIndexFromPUID(EPrinterID e) { return e > 128 ? _ : log2table[(uint32_t)e]; }
@@ -1885,12 +1851,8 @@ namespace tilogspace
 			~TiLogEngines();
 		};
 
-		void TiLogPrinterData::init()
+		void TiLogPrinterData::SetPrinterThreadName()
 		{
-			while (!mPrinterCtorCompleted)
-			{
-				std::this_thread::yield();
-			}
 			char tname[16];
 			if (mpEngine != nullptr)
 			{
@@ -1900,7 +1862,6 @@ namespace tilogspace
 				snprintf(tname, 16, "printer#%d", (int)mpPrinter->getUniqueID());
 			}
 			SetThreadName((thrd_t)-1, tname);
-			mTaskQThrdCreated = true;
 		}
 
 	}	 // namespace internal
@@ -2078,6 +2039,7 @@ namespace tilogspace
 			: TiLogPrinter(e), mFile(), mRotater(folderPath0, mFile), mTaskQueue(new TiLogPrinterTaskQueue())
 		{
 			DEBUG_PRINTA("file printer %p path %s\n", this, folderPath0.c_str());
+			mTaskQueue->pushTask([this] { mData->SetPrinterThreadName(); });
 		}
 
 		TiLogFilePrinter::TiLogFilePrinter(String folderPath0) : TiLogFilePrinter(nullptr, std::move(folderPath0)) {}
@@ -2163,10 +2125,7 @@ namespace tilogspace
 		}
 
 #ifdef __________________________________________________TiLogPrinterManager__________________________________________________
-		void TiLogPrinterManager::MarkPrinterCtorComplete(TiLogPrinter* p)
-		{
-			if (p->mData) { p->mData->mPrinterCtorCompleted = true; }
-		}
+
 		TiLogPrinter* TiLogPrinterManager::CreatePrinter(TiLogEngine* e, EPrinterID id)
 		{
 			TiLogPrinter* p;
@@ -2185,7 +2144,6 @@ namespace tilogspace
 				DEBUG_ASSERT(false);
 				p = TiLogNonePrinter::getInstance();
 			}
-			MarkPrinterCtorComplete(p);
 			return p;
 		}
 
@@ -2237,7 +2195,7 @@ namespace tilogspace
 			EPrinterID e = printer->getUniqueID();
 			int32_t u = GetIndexFromPUID(e);
 			DEBUG_PRINTA(
-				"addPrinter printer[addr: %p id: %d index: %d] taskqueue[addr %p]\n", printer, (int)e, (int)u, &printer->mData->mTaskQueue);
+				"addPrinter printer[addr: %p id: %d index: %d]\n", printer, (int)e, (int)u);
 			DEBUG_ASSERT2(u >= 0, e, u);
 			DEBUG_ASSERT2(u < PRINTER_ID_MAX, e, u);
 			m_printers[u] = printer;
@@ -2260,17 +2218,6 @@ namespace tilogspace
 				size_t size = printer->isAlignedOutput() ? bufPtr->size() : bufPtr->unaligned_size();
 				TiLogPrinter::buf_t buf{ bufPtr->data(), size, bufPtr->mTime };
 				printer->onAcceptLogs(TiLogPrinter::MetaData{ &buf });
-			}
-		}
-
-		void TiLogPrinterManager::pushLogsToPrinters(IOBeanSharedPtr spLogs, const printer_ids_t& printerIds)
-		{
-			Vector<TiLogPrinter*> printers = TiLogPrinterManager::getPrinters(printerIds);
-			if (printers.empty()) { return; }
-			DEBUG_PRINTI("prepare to push %u bytes\n", (unsigned)spLogs->size());
-			for (TiLogPrinter* printer : printers)
-			{
-				printer->mData->pushLogs(spLogs);
 			}
 		}
 
@@ -3446,7 +3393,7 @@ namespace tilogspace
 
 namespace tilogspace
 {
-	bool TiLogPrinter::Prepared() { return mData == nullptr || mData->mTaskQThrdCreated; }
+	bool TiLogPrinter::Prepared() { return true; }
 	bool TiLogPrinter::isAlignedOutput() { return false; }
 	TiLogPrinter::TiLogPrinter() : mData() {}
 	TiLogPrinter::TiLogPrinter(void* engine) { mData = new TiLogPrinterData((TiLogEngine*)engine, this); }
