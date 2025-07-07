@@ -1547,7 +1547,7 @@ namespace tilogspace
 			friend class TiLogDaemon;
 
 		public:
-			const char* GetName() override { return "PROC"; };
+			const char* GetName() override { return mThrdName; };
 			CoreThrdEntryFuncType GetThrdEntryFunc() override
 			{
 				return [](void* core) { ((TiLogCore*)(core))->Entry(); };
@@ -1579,6 +1579,7 @@ namespace tilogspace
 			TiLogMap_t* mTiLogMap;
 			atomic_uint64_t mPrintedLogs{ 0 };
 			const uint32_t mID;
+			char mThrdName[16]{};
 
 			std::thread mThread;
 
@@ -2286,7 +2287,7 @@ namespace tilogspace
 			ThreadStru* pThreadStru{ nullptr };
 		};
 
-		}	 // namespace internal
+	}	 // namespace internal
 
 	namespace internal
 	{
@@ -2295,8 +2296,9 @@ namespace tilogspace
 			: TiLogCoreMini(SEQ_FREE, this), mTiLogDaemon(d), mTiLogEngine(d->mTiLogEngine),
 			  mTiLogMap(&TiLogEngines::getRInstance().tilogmap), mID(id)
 		{
-			DEBUG_PRINTA("TiLogCore::TiLogCore %p\n", this);
-			
+			DEBUG_PRINTA("TiLogCore::TiLogCore %p ID %u\n", this,(unsigned)mID);
+			snprintf(mThrdName, sizeof(mThrdName), "PROC~%u", (unsigned)mID);
+
 			mThread = mTiLogDaemon->CreateCoreThread(*this, this);
 		}
 
@@ -3059,7 +3061,7 @@ namespace tilogspace
 				// force lock if in TiLogCore exit or exist dying threads or pool internal > TILOG_POLL_THREAD_MAX_SLEEP_MS
 				unique_lock<decltype(mThreadStruQueue)> lk_queue(mThreadStruQueue, std::defer_lock);
 				if (mPoll.mPollPeriodMs == TILOG_POLL_THREAD_SLEEP_MS_IF_EXIST_THREAD_DYING || mPoll.mStatus == ON_FINAL_LOOP
-					|| nowTime > lastPoolTime + std::chrono::milliseconds(TILOG_POLL_THREAD_MAX_SLEEP_MS))
+					|| nowTime > lastPoolTime + std::chrono::milliseconds(mPoll.mPollPeriodMs))
 				{
 					lk_queue.lock();
 				} else

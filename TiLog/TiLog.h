@@ -431,6 +431,7 @@ namespace tilogspace
 	} tilog_align_val_t;
 
 
+	inline constexpr bool is_power_of_two(uint64_t num) { return num != 0 && (num & (num - 1)) == 0; }
 	inline size_t round_up(size_t size, size_t align) { return (size + align - 1) / align * align; }
 	inline size_t round_down(size_t size, size_t align) { return size / align * align; }
 
@@ -3090,7 +3091,7 @@ namespace tilogspace
 
 			DEBUG_DECLARE(uint8_t tidlen)
 			DEBUG_CANARY_UINT64(flag3)
-			DEBUG_DECLARE(char datas[])	   //{tid}{userlog}
+			DEBUG_DECLARE(char datas[])	   // such as "hello world"
 
 		public:
 			ELogLevelFlag level() const { return (ELogLevelFlag)(*source_location_str)[0]; }
@@ -3608,7 +3609,7 @@ namespace tilogspace
 					if (pos2 != std::string::npos && pos2 != fmt.size() - 1 && fmt[pos2 + 1] == '}')
 					{
 						outs.append(fmt.begin() + start, fmt.begin() + pos2);
-						outs.append("}");
+						outs.append('}');
 						start = pos2 + 2;
 						continue;
 					}
@@ -3619,7 +3620,7 @@ namespace tilogspace
 				if (fmt[pos + 1] == '{')
 				{
 					outs.append(fmt.begin() + start, fmt.begin() + pos);
-					outs.append("{");
+					outs.append('{');
 					start = pos + 2;
 				} else
 				{
@@ -3798,8 +3799,14 @@ namespace tilogspace
 			&& TILOG_POLL_THREAD_SLEEP_MS_IF_TO_EXIT > 0,
 		"fatal err!");
 	static_assert(TILOG_POLL_MS_ADJUST_PERCENT_RATE > 0 && TILOG_POLL_MS_ADJUST_PERCENT_RATE < 100, "fatal err!");
+	static_assert(TILOG_MEM_TRIM_LEAST_MS > 0, "fatal err!");
 	static_assert(TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE > 0, "fatal err!");
 	static_assert(TILOG_SINGLE_LOG_RESERVE_LEN > 0, "fatal err!");
+
+	static_assert(is_power_of_two(TILOG_STREAM_LINEAR_MEM_POOL_ALIGN), "fatal err!");
+	static_assert(TILOG_STREAM_MEMPOOL_TRIM_MS > 0, "fatal err!");
+	static_assert(TILOG_STREAM_MEMPOOL_TRY_GET_CYCLE > 1, "fatal err!");
+
 	static_assert(TILOG_MERGE_RAWDATA_QUEUE_NEARLY_FULL_SIZE >= 1, "fatal error!too small");
 	static_assert(TILOG_MERGE_RAWDATA_QUEUE_FULL_SIZE >= TILOG_MERGE_RAWDATA_QUEUE_NEARLY_FULL_SIZE, "fatal error!too small");
 
