@@ -1672,7 +1672,7 @@ namespace tilogspace
 			FeatType::onrelease(p);
 			synchronized(mtx)
 			{
-				if (size >= SIZE)
+				if (size > SIZE)
 				{
 					mtx.unlock();
 					del_obj(p);
@@ -2826,9 +2826,9 @@ namespace tilogspace
 #else
 							tp = std::chrono::time_point_cast<std::chrono::seconds>(tp);
 #endif
-							if (Clock::is_steady || s_now.load(std::memory_order_relaxed) < tp)
+							if (Clock::is_steady || s_now.load(std::memory_order_acquire) < tp)
 							{
-								s_now.store(tp, std::memory_order_relaxed);
+								s_now.store(tp, std::memory_order_release);
 							}
 							std::this_thread::sleep_for(std::chrono::microseconds(TILOG_USER_MODE_CLOCK_UPDATE_US));
 						}
@@ -2843,7 +2843,7 @@ namespace tilogspace
 					toExit = true;
 					if (th.joinable()) { th.join(); }
 				}
-				TILOG_FORCEINLINE static TimePoint now() noexcept { return getRInstance().s_now.load(std::memory_order_relaxed); };
+				TILOG_FORCEINLINE static TimePoint now() noexcept { return getRInstance().s_now.load(std::memory_order_acquire); };
 				TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_FUNC_IMPL(UserModeClockT<Clock>, instance)
 				static time_t to_time_t(const TimePoint& point) { return (Clock::to_time_t(point)); }
 
