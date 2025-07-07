@@ -1056,6 +1056,7 @@ namespace tilogspace
 					succ = datas.emplace_back(TILOG_BLANK_BUFFER, aligned_size - p.size());
 					DEBUG_ASSERT(succ);
 					// metas.emplace_back(p);
+					DEBUG_PRINTI("emplace_back %llu bytes ok\n",(long long unsigned)aligned_size);
 					return true;
 				}
 				return false;
@@ -2051,7 +2052,6 @@ namespace tilogspace
 
 		void TiLogFilePrinter::onAcceptLogs(MetaData metaData)
 		{
-			mRotater.onAcceptLogs(metaData);
 			if (metaData->logs_size <= TILOG_FILE_BUFFER)
 			{
 				push(*metaData);
@@ -2092,13 +2092,19 @@ namespace tilogspace
 				}
 			} while (!ret);
 
-			mTaskQueue->pushTask([this] { pop(); });
+			mTaskQueue->pushTask([this, b] {
+				mRotater.onAcceptLogs(&b);
+				pop();
+			});
 		}
 
 		// big str,write through
 		void TiLogFilePrinter::push_big_str(const buf_t& metaData)
 		{
-			mTaskQueue->pushTaskSynced([&metaData, this] { mFile.write(TiLogStringView{ metaData.logs, metaData.logs_size }); });
+			mTaskQueue->pushTaskSynced([&metaData, this] {
+				mRotater.onAcceptLogs(&metaData);
+				mFile.write(TiLogStringView{ metaData.logs, metaData.logs_size });
+			});
 		}
 
 		void TiLogFilePrinter::pop()
@@ -2107,9 +2113,11 @@ namespace tilogspace
 			size_t data_size = buffer.datas.first_sub_queue_size();
 			char* data_begin = buffer.datas.first_sub_queue_begin();
 			mFile.write(TiLogStringView{ data_begin, data_size });
+			DEBUG_PRINTI("write1 %llu bytes ok\n",(long long unsigned)data_size);
 			data_size = buffer.datas.second_sub_queue_size();
 			data_begin = buffer.datas.second_sub_queue_begin();
 			mFile.write(TiLogStringView{ data_begin, data_size });
+			DEBUG_PRINTI("write2 %llu bytes ok\n",(long long unsigned)data_size);
 			buffer.datas.clear();
 
 			lk.unlock();
@@ -2590,9 +2598,10 @@ namespace tilogspace
 				};
 
 				size_t qCachePreSize = qCache.size();
+				const char* tid =(threadStru.tid == nullptr ? "" : threadStru.tid->c_str());
 				DEBUG_PRINTD(
 					"MergeThreadStruQueueToSet ptid %p , tid %s , qCachePreSize= %u\n", threadStru.tid,
-					(threadStru.tid == nullptr ? "" : threadStru.tid->c_str()), (unsigned)qCachePreSize);
+					tid, (unsigned)qCachePreSize);
 
 				VecLogCache& v = mMerge.mRawDatas.get(threadStru.tid);
 				size_t vsizepre = v.size();
@@ -2627,7 +2636,16 @@ namespace tilogspace
 			loopend:
 				DEBUG_RUN(CheckVecLogCacheOrdered(v));
 
-				DEBUG_PRINTD("v %p size after: %u diff %u\n", &v, (unsigned)v.size(), (unsigned)(v.size() - vsizepre));
+				DEBUG_PRINTD(
+					"ptid %p, tid %s, v %p size after: %u diff %u\n", threadStru.tid, tid, &v, (unsigned)v.size(),
+					(unsigned)(v.size() - vsizepre));
+				if (!v.empty())
+				{
+					auto first_log = v.front();
+					auto final_log = v.back();
+					DEBUG_PRINTD(
+						"ptid %p, tid %s, first log [%.30s], final log [%.30s]", threadStru.tid, tid, first_log->buf(), final_log->buf());
+				}
 				mMerge.mMergeLogVecVec[mMerge.mMergeLogVecVec.mIndex++].swap(v);
 			}
 		}
@@ -3008,6 +3026,7 @@ namespace tilogspace
 						DEBUG_ASSERT(currCore->mMerge.mMergeLogVecVec.mIndex == 0);
 						currCore->mMerge.mMergeLogVecVec.swap(mMerge.mMergeLogVecVec);	  // exchange logs to core's mMergeLogVecVec
 						currCore->mNeedWoking = true;
+						DEBUG_PRINTI("choose core %u %p to handle seq %llu", (unsigned)currCore->mID, currCore, (long long unsigned)seq);
 					}
 					synchronized(mScheduler) { ++mScheduler.mPollSeq; }
 					currCore->mCV.notify_one();
