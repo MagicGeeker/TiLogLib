@@ -55,7 +55,7 @@
 
 
 #if TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_MICROSECOND
-
+#define TILOG_PREFIX_LOG_SIZE (32)		 // reserve for prefix static c-strings;
 #elif TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_MILLISECOND
 #define TILOG_PREFIX_LOG_SIZE (32)		 // reserve for prefix static c-strings;
 #elif TILOG_TIMESTAMP_SHOW TILOG_TIMESTAMP_SECOND
@@ -237,7 +237,8 @@ namespace tiloghelperspace
 	}
 
 
-	//return string such as ||2022-06-06  19:35:08.064|| (24Bytes)
+	//or return string such as ||2022-06-06 19:35:08.064001|| (26Bytes)
+	//or return string such as ||2022-06-06  19:35:08.064|| (24Bytes)
 	//or return string such as ||2022-06-06 19:25:10|| (19Bytes)
 	static size_t TimePointToTimeCStr(char* dst, SystemTimePoint nowTime)
 	{
@@ -262,6 +263,28 @@ namespace tiloghelperspace
 			int len2 = snprintf(dst + len, n_with_zero, ".%03u", (unsigned)milli.count());	  // len2 without zero
 			DEBUG_ASSERT(len2 > 0);
 			len += std::min((size_t)len2, n_with_zero - 1);
+#elif TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_MICROSECOND
+			size_t len = strftime(dst, TILOG_CTIME_MAX_LEN, "%Y-%m-%d %H:%M:%S", tmd);	  // 26B
+			// len without zero '\0'
+			if (len == 0) { break; }
+			auto since_epoch = nowTime.time_since_epoch();
+			std::chrono::seconds s = std::chrono::duration_cast<std::chrono::seconds>(since_epoch);
+
+			since_epoch -= s;
+			std::chrono::milliseconds milli = std::chrono::duration_cast<std::chrono::milliseconds>(since_epoch);
+			size_t n_with_zero = TILOG_CTIME_MAX_LEN - len;
+			DEBUG_ASSERT((int32_t)n_with_zero > 0);
+			int len2 = snprintf(dst + len, n_with_zero, ".%03u", (unsigned)milli.count());	  // len2 without zero
+			DEBUG_ASSERT(len2 > 0);
+			len += std::min((size_t)len2, n_with_zero - 1);
+
+			since_epoch -= milli;
+			std::chrono::microseconds micro = std::chrono::duration_cast<std::chrono::microseconds>(since_epoch);
+			n_with_zero = TILOG_CTIME_MAX_LEN - len;
+			DEBUG_ASSERT((int32_t)n_with_zero > 0);
+			int len3 = snprintf(dst + len, n_with_zero, "%03u", (unsigned)micro.count());	 // len3 without zero
+			DEBUG_ASSERT(len3 > 0);
+			len += std::min((size_t)len3, n_with_zero - 1);
 #endif
 			return len;
 		} while (false);
@@ -1162,7 +1185,7 @@ namespace tilogspace
 			TiLogDaemon* pDaemon;
 			CrcQueueLogCache qCache;
 			ThreadLocalSpinMutex spinMtx;	 // protect cache
-			uint16_t notify_flag{};
+			uint32_t notify_flag{};
 
 			mempoolspace::linear_mem_pool_list* lmempoolist;
 			core_seq_t pollseq_when_thrd_dead = core_seq_t::SEQ_INVALID;
@@ -1723,7 +1746,10 @@ namespace tilogspace
 
 		DeliverStru::DeliverStru()
 		{
-#if TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_MILLISECOND
+#if TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_MICROSECOND
+			memcpy(mlogprefix, "\n [2022-06-06 19:25:10.763001] #", sizeof(mlogprefix));
+			mctimestr = mlogprefix + 3;
+#elif TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_MILLISECOND
 			memcpy(mlogprefix, "\n   [2022-06-06  19:25:10.763] #", sizeof(mlogprefix));
 			mctimestr = mlogprefix + 5;
 #else
@@ -1734,6 +1760,18 @@ namespace tilogspace
 
 		struct TiLogMap_t
 		{
+#if TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_MICROSECOND
+			TiLogMap_t()
+			{
+				char mod[4 + 1] = "000]";
+				for (uint32_t i = 0; i < 1000; i++)
+				{
+					sprintf(mod, "%03d]", i);	 // "000]"->"999]"
+					memcpy_small<4>(m_map_us[i], mod);
+				}
+			}
+			char m_map_us[1000][4];
+#endif
 		};
 
 
@@ -2015,6 +2053,8 @@ namespace tilogspace
 				constexpr size_t LOG_FILE_MIN = (1U << 20U);
 #elif TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_MILLISECOND
 				constexpr size_t LOG_FILE_MIN = (1U << 10U);
+#elif TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_MICROSECOND
+				constexpr size_t LOG_FILE_MIN = (1U << 5U);
 #endif
 				static_assert(TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE >= LOG_FILE_MIN, "too small file size,logs may overlap");
 				s.append(mFolderPath).append(fileName, size).append(indexs).append(".log", 4);
@@ -2542,7 +2582,11 @@ namespace tilogspace
 			DEBUG_ASSERT(mMagicNumber == MAGIC_NUMBER);			// assert TiLogCore inited
 			ThreadStru& stru = *GetThreadStru();
 #if TILOG_USE_USER_MODE_CLOCK
-			if (++stru.notify_flag == 0) { tilogtimespace::UserModeClock::getRInstance().update(); }
+			if (++stru.notify_flag >= (TILOG_TIMESTAMP_SHOW / 100))
+			{
+				stru.notify_flag = 0;
+				tilogtimespace::UserModeClock::getRInstance().update();
+			}
 #endif
 			unique_lock<ThreadLocalSpinMutex> lk_local(stru.spinMtx);
 			bool isLocalFull = LocalCircularQueuePushBack(stru, pBean);
@@ -2853,6 +2897,24 @@ namespace tilogspace
 			TiLogTime show_time = bean.ext.time();
 			show_time.cast_to_show_accu();
 #endif
+
+#if TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_MICROSECOND
+			TiLogTime show_time_ms = bean.ext.time();
+			show_time_ms.cast_to_ms();
+			uint32_t us =
+				(uint32_t)chrono::duration_cast<chrono::microseconds>(show_time.get_origin_time() - show_time_ms.get_origin_time()).count();
+
+			TiLogTime::origin_time_type oriTime = show_time_ms.get_origin_time();
+			if (oriTime == mDeliver.mPreLogTime)	// ms is equal
+			{
+				memcpy_small<4>(&mDeliver.mlogprefix[26], &TiLogEngines::getRInstance().tilogmap.m_map_us[us]);	   // update us only
+			} else
+			{
+				size_t len = TimePointToTimeCStr(mDeliver.mctimestr, oriTime);
+				mDeliver.mPreLogTime = len == 0 ? TiLogTime::origin_time_type() : oriTime;
+				mDeliver.mlogprefix[29] = ']';
+			}
+#else
 			TiLogTime::origin_time_type oriTime = show_time.get_origin_time();
 			if (oriTime == mDeliver.mPreLogTime)
 			{
@@ -2867,6 +2929,7 @@ namespace tilogspace
 				mDeliver.mlogprefix[22] = ']';
 #endif
 			}
+#endif
 			logs.writend(mDeliver.mlogprefix, sizeof(mDeliver.mlogprefix));
 			logs.writend(bean.ext.source_location_str->data(), source_location_size);
 			logs.writend(bean.ext.tid->c_str(), bean.ext.tid->size());

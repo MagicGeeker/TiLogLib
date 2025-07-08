@@ -138,8 +138,8 @@
 /**************************************************MACRO FOR USER**************************************************/
 #define TILOG_TIME_IMPL_TYPE TILOG_INTERNAL_STD_STEADY_CLOCK //choose what clock to use
 #define TILOG_USE_USER_MODE_CLOCK  TRUE  // TRUE or FALSE,if true use user mode clock,otherwise use kernel mode clock
-#define TILOG_TIMESTAMP_SORT TILOG_TIMESTAMP_MILLISECOND 
-#define TILOG_TIMESTAMP_SHOW TILOG_TIMESTAMP_MILLISECOND
+#define TILOG_TIMESTAMP_SORT (TILOG_TIMESTAMP_MICROSECOND/4)
+#define TILOG_TIMESTAMP_SHOW TILOG_TIMESTAMP_MICROSECOND
 
 #define TILOG_IS_WITH_FUNCTION_NAME TRUE  // TRUE or FALSE,if false no function name in print
 #define TILOG_IS_WITH_FILE_LINE_INFO FALSE  // TRUE or FALSE,if false no file and line in print
@@ -1973,6 +1973,8 @@ namespace tilogspace
 
 				inline void cast_to_ms();
 
+				inline void cast_to_show_accu();
+
 				inline origin_time_type get_origin_time() const;
 
 				//static functions
@@ -2015,12 +2017,7 @@ namespace tilogspace
 						SetThreadName((thrd_t)(-1), "UserModeClockT");
 						while (!toExit)
 						{
-							TimePoint tp = Clock::now();
-							tp = std::chrono::time_point_cast<sort_dur_t>(tp);
-							if (Clock::is_steady || s_now.load(std::memory_order_acquire) < tp)
-							{
-								s_now.store(tp, std::memory_order_release);
-							}
+							update_tp();
 							std::unique_lock<OptimisticMutex> lk(mtx);
 							cv.wait_for(lk, std::chrono::nanoseconds(TILOG_USER_MODE_CLOCK_UPDATE_NS));
 						}
@@ -2036,7 +2033,30 @@ namespace tilogspace
 					cv.notify_one();
 					if (th.joinable()) { th.join(); }
 				}
-				void update() { cv.notify_one(); }	  // notify may lost, but ignore
+				void update_tp()
+				{
+					constexpr bool multi_thrd_update = TILOG_TIMESTAMP_SHOW <= TILOG_TIMESTAMP_MICROSECOND;
+					if (Clock::is_steady && !multi_thrd_update)
+					{
+						TimePoint tp = Clock::now();
+						tp = std::chrono::time_point_cast<sort_dur_t>(tp);
+						s_now.store(tp, std::memory_order_release);
+					} else
+					{
+						TimePoint tp = Clock::now();
+						tp = std::chrono::time_point_cast<sort_dur_t>(tp);
+						TimePoint pre =  s_now.load(std::memory_order_acquire);
+						if (pre < tp) { s_now.compare_exchange_weak(pre, tp, std::memory_order_acq_rel); }
+					}
+				}
+				void update()
+				{
+					if_constexpr(TILOG_TIMESTAMP_SHOW <= TILOG_TIMESTAMP_MICROSECOND) { update_tp(); }
+					else
+					{
+						cv.notify_one();	// notify may lost, but ignore
+					}
+				}
 				TILOG_FORCEINLINE static TimePoint now() noexcept { return getRInstance().s_now.load(std::memory_order_acquire); };
 				TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_FUNC_IMPL(UserModeClockT<Clock>, instance)
 				static time_t to_time_t(const TimePoint& point) { return (Clock::to_time_t(point)); }
@@ -2071,6 +2091,7 @@ namespace tilogspace
 				inline time_t to_time_t() const { return Clock::to_time_t(chronoTime); }
 				inline void cast_to_sec() { chronoTime = std::chrono::time_point_cast<std::chrono::seconds>(chronoTime); }
 				inline void cast_to_ms() { chronoTime = std::chrono::time_point_cast<std::chrono::milliseconds>(chronoTime); }
+				inline void cast_to_show_accu() { chronoTime = std::chrono::time_point_cast<show_dur_t>(chronoTime); }
 				inline size_t hash() const { return (size_t)chronoTime.time_since_epoch().count(); }
 
 				inline origin_time_type get_origin_time() const { return chronoTime; }
@@ -2172,6 +2193,7 @@ namespace tilogspace
 				}
 				inline void cast_to_sec() { chronoTime = std::chrono::time_point_cast<std::chrono::seconds>(chronoTime); }
 				inline void cast_to_ms() { chronoTime = std::chrono::time_point_cast<std::chrono::milliseconds>(chronoTime); }
+				inline void cast_to_show_accu() { chronoTime = std::chrono::time_point_cast<show_dur_t>(chronoTime); }
 
 				inline origin_time_type get_origin_time() const { return chronoTime; }
 
@@ -2235,14 +2257,7 @@ namespace tilogspace
 				inline time_t to_time_t() const { return impl.to_time_t(); }
 				inline void cast_to_sec() { impl.cast_to_sec(); }
 				inline void cast_to_ms() { impl.cast_to_ms(); }
-				inline void cast_to_show_accu()
-				{
-#if TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_MILLISECOND
-					cast_to_ms();
-#elif TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_SECOND
-					cast_to_sec();
-#endif
-				}
+				inline void cast_to_show_accu() { impl.cast_to_show_accu(); }
 
 				inline origin_time_type get_origin_time() const { return impl.get_origin_time(); }
 
