@@ -7,6 +7,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <cstddef>
+#include <condition_variable>
 #include <atomic>
 #include <functional>
 #include <thread>
