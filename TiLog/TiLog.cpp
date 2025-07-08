@@ -54,9 +54,11 @@
 #define TILOG_CTIME_MAX_LEN 32
 
 
-#if TILOG_IS_WITH_MILLISECONDS
+#if TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_MICROSECOND
+
+#elif TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_MILLISECOND
 #define TILOG_PREFIX_LOG_SIZE (32)		 // reserve for prefix static c-strings;
-#else
+#elif TILOG_TIMESTAMP_SHOW TILOG_TIMESTAMP_SECOND
 #define TILOG_PREFIX_LOG_SIZE (24)		 // reserve for prefix static c-strings;
 #endif
 
@@ -244,10 +246,10 @@ namespace tiloghelperspace
 		do
 		{
 			if (tmd == nullptr) { break; }
-#if TILOG_IS_WITH_MILLISECONDS == FALSE
+#if TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_SECOND
 			size_t len = strftime(dst, TILOG_CTIME_MAX_LEN, "%Y-%m-%d %H:%M:%S", tmd);	   // 19B
 			if (len == 0) { break; }
-#elif TILOG_IS_WITH_MILLISECONDS == TRUE
+#elif TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_MILLISECOND
 			size_t len = strftime(dst, TILOG_CTIME_MAX_LEN, "%Y-%m-%d  %H:%M:%S", tmd);	   // 24B
 			// len without zero '\0'
 			if (len == 0) { break; }
@@ -1160,6 +1162,7 @@ namespace tilogspace
 			TiLogDaemon* pDaemon;
 			CrcQueueLogCache qCache;
 			ThreadLocalSpinMutex spinMtx;	 // protect cache
+			uint16_t notify_flag{};
 
 			mempoolspace::linear_mem_pool_list* lmempoolist;
 			core_seq_t pollseq_when_thrd_dead = core_seq_t::SEQ_INVALID;
@@ -1720,7 +1723,7 @@ namespace tilogspace
 
 		DeliverStru::DeliverStru()
 		{
-#if TILOG_IS_WITH_MILLISECONDS
+#if TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_MILLISECOND
 			memcpy(mlogprefix, "\n   [2022-06-06  19:25:10.763] #", sizeof(mlogprefix));
 			mctimestr = mlogprefix + 5;
 #else
@@ -2008,9 +2011,9 @@ namespace tilogspace
 				strcpy(mPreTimeStr, timeStr);
 				char indexs[9];
 				snprintf(indexs, 9, "_idx%04u", (unsigned)mFileIndex);	  // 0000-9999
-#if TILOG_IS_WITH_MILLISECONDS == FALSE
+#if TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_SECOND
 				constexpr size_t LOG_FILE_MIN = (1U << 20U);
-#else
+#elif TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_MILLISECOND
 				constexpr size_t LOG_FILE_MIN = (1U << 10U);
 #endif
 				static_assert(TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE >= LOG_FILE_MIN, "too small file size,logs may overlap");
@@ -2538,6 +2541,9 @@ namespace tilogspace
 		{
 			DEBUG_ASSERT(mMagicNumber == MAGIC_NUMBER);			// assert TiLogCore inited
 			ThreadStru& stru = *GetThreadStru();
+#if TILOG_USE_USER_MODE_CLOCK
+			if (++stru.notify_flag == 0) { tilogtimespace::UserModeClock::getRInstance().update(); }
+#endif
 			unique_lock<ThreadLocalSpinMutex> lk_local(stru.spinMtx);
 			bool isLocalFull = LocalCircularQueuePushBack(stru, pBean);
 			// init log time after stru is inited and push to local queue,to make sure log can be print ordered
@@ -2841,7 +2847,13 @@ namespace tilogspace
 			logs.reserve(reserveSize);
 
 
-			TiLogTime::origin_time_type oriTime = bean.ext.time().get_origin_time();
+#if TILOG_USE_USER_MODE_CLOCK && TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_SORT
+			const TiLogTime& show_time = bean.ext.time();
+#else
+			TiLogTime show_time = bean.ext.time();
+			show_time.cast_to_show_accu();
+#endif
+			TiLogTime::origin_time_type oriTime = show_time.get_origin_time();
 			if (oriTime == mDeliver.mPreLogTime)
 			{
 				// time is equal to pre,no need to update
@@ -2849,9 +2861,9 @@ namespace tilogspace
 			{
 				size_t len = TimePointToTimeCStr(mDeliver.mctimestr, oriTime);
 				mDeliver.mPreLogTime = len == 0 ? TiLogTime::origin_time_type() : oriTime;
-#if TILOG_IS_WITH_MILLISECONDS
+#if TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_MILLISECOND
 				mDeliver.mlogprefix[29] = ']';
-#else
+#elif TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_SECOND
 				mDeliver.mlogprefix[22] = ']';
 #endif
 			}

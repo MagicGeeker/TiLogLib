@@ -129,10 +129,17 @@
 #define TILOG_INTERNAL_STD_STEADY_CLOCK 1
 #define TILOG_INTERNAL_STD_SYSTEM_CLOCK 2
 
+#define TILOG_TIMESTAMP_SECOND (1000*1000*1000)
+#define TILOG_TIMESTAMP_MILLISECOND (1000*1000)
+#define TILOG_TIMESTAMP_MICROSECOND 1000
+#define TILOG_TIMESTAMP_NANOSECOND 1
+
+
 /**************************************************MACRO FOR USER**************************************************/
 #define TILOG_TIME_IMPL_TYPE TILOG_INTERNAL_STD_STEADY_CLOCK //choose what clock to use
 #define TILOG_USE_USER_MODE_CLOCK  TRUE  // TRUE or FALSE,if true use user mode clock,otherwise use kernel mode clock
-#define TILOG_IS_WITH_MILLISECONDS TRUE  // TRUE or FALSE,if false no ms info in timestamp
+#define TILOG_TIMESTAMP_SORT TILOG_TIMESTAMP_MILLISECOND 
+#define TILOG_TIMESTAMP_SHOW TILOG_TIMESTAMP_MILLISECOND
 
 #define TILOG_IS_WITH_FUNCTION_NAME TRUE  // TRUE or FALSE,if false no function name in print
 #define TILOG_IS_WITH_FILE_LINE_INFO FALSE  // TRUE or FALSE,if false no file and line in print
@@ -214,7 +221,7 @@ namespace tilogspace
 #endif
 	constexpr static uint16_t TILOG_SOURCE_LOCATION_MAX_SIZE = 368;
 	// interval of user mode clock sync with kernel(microseconds),should be smaller than timestamp print accuracy
-	constexpr static uint32_t TILOG_USER_MODE_CLOCK_UPDATE_US = TILOG_IS_WITH_MILLISECONDS ? 300 : 300000;
+	constexpr static uint32_t TILOG_USER_MODE_CLOCK_UPDATE_NS = TILOG_TIMESTAMP_SORT/4;
 
 	constexpr static uint32_t TILOG_DAEMON_PROCESSER_NUM = 4;	// tilog daemon processer num
 	constexpr static uint32_t TILOG_SYNC_MAX_INTERVAL_MS = 500;	// max sync interval, to ensure print every logs for every thread
@@ -1908,6 +1915,11 @@ namespace tilogspace
 	{
 		namespace tilogtimespace
 		{
+			using sort_dur_t = std::chrono::duration<
+				std::chrono::nanoseconds::rep, std::ratio_multiply<std::chrono::nanoseconds::period, std::ratio<TILOG_TIMESTAMP_SORT, 1>>>;
+			using show_dur_t = std::chrono::duration<
+				std::chrono::nanoseconds::rep, std::ratio_multiply<std::chrono::nanoseconds::period, std::ratio<TILOG_TIMESTAMP_SHOW, 1>>>;
+
 			enum class ELogTime
 			{
 				NOW,
@@ -2004,16 +2016,13 @@ namespace tilogspace
 						while (!toExit)
 						{
 							TimePoint tp = Clock::now();
-#ifdef TILOG_IS_WITH_MILLISECONDS
-							tp = std::chrono::time_point_cast<std::chrono::milliseconds>(tp);
-#else
-							tp = std::chrono::time_point_cast<std::chrono::seconds>(tp);
-#endif
+							tp = std::chrono::time_point_cast<sort_dur_t>(tp);
 							if (Clock::is_steady || s_now.load(std::memory_order_acquire) < tp)
 							{
 								s_now.store(tp, std::memory_order_release);
 							}
-							std::this_thread::sleep_for(std::chrono::microseconds(TILOG_USER_MODE_CLOCK_UPDATE_US));
+							std::unique_lock<OptimisticMutex> lk(mtx);
+							cv.wait_for(lk, std::chrono::nanoseconds(TILOG_USER_MODE_CLOCK_UPDATE_NS));
 						}
 					});
 					while (now() == TimePoint::min())
@@ -2024,14 +2033,17 @@ namespace tilogspace
 				~UserModeClockT()
 				{
 					toExit = true;
+					cv.notify_one();
 					if (th.joinable()) { th.join(); }
 				}
+				void update() { cv.notify_one(); }	  // notify may lost, but ignore
 				TILOG_FORCEINLINE static TimePoint now() noexcept { return getRInstance().s_now.load(std::memory_order_acquire); };
 				TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_FUNC_IMPL(UserModeClockT<Clock>, instance)
 				static time_t to_time_t(const TimePoint& point) { return (Clock::to_time_t(point)); }
 
 			protected:
 				static uint64_t instance[];
+				TILOG_MUTEXABLE_CLASS_MACRO_WITH_CV(OptimisticMutex, mtx, cv_type, cv)
 				std::atomic<TimePoint> s_now{ TimePoint::min() };
 				std::thread th{};
 				uint32_t magic{ 0xf001a001 };
@@ -2189,13 +2201,6 @@ namespace tilogspace
 				inline ITiLogTime(EPlaceHolder)
 				{
 					impl = TimeImplType::now();
-#ifndef TILOG_USE_USER_MODE_CLOCK
-#ifdef TILOG_IS_WITH_MILLISECONDS
-					cast_to_ms();
-#else
-					cast_to_sec();
-#endif
-#endif
 				}
 				inline ITiLogTime(const TimeImplType& t) { impl = t; }
 
@@ -2230,6 +2235,14 @@ namespace tilogspace
 				inline time_t to_time_t() const { return impl.to_time_t(); }
 				inline void cast_to_sec() { impl.cast_to_sec(); }
 				inline void cast_to_ms() { impl.cast_to_ms(); }
+				inline void cast_to_show_accu()
+				{
+#if TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_MILLISECOND
+					cast_to_ms();
+#elif TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_SECOND
+					cast_to_sec();
+#endif
+				}
 
 				inline origin_time_type get_origin_time() const { return impl.get_origin_time(); }
 
@@ -2965,7 +2978,7 @@ namespace tilogspace
 namespace tilogspace
 {
 	static_assert(sizeof(size_type) <= sizeof(size_t), "fatal err!");
-	static_assert(true || TILOG_IS_WITH_MILLISECONDS, "this micro must be defined");
+	static_assert( TILOG_TIMESTAMP_SHOW >= TILOG_TIMESTAMP_SORT, "sort accuracy MUST BE more precise");
 	static_assert(true || TILOG_IS_WITH_FUNCTION_NAME, "this micro must be defined");
 	static_assert(true || TILOG_IS_WITH_FILE_LINE_INFO, "this micro must be defined");
 	static_assert(true || TILOG_IS_SUPPORT_DYNAMIC_LOG_LEVEL, "this micro must be defined");
