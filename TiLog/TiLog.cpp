@@ -1922,11 +1922,11 @@ namespace tilogspace
 		{
 			HANDLE fd = nullfd;
 
-			fd = CreateFileA(path, GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS, 0, 0);
+			fd = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_ALWAYS, 0, 0);
 			DWORD written = 0;
 			WriteFile(fd, TILOG_TITLE, sizeof(TILOG_TITLE), &written, NULL);
 			CloseHandle(fd);
-			fd = CreateFileA(path, GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS, FILE_FLAG_NO_BUFFERING, 0);
+			fd = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_ALWAYS, FILE_FLAG_NO_BUFFERING, 0);
 			func_trunc(fd, TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE, true);
 			func_moveptr(fd, 0);
 			return fd;
@@ -2352,8 +2352,8 @@ namespace tilogspace
 			mTiLogDaemon->InitCoreThreadBeforeRun(GetName());
 			while (true)
 			{
-				mDoing = false;
 				std::unique_lock<std::mutex> lk_merge(mMtx);
+				auto cleaner = make_cleaner([this] { mDoing = false; });
 				if (!mNeedWoking)
 				{
 					if (mStatus == ON_FINAL_LOOP) { break; }
@@ -2591,9 +2591,13 @@ namespace tilogspace
 
 			if (isLocalFull)
 			{
+				lk_local.unlock();
+				auto lk_poll = GetPollLock();
+				lk_local.lock();
 				MoveLocalCacheToGlobal(stru);
 				lk_local.unlock();
-				if (mMerge.mRawDatas.may_nearlly_full() && !mPoll.mDoing)
+				lk_poll.unlock();
+				if (mMerge.mRawDatas.may_nearlly_full())
 				{
 					NotifyPoll();
 				} else if (mMerge.mRawDatas.may_full())
@@ -3079,8 +3083,8 @@ namespace tilogspace
 				if (mPoll.mStatus == ON_FINAL_LOOP) { break; }
 				if (mToExit) { mPoll.mStatus = PREPARE_FINAL_LOOP; }
 				if (mPoll.mStatus == PREPARE_FINAL_LOOP) { mPoll.mStatus = ON_FINAL_LOOP; }
-				mPoll.mDoing = false;
 				std::unique_lock<std::mutex> lk_poll(mPoll.mMtx);
+				auto cleaner = make_cleaner([this] { mPoll.mDoing = false; });
 				mPoll.mCV.wait_for(lk_poll,std::chrono::milliseconds(mPoll.mPollPeriodMs));
 				mPoll.mDoing = true;
 
@@ -3421,7 +3425,7 @@ namespace tilogspace
 			void PushLog(TiLogCompactString* pBean)
 			{
 				std::unique_lock<OptimisticMutex> lk(mtx);
-				new (&pBean->ext.tiLogTime) TiLogTime(EPlaceHolder{});
+				
 				if (mCaches.size() >= TILOG_INNO_LOG_QUEUE_NEARLY_FULL_SIZE)
 				{
 					do
@@ -3433,6 +3437,7 @@ namespace tilogspace
 					}while (mCaches.size() == TILOG_INNO_LOG_QUEUE_FULL_SIZE);
 				}
 				mCaches.emplace_back(pBean);
+				new (&pBean->ext.tiLogTime) TiLogTime(EPlaceHolder{});
 			}
 
 			core_seq_t GetInnerLogPoolSeq()

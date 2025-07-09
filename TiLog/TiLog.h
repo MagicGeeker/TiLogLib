@@ -743,6 +743,22 @@ namespace tilogspace
 		TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_MEMBER_DECLARE(ti_iostream_mtx_t, instance)
 	};
 
+	template <typename R>
+	struct cleaner
+	{
+		constexpr cleaner(R&& r0) : r(r0), should_be_called(true) {}
+		cleaner(const cleaner&) = delete;
+		cleaner(cleaner&& rhs) noexcept : r(std::move(rhs.r)), should_be_called(rhs.should_be_called) { rhs.should_be_called = false; }
+		~cleaner() { should_be_called && (r(), should_be_called = false); }
+		R r;
+		bool should_be_called;
+	};
+
+	template <typename R>
+	constexpr auto make_cleaner(R&& r) -> cleaner<R>
+	{
+		return { std::forward<R>(r) };
+	}
 
 	struct lock_proxy_t
 	{
