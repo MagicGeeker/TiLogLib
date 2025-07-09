@@ -840,12 +840,6 @@ namespace tilogspace
 				if (pFirst == pMemEnd) { pFirst = pMem; }
 				q_size -= n;
 			}
-			iterator next(iterator it)
-			{
-				if (it == pMemEnd) { return pMem + 1; }
-				if (it + 1 == pMemEnd) { return pMem; }
-				return it + 1;
-			}
 
 			// exclude _to
 			void erase_from_begin_to(iterator _to)
@@ -1528,7 +1522,9 @@ namespace tilogspace
 			VecLogCache mDeliverCache;
 			atomic_uint64_t mDeliveredTimes{};
 			TiLogTime::origin_time_type mPreLogTime{};
+			DEBUG_DECLARE(TiLogTime::origin_time_type mPreLogTimeUs{});
 			alignas(32) char mlogprefix[TILOG_PREFIX_LOG_SIZE];
+			DEBUG_DECLARE(alignas(32) char mlogprefix_pre[TILOG_PREFIX_LOG_SIZE]{};)
 			char* mctimestr;
 			IOBean mIoBean;
 			IOBean* mIoBeanForPush;	   // output
@@ -2608,18 +2604,32 @@ namespace tilogspace
 			}
 		}
 
-		void static CheckVecLogCacheOrdered(VecLogCache& v)
+		void static CheckVecLogCacheOrdered(VecLogCache& v, TiLogCompactString* max_tp_str = nullptr)
 		{
-			if (!std::is_sorted(v.begin(), v.end(), TiLogCompactStringPtrComp()))
+			std::ostringstream os;
+			uint32_t index = 0;
+			for (; index != v.size(); index++)
 			{
-				std::ostringstream os;
-				for (uint32_t index = 0; index != v.size(); index++)
+				if (index + 1 != v.size())
 				{
-					os << v[index]->ext.time().toSteadyFlag() << " ";
-					if (index % 6 == 0) { os << "\n"; }
+					if (TiLogCompactStringPtrComp()(v[index + 1], v[index]))
+					{
+						os << index << " " << v[index]->ext.time().toSteadyFlag() << " ";
+						os << index + 1 << " " << v[index + 1]->ext.time().toSteadyFlag() << " ";
+						goto failhd;
+					}
 				}
-				DEBUG_ASSERT1(false, os.str());
+				if (max_tp_str != nullptr && TiLogCompactStringPtrComp()(max_tp_str, v[index]))
+				{
+					os << index << " " << v[index]->ext.time().toSteadyFlag() << " ";
+					os << max_tp_str << " " << max_tp_str->ext.time().toSteadyFlag() << " ";
+					goto failhd;
+				}
 			}
+			return;
+		failhd:
+			os << std::endl;
+			DEBUG_ASSERT1(false, os.str());
 		}
 
 		void TiLogDaemon::MergeThreadStruQueueToSet(List<ThreadStru*>& thread_queue, TiLogCompactString& bean)
@@ -2654,7 +2664,7 @@ namespace tilogspace
 				if (qCachePreSize == 0) { goto loopend; }
 				if (bean.ext.time() < (**qCache.first_sub_queue_begin()).ext.time()) { goto loopend; }
 
-				
+
 				if (!qCache.normalized())
 				{
 					if (bean.ext.time() < (**qCache.second_sub_queue_begin()).ext.time()) { goto one_sub; }
@@ -2678,7 +2688,7 @@ namespace tilogspace
 				}
 
 			loopend:
-				DEBUG_RUN(CheckVecLogCacheOrdered(v));
+				//TODO DEBUG_RUN(CheckVecLogCacheOrdered(v,&bean));
 
 				DEBUG_PRINTD(
 					"ptid %p, tid %s, v %p size after: %u diff %u\n", threadStru.tid, tid, &v, (unsigned)v.size(),
@@ -2706,10 +2716,10 @@ namespace tilogspace
 
 		void TiLogDaemon::CollectRawDatas()
 		{
-			DEBUG_PRINTD("Begin of CollectRawDatas\n");
 			size_t init_size = 0;
 			TiLogCompactString referenceBean;
 			referenceBean.ext.time() = mPoll.s_log_last_time = TiLogTime::now();	// referenceBean's time is the biggest up to now
+			DEBUG_PRINTI("Begin,poll time %lld\n",(long long)mPoll.s_log_last_time.toSteadyFlag());
 
 			synchronized(mThreadStruQueue)
 			{
@@ -2901,17 +2911,17 @@ namespace tilogspace
 #if TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_MICROSECOND
 			TiLogTime show_time_ms = bean.ext.time();
 			show_time_ms.cast_to_ms();
-			uint32_t us =
-				(uint32_t)chrono::duration_cast<chrono::microseconds>(show_time.get_origin_time() - show_time_ms.get_origin_time()).count();
 
-			TiLogTime::origin_time_type oriTime = show_time_ms.get_origin_time();
-			if (oriTime == mDeliver.mPreLogTime)	// ms is equal
+			TiLogTime::origin_time_type us_tp = show_time.get_origin_time();
+			TiLogTime::origin_time_type ms_tp = show_time_ms.get_origin_time();
+			uint32_t us = (uint32_t)chrono::duration_cast<chrono::microseconds>(us_tp - ms_tp).count();
+			if (ms_tp == mDeliver.mPreLogTime)	  // ms is equal
 			{
 				memcpy_small<4>(&mDeliver.mlogprefix[26], &TiLogEngines::getRInstance().tilogmap.m_map_us[us]);	   // update us only
 			} else
 			{
-				size_t len = TimePointToTimeCStr(mDeliver.mctimestr, oriTime);
-				mDeliver.mPreLogTime = len == 0 ? TiLogTime::origin_time_type() : oriTime;
+				size_t len = TimePointToTimeCStr(mDeliver.mctimestr, us_tp);				// parse bt us
+				mDeliver.mPreLogTime = len == 0 ? TiLogTime::origin_time_type() : ms_tp;	// stor ms only
 				mDeliver.mlogprefix[29] = ']';
 			}
 #else
@@ -2930,6 +2940,16 @@ namespace tilogspace
 #endif
 			}
 #endif
+
+#if 0 && !defined(IUILS_NDEBUG_WITHOUT_ASSERT) && TILOG_TIME_IMPL_TYPE == TILOG_INTERNAL_STD_STEADY_CLOCK
+			if (mDeliver.mlogprefix_pre[0] != 0)
+			{
+				if (memcmp(&mDeliver.mlogprefix_pre[0], &mDeliver.mlogprefix[0], sizeof(mDeliver.mlogprefix)) > 0) { abort(); }
+			}
+			memcpy(mDeliver.mlogprefix_pre, mDeliver.mlogprefix, sizeof(mDeliver.mlogprefix));
+			mDeliver.mPreLogTimeUs = us_tp;
+#endif
+
 			logs.writend(mDeliver.mlogprefix, sizeof(mDeliver.mlogprefix));
 			logs.writend(bean.ext.source_location_str->data(), source_location_size);
 			logs.writend(bean.ext.tid->c_str(), bean.ext.tid->size());
@@ -3016,6 +3036,9 @@ namespace tilogspace
 			mDeliver.mIoBeanForPush = nullptr;
 			if (mDeliver.mDeliverCache.empty()) { return; }
 			VecLogCache& c = mDeliver.mDeliverCache;
+			DEBUG_PRINTI(
+				"logs c range [%lld,%lld]", (long long)c.front()->ext.time().toSteadyFlag(),
+				(long long)c.back()->ext.time().toSteadyFlag());
 			{
 				mDeliver.mIoBean.clear();
 				mergeLogsToOneString(c);

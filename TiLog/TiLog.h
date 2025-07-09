@@ -2166,9 +2166,21 @@ namespace tilogspace
 				static inline void init()
 				{
 					auto t1 = SystemClock::now();
-					*(TimePoint*)&initSteadyTimeBuf = Clock::now();
+					auto t = Clock::now();
 					auto t2 = SystemClock::now();
-					*(SystemTimePoint*)&initSystemTimeBuf = t1 + (t2 - t1) / 2;
+					auto ts = t1 + (t2 - t1) / 2;
+
+					auto t_mill = std::chrono::time_point_cast<std::chrono::milliseconds>(t);
+					auto ts_mill = std::chrono::time_point_cast<std::chrono::milliseconds>(ts);
+					auto dur_t_ms = t - t_mill;
+					auto dur_ts_ms = ts - ts_mill;
+					auto dur_avg_ms = dur_t_ms + (dur_ts_ms - dur_t_ms) / 2;
+					auto final_t = t_mill + dur_avg_ms;
+					auto final_ts = ts_mill + dur_avg_ms;
+					// force sync microseconds of steady time and system time,‌
+					// prevent out-of-order timestamps in AppendToMergeCacheByMetaData
+					*(TimePoint*)&initSteadyTimeBuf = std::chrono::time_point_cast<std::chrono::microseconds>(final_t);
+					*(SystemTimePoint*)&initSystemTimeBuf = std::chrono::time_point_cast<std::chrono::microseconds>(final_ts);
 				}
 				static inline SystemTimePoint getInitSystemTime() { return *(SystemTimePoint*)&initSystemTimeBuf; }
 				static inline TimePoint getInitSteadyTime() { return *(TimePoint*)&initSteadyTimeBuf; }
