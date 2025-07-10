@@ -664,259 +664,174 @@ namespace tilogspace
 
 #ifdef __________________________________________________TiLogCircularQueue__________________________________________________
 
+#define CQ_ASSERT(what) DEBUG_ASSERT4(what, this, pMem, len, hindex)
+
 		template <typename T, size_t CAPACITY>
-		class PodCircularQueue : public TiLogObject
+		class TrivialCircularQueue : public TiLogObject
 		{
 
 			static_assert(
 				std::is_trivially_copy_constructible<T>::value && std::is_trivially_copy_assignable<T>::value
 					&& std::is_trivially_move_assignable<T>::value && std::is_trivially_destructible<T>::value,
 				"fatal error");
+			static_assert(CAPACITY > 0, "Capacity must be positive");
 
 		public:
 			using iterator = T*;
 			using const_iterator = const T*;
 
-
-			explicit PodCircularQueue(T* mem) : pMem(mem), pMemEnd(pMem + CAPACITY) { pFirst = pEnd = pMem; }
-
-			explicit PodCircularQueue() : PodCircularQueue((T*)timalloc(CAPACITY * sizeof(T))) {}
-
-			PodCircularQueue(const PodCircularQueue& rhs) : PodCircularQueue()
+			void swap(TrivialCircularQueue& other) noexcept
 			{
-				size_t sz1 = rhs.first_sub_queue_size();
-				size_t sz2 = rhs.second_sub_queue_size();
-				memcpy(pMem, rhs.first_sub_queue_begin(), sz1 * sizeof(T));
-				memcpy(pMem + sz1, rhs.second_sub_queue_begin(), sz2 * sizeof(T));
-				pEnd = pMem + (sz1 + sz2);
-				q_size = rhs.q_size;
+				std::swap(pMem, other.pMem);
+				std::swap(len, other.len);
+				std::swap(hindex, other.hindex);
 			}
-			PodCircularQueue(PodCircularQueue&& rhs)
+
+		public:
+			explicit TrivialCircularQueue(T* mem = (T*)timalloc(CAPACITY * sizeof(T))) : pMem(mem), len(0), hindex(0)
 			{
-				this->pMem = rhs.pMem;
-				this->pMemEnd = rhs.pMemEnd;
-				this->pFirst = rhs.pFirst;
-				this->pEnd = rhs.pEnd;
+				CQ_ASSERT(pMem != nullptr);
+			}
+
+			TrivialCircularQueue(const TrivialCircularQueue& rhs) : pMem((T*)timalloc(CAPACITY * sizeof(T))), len(rhs.len), hindex(0)
+			{
+				if (rhs.normalized())	 // include len == 0
+				{
+					memcpy(pMem, rhs.pMem + rhs.hindex, len * sizeof(T));
+				} else
+				{
+					size_t firstPart = CAPACITY - rhs.hindex;
+					memcpy(pMem, rhs.pMem + rhs.hindex, firstPart * sizeof(T));
+					memcpy(pMem + firstPart, rhs.pMem, (len - firstPart) * sizeof(T));
+				}
+			}
+
+			TrivialCircularQueue(TrivialCircularQueue&& rhs) noexcept : pMem(rhs.pMem), len(rhs.len), hindex(rhs.hindex)
+			{
 				rhs.pMem = nullptr;
-				this->q_size = rhs.q_size;
+				rhs.len = 0;
+				rhs.hindex = 0;
 			}
 
-			PodCircularQueue& operator=(PodCircularQueue rhs) noexcept
+			TrivialCircularQueue& operator=(TrivialCircularQueue rhs) noexcept
 			{
-				std::swap(*this, rhs);
+				swap(rhs);
 				return *this;
 			}
 
-			~PodCircularQueue() { tifree(pMem); }
+			~TrivialCircularQueue() { tifree(pMem); }
 
-			bool empty() const { return q_size == 0; }
-
-			bool full() const
-			{
-				DEBUG_ASSERT(size() <= capacity());
-				return size() == capacity();
-			}
-
-			size_t size() const
-			{
-				size_t sz = q_size;
-				DEBUG_ASSERT4(sz <= capacity(), pMem, pMemEnd, pFirst, pEnd);
-				return sz;
-			}
-
+			bool empty() const { return len == 0; }
+			bool full() const { return len == CAPACITY; }
+			size_t size() const { return len; }
 			constexpr size_t capacity() const { return CAPACITY; }
+			size_t available_size() const { return CAPACITY - len; }
 
-			size_t available_size() const { return capacity() - size(); }
+			bool normalized() const { return hindex + len <= CAPACITY; }
 
-			bool normalized() const
-			{
-				DEBUG_ASSERT2(pMem <= pFirst, pMem, pFirst);
-				DEBUG_ASSERT2(pFirst < pMemEnd, pFirst, pMemEnd);
-				DEBUG_ASSERT2(pMem <= pEnd, pMem, pEnd);
-				DEBUG_ASSERT2(pEnd <= pMemEnd, pEnd, pMemEnd);
-				return pEnd > pFirst || q_size == 0;
-			}
+			size_t first_sub_queue_size() const { return normalized() ? len : CAPACITY - hindex; }
+			const_iterator first_sub_queue_begin() const { return pMem + hindex; }
+			iterator first_sub_queue_begin() { return pMem + hindex; }
+			const_iterator first_sub_queue_end() const { return normalized() ? pMem + hindex + len : pMem + CAPACITY; }
+			iterator first_sub_queue_end() { return normalized() ? pMem + hindex + len : pMem + CAPACITY; }
+
+			size_t second_sub_queue_size() const { return normalized() ? 0 : len - (CAPACITY - hindex); }
+			const_iterator second_sub_queue_begin() const { return normalized() ? nullptr : pMem; }
+			iterator second_sub_queue_begin() { return normalized() ? nullptr : pMem; }
+			const_iterator second_sub_queue_end() const { return normalized() ? nullptr : pMem + (len - (CAPACITY - hindex)); }
+			iterator second_sub_queue_end() { return normalized() ? nullptr : pMem + (len - (CAPACITY - hindex)); }
 
 			T& front() const
 			{
-				DEBUG_ASSERT(!empty());
-				return *pFirst;
+				CQ_ASSERT(!empty());
+				return pMem[hindex];
 			}
 
 			T& back() const
 			{
-				DEBUG_ASSERT(pEnd >= pMem);
-				return pEnd > pMem ? *(pEnd - 1) : *(pMemEnd - 1);
+				CQ_ASSERT(!empty());
+				return pMem[(hindex + len - 1) % CAPACITY];
 			}
-
-
-			//------------------------------------------sub queue------------------------------------------//
-			size_t first_sub_queue_size() const { return normalized() ? pEnd - pFirst : pMemEnd - pFirst; }
-			const_iterator first_sub_queue_begin() const { return pFirst; }
-			iterator first_sub_queue_begin() { return pFirst; }
-			const_iterator first_sub_queue_end() const { return normalized() ? pEnd : pMemEnd; };
-			iterator first_sub_queue_end() { return normalized() ? pEnd : pMemEnd; }
-
-			size_t second_sub_queue_size() const { return normalized() ? 0 : pEnd - pMem; }
-			const_iterator second_sub_queue_begin() const { return normalized() ? NULL : pMem; }
-			iterator second_sub_queue_begin() { return normalized() ? NULL : pMem; }
-			const_iterator second_sub_queue_end() const { return normalized() ? NULL : pEnd; }
-			iterator second_sub_queue_end() { return normalized() ? NULL : pEnd; }
-			//------------------------------------------sub queue------------------------------------------//
 
 			void clear()
 			{
-				pEnd = pFirst = pMem;
-				q_size = 0;
-				DEBUG_RUN(memset(pMem, 0, mem_size()));
+				len = 0;
+				hindex = 0;
 			}
 
 			void emplace_back(T t)
 			{
-				DEBUG_ASSERT(!full());
-				if (pEnd == pMemEnd) { pEnd = pMem; }
-				*pEnd = t;
-				pEnd++;
-				q_size++;
+				CQ_ASSERT(!full());
+				pMem[(hindex + len) % CAPACITY] = t;
+				len++;
 			}
 
 			void pop_front()
 			{
-				DEBUG_ASSERT(!empty());
-				if (pFirst >= pMemEnd - 1)
-				{
-					pFirst = pMem;
-				} else
-				{
-					pFirst++;
-				}
-				q_size--;
+				CQ_ASSERT(!empty());
+				hindex = (hindex + 1) % CAPACITY;
+				len--;
 			}
 
 			bool emplace_back(const T t[], size_t n, void* (*copyfun)(void*, const void*, size_t) = memcpy)
 			{
-				if (size() + n > capacity()) { return false; }
-				if (pEnd == pMemEnd) { pEnd = pMem; }
-				if (!normalized())
+				// ensure safe write
+				if (available_size() < n) return false;
+
+				size_t insertPos = (hindex + len) % CAPACITY;
+				size_t tailToMemend = CAPACITY - insertPos;
+
+				if (n <= tailToMemend)
 				{
-					copyfun(pEnd, t, n * sizeof(T));
-					pEnd += n;
+					// normalized write
+					//    membeg(pMem)     insertPos    tailToMemend(write_able area)    memend(pMem+CAPACITY)
+					//    ⬇                   ⬇                                        ⬇
+					//    ||       #############                                       ||
+
+					// not normalized write
+					// n <= tailToMemend is equal to n <= write_able area (ok); n > write_able area(return false previous)
+					//                              [                         tailToMemend                    ]
+					//    membeg(pMem)     insertPos[    n <= write_able area                 ]               memend(pMem+CAPACITY)
+					//    ⬇                       ⬇                                         ⬇              ⬇
+					//    ||########################                                          ##############||
+
+					copyfun(pMem + insertPos, t, n * sizeof(T));
 				} else
 				{
-					size_t sz1 = std::min(size_t(pMemEnd - pEnd), n);
-					copyfun(pEnd, t, sz1 * sizeof(T));
-					if (sz1 >= n)
-					{
-						pEnd += n;
-					} else
-					{
-						size_t sz2 = n - sz1;
-						copyfun(pMem, t + sz1, sz2 * sizeof(T));
-						pEnd = pMem + sz2;
-					}
+					copyfun(pMem + insertPos, t, tailToMemend * sizeof(T));
+					copyfun(pMem, t + tailToMemend, (n - tailToMemend) * sizeof(T));
 				}
-				q_size += n;
+
+				len += n;
 				return true;
 			}
 
 			void pop_front(size_t n)
 			{
-				DEBUG_ASSERT2(n <= size(), size(), n);
-				if (normalized())
-				{
-					pFirst += n;
-				} else
-				{
-					size_t sz1 = pMemEnd - pFirst;
-					if (sz1 >= n)
-					{
-						pFirst += n;
-					} else
-					{
-						size_t sz2 = n - sz1;
-						pFirst = pMem + sz2;
-					}
-				}
-				if (pFirst == pMemEnd) { pFirst = pMem; }
-				q_size -= n;
-			}
-
-			// exclude _to
-			void erase_from_begin_to(iterator _to)
-			{
-				if (normalized())
-				{
-					DEBUG_ASSERT(pFirst <= _to);
-					DEBUG_ASSERT(_to <= pEnd);
-					q_size = pEnd - _to;
-				} else
-				{
-					DEBUG_ASSERT((pFirst <= _to && _to <= pMemEnd) || (pMem <= _to && _to <= pEnd));
-					if (pFirst <= _to && _to <= pMemEnd)
-					{
-						q_size -= (_to - pFirst);
-					} else
-					{
-						q_size = pEnd - _to;
-					}
-				}
-
-				if (_to == pMemEnd)
-				{
-					if (pEnd == pMemEnd)
-					{
-						pFirst = pEnd = pMem;
-					} else
-					{
-						pFirst = pMem;
-					}
-				} else
-				{
-					pFirst = _to;
-				}
-
-				DEBUG_ASSERT(_to != pMem);	  // use pMemEnd instead of pMem
-			}
-
-		public:
-			template <typename AL>
-			static void to_vector(Vector<T, AL>& v, const PodCircularQueue& q)
-			{
-				v.resize(0);
-				v.insert(v.end(), q.first_sub_queue_begin(), q.first_sub_queue_end());
-				v.insert(v.end(), q.second_sub_queue_begin(), q.second_sub_queue_end());
+				CQ_ASSERT(len >= n);
+				hindex = (hindex + n) % CAPACITY;
+				len -= n;
 			}
 
 			template <typename AL>
-			static void to_vector(Vector<T, AL>& v, PodCircularQueue::const_iterator _beg, PodCircularQueue::const_iterator _end)
-			{
-				DEBUG_ASSERT2(_beg <= _end, _beg, _end);
-				v.resize(0);
-				v.insert(v.end(), _beg, _end);
-			}
-
-			template <typename AL>
-			static void append_to_vector(Vector<T, AL>& v, const PodCircularQueue& q)
+			static void append_to_vector(Vector<T, AL>& v, const TrivialCircularQueue& q)
 			{
 				v.insert(v.end(), q.first_sub_queue_begin(), q.first_sub_queue_end());
 				v.insert(v.end(), q.second_sub_queue_begin(), q.second_sub_queue_end());
 			}
 
 			template <typename AL>
-			static void append_to_vector(Vector<T, AL>& v, PodCircularQueue::const_iterator _beg, PodCircularQueue::const_iterator _end)
+			static void append_to_vector(Vector<T, AL>& v, const_iterator _beg, const_iterator _end)
 			{
 				DEBUG_ASSERT2(_beg <= _end, _beg, _end);
 				v.insert(v.end(), _beg, _end);
 			}
 
-			size_t mem_size() const { return (pMemEnd - pMem) * sizeof(T); }
+			constexpr size_t mem_size() const { return CAPACITY * sizeof(T); }
 
 			T* pMem;
-			T* pMemEnd;
-			T* pFirst;
-			T* pEnd;
-			size_t q_size = 0;
-			DEBUG_DECLARE(T (*pDbgMemArr)[CAPACITY] = (T(*)[CAPACITY])pMem);
+			size_t len;
+			size_t hindex;
 		};
 
 #endif
@@ -1053,8 +968,8 @@ namespace tilogspace
 			constexpr static size_t CAPACITY = TILOG_FILE_BUFFER;
 
 			alignas(TILOG_DISK_SECTOR_SIZE) char datamem[CAPACITY];
-			PodCircularQueue<char, CAPACITY> datas{ datamem };	  // meta never full before data
-			// PodCircularQueue<buf_t, CAPACITY / TILOG_DISK_SECTOR_SIZE> metas;
+			TrivialCircularQueue<char, CAPACITY> datas{ datamem };	  // meta never full before data
+			// TrivialCircularQueue<buf_t, CAPACITY / TILOG_DISK_SECTOR_SIZE> metas;
 
 			~FilePrinterCrcQueue() { datas.pMem = nullptr; }
 			bool emplace_back(const buf_t& p)
@@ -1151,7 +1066,7 @@ namespace tilogspace
 		};
 
 
-		using CrcQueueLogCache = PodCircularQueue<TiLogCompactString*, TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE>;
+		using CrcQueueLogCache = TrivialCircularQueue<TiLogCompactString*, TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE>;
 		using TiLogCoreString = TiLogString;
 
 		using ThreadLocalSpinMutex = OptimisticMutex;
@@ -1307,7 +1222,7 @@ namespace tilogspace
 		};
 
 
-		struct iobean_statics_vec_t : PodCircularQueue<size_t, 8>
+		struct iobean_statics_vec_t : TrivialCircularQueue<size_t, 8>
 		{
 			SyncedIOBeanPool* mIOBeanPool;
 			size_t mIoBeanSizeSum{};
@@ -2651,7 +2566,7 @@ namespace tilogspace
 				ThreadSpinLock spinLock{ threadStru.spinMtx };
 				CrcQueueLogCache& qCache = threadStru.qCache;
 
-				auto func_to_vector = [&](CrcQueueLogCache::iterator it_sub_beg, CrcQueueLogCache::iterator it_sub_end) {
+				auto find_greater_it = [&](CrcQueueLogCache::iterator it_sub_beg, CrcQueueLogCache::iterator it_sub_end) {
 					DEBUG_ASSERT(it_sub_beg <= it_sub_end);
 					size_t size = it_sub_end - it_sub_beg;
 					if (size == 0) { return it_sub_end; }
@@ -2669,6 +2584,8 @@ namespace tilogspace
 				size_t vsizepre = v.size();
 				DEBUG_PRINTD("v %p size pre: %u\n", &v, (unsigned)vsizepre);
 
+				auto it_greater_than_bean = CrcQueueLogCache::iterator();
+
 				if (qCachePreSize == 0) { goto loopend; }
 				if (bean.ext.time() < (**qCache.first_sub_queue_begin()).ext.time()) { goto loopend; }
 
@@ -2683,16 +2600,16 @@ namespace tilogspace
 						CrcQueueLogCache::append_to_vector(v, qCache.first_sub_queue_begin(), qCache.first_sub_queue_end());
 
 						// get iterator > bean
-						auto it_before_last_merge = func_to_vector(qCache.second_sub_queue_begin(), qCache.second_sub_queue_end());
-						v.insert(v.end(), qCache.second_sub_queue_begin(), it_before_last_merge);
-						qCache.erase_from_begin_to(it_before_last_merge);
+						it_greater_than_bean = find_greater_it(qCache.second_sub_queue_begin(), qCache.second_sub_queue_end());
+						v.insert(v.end(), qCache.second_sub_queue_begin(), it_greater_than_bean);
+						qCache.pop_front(qCache.first_sub_queue_size() + (it_greater_than_bean - qCache.second_sub_queue_begin()));
 					}
 				} else
 				{
 				one_sub:
-					auto it_before_last_merge = func_to_vector(qCache.first_sub_queue_begin(), qCache.first_sub_queue_end());
-					CrcQueueLogCache::append_to_vector(v, qCache.first_sub_queue_begin(), it_before_last_merge);
-					qCache.erase_from_begin_to(it_before_last_merge);
+					it_greater_than_bean = find_greater_it(qCache.first_sub_queue_begin(), qCache.first_sub_queue_end());
+					CrcQueueLogCache::append_to_vector(v, qCache.first_sub_queue_begin(), it_greater_than_bean);
+					qCache.pop_front(it_greater_than_bean - qCache.first_sub_queue_begin());
 				}
 
 			loopend:
@@ -3349,7 +3266,7 @@ namespace tilogspace
 
 		struct TiLogInnerLogMgrImpl
 		{
-			PodCircularQueue<TiLogCompactString*, TILOG_INNO_LOG_QUEUE_FULL_SIZE> mCaches;
+			TrivialCircularQueue<TiLogCompactString*, TILOG_INNO_LOG_QUEUE_FULL_SIZE> mCaches;
 			TiLogFile mFile{};
 			TiLogFileRotater mRotater{ TILOG_STATIC_SUB_SYS_CFGS[TILOG_SUB_SYSTEM_INTERNAL].data, mFile };
 			enum
