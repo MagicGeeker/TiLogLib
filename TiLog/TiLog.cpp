@@ -2323,6 +2323,8 @@ namespace tilogspace
 	namespace internal
 	{
 #ifdef __________________________________________________TiLogCore__________________________________________________
+		void static CheckVecLogCacheOrdered(VecLogCache& v, TiLogCompactString* max_tp_str = nullptr);
+
 		TiLogCore::TiLogCore(TiLogDaemon* d, uint32_t id)
 			: TiLogCoreMini(SEQ_FREE, this), mTiLogDaemon(d), mTiLogEngine(d->mTiLogEngine),
 			  mTiLogMap(&TiLogEngines::getRInstance().tilogmap), mID(id)
@@ -2436,6 +2438,7 @@ namespace tilogspace
 			// bean's spinMtx protect both qCache and vec
 			VecLogCache& vec = mMerge.mRawDatas.get_for_append(bean.tid);
 			CrcQueueLogCache::append_to_vector(vec, bean.qCache);
+			DEBUG_RUN(CheckVecLogCacheOrdered(vec));
 			bean.qCache.clear();
 		}
 
@@ -2460,7 +2463,7 @@ namespace tilogspace
 				++mThreadStruQueue.handledUserThreadCnt;
 				synchronized(mThreadStruQueue)
 				{
-					DEBUG_PRINTV("pDstQueue %p insert thrd tid= %s\n", pDstQueue, pStru->tid->c_str());
+					DEBUG_PRINTI("pDstQueue %p insert thrd tid= %s\n", pDstQueue, pStru->tid->c_str());
 					pDstQueue->emplace_back(pStru);
 				}
 				unique_lock<mutex> lk(pStru->thrdExistMtx);
@@ -2608,12 +2611,13 @@ namespace tilogspace
 			}
 		}
 
-		void static CheckVecLogCacheOrdered(VecLogCache& v, TiLogCompactString* max_tp_str = nullptr)
+		void static CheckVecLogCacheOrdered(VecLogCache& v, TiLogCompactString* max_tp_str)
 		{
 			std::ostringstream os;
 			uint32_t index = 0;
 			for (; index != v.size(); index++)
 			{
+				TiLogBean::check(&v[index]->ext);
 				if (index + 1 != v.size())
 				{
 					if (TiLogCompactStringPtrComp()(v[index + 1], v[index]))
@@ -2692,7 +2696,7 @@ namespace tilogspace
 				}
 
 			loopend:
-				//TODO DEBUG_RUN(CheckVecLogCacheOrdered(v,&bean));
+				DEBUG_RUN(CheckVecLogCacheOrdered(v,&bean));
 
 				DEBUG_PRINTD(
 					"ptid %p, tid %s, v %p size after: %u diff %u\n", threadStru.tid, tid, &v, (unsigned)v.size(),
