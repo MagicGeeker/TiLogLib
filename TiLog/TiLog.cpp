@@ -913,7 +913,7 @@ namespace tilogspace
 		public:
 			inline TiLogFile() = default;
 			inline ~TiLogFile();
-			inline TiLogFile(TiLogStringView fpath);
+			inline explicit TiLogFile(TiLogStringView fpath);
 			explicit inline operator bool() const;
 			inline bool valid() const;
 			inline bool open(TiLogStringView fpath);
@@ -941,7 +941,7 @@ namespace tilogspace
 
 		protected:
 			TiLogNonePrinter() = default;
-			~TiLogNonePrinter() = default;
+			~TiLogNonePrinter() override = default;
 		};
 
 		class TiLogTerminalPrinter : public TiLogPrinter
@@ -1038,7 +1038,7 @@ namespace tilogspace
 			bool isAlignedOutput() override { return true; }
 
 		protected:
-			TiLogFilePrinter(String folderPath);
+			explicit TiLogFilePrinter(String folderPath);
 			TiLogFilePrinter(TiLogEngine* e, String folderPath);
 			~TiLogFilePrinter() override;
 
@@ -1179,7 +1179,7 @@ namespace tilogspace
 			void make_aligned_to_sector() { make_aligned(TILOG_DISK_SECTOR_SIZE); }
 			using TiLogCoreString::TiLogCoreString;
 		};
-		void swap(IOBean& lhs, IOBean& rhs)
+		void swap(IOBean& lhs, IOBean& rhs) noexcept
 		{
 			((TiLogCoreString&)lhs).swap((TiLogCoreString&)rhs);
 			std::swap(lhs.core, rhs.core);
@@ -1228,7 +1228,7 @@ namespace tilogspace
 			size_t mIoBeanSizeSum{};
 			uint64_t mShrinkCount{};
 			std::chrono::steady_clock::time_point mLastShrink{ std::chrono::steady_clock::now() };
-			iobean_statics_vec_t(SyncedIOBeanPool* pool) : mIOBeanPool(pool)
+			explicit iobean_statics_vec_t(SyncedIOBeanPool* pool) : mIOBeanPool(pool)
 			{
 				for (size_t i = 0; i < capacity(); i++)
 				{
@@ -1267,7 +1267,7 @@ namespace tilogspace
 		{
 			List<ThreadStru*> availQueue;			 // thread is live
 			UnorderedSet<ThreadStru*> dyingQueue;	 // thread is dying(is destroying thread_local variables)
-			List<ThreadStru*> waitMergeQueue;		 // thread is dead, but some logs have not merge to global print string
+			List<ThreadStru*> waitMergeQueue;		 // thread is dead, but some logs have not merged to global print string
 			List<ThreadStru*> toDelQueue;			 // thread is dead and no logs exist,need to delete by gc thread
 
 			atomic<uint64_t> handledUserThreadCnt{};
@@ -1300,7 +1300,7 @@ namespace tilogspace
 
 			explicit TiLogTaskQueueBasic(EPlaceHolder, task_t initerFunc, bool runAtOnce = true)
 			{
-				this->initerFunc = initerFunc;
+				this->initerFunc = std::move(initerFunc);
 				stat = RUN;
 				creator_tid = GetNewThreadIDString();
 				DEBUG_PRINTI("Create TiLogTaskQueueBasic %p by thread %s\n", this, creator_tid.data());
@@ -1332,7 +1332,7 @@ namespace tilogspace
 
 			void pushTask(task_t p)
 			{
-				synchronized(mtx) { taskDeque.push_back(p); }
+				synchronized(mtx) { taskDeque.push_back(std::move(p)); }
 				cv.notify_one();
 			}
 
@@ -1720,7 +1720,7 @@ namespace tilogspace
 			void AsyncDisablePrinter(EPrinterID printer);
 			void AsyncSetPrinters(printer_ids_t printerIds);
 
-			TiLogPrinterManager(TiLogEngine* e);
+			explicit TiLogPrinterManager(TiLogEngine* e);
 			~TiLogPrinterManager();
 
 		public:	   // internal public
@@ -1823,14 +1823,14 @@ namespace tilogspace
 		inline static void func_moveptr(HANDLE fd, size_t size)
 		{
 			LARGE_INTEGER li;
-			li.QuadPart = size;
+			li.QuadPart = static_cast<LONGLONG>(size);
 			SetFilePointerEx(fd, li, NULL, FILE_BEGIN);
 		}
 		inline static int func_trunc(HANDLE fd, size_t size, bool inc = false)
 		{
 			func_moveptr(fd, size);
 			SetEndOfFile(fd);
-			if (inc) { SetFileValidData(fd, size); }
+			if (inc) { SetFileValidData(fd, static_cast<LONGLONG>(size)); }
 			return 0;
 		}
 		inline static HANDLE func_open(const char* path)
@@ -1992,10 +1992,7 @@ namespace tilogspace
 
 		TiLogFilePrinter::TiLogFilePrinter(String folderPath0) : TiLogFilePrinter(nullptr, std::move(folderPath0)) {}
 
-		TiLogFilePrinter::~TiLogFilePrinter()
-		{
-			fsync();
-		}
+		TiLogFilePrinter::~TiLogFilePrinter() { TiLogFilePrinter::fsync(); }
 
 		void TiLogFilePrinter::onAcceptLogs(MetaData metaData)
 		{
@@ -2331,7 +2328,7 @@ namespace tilogspace
 			auto& schd = mTiLogDaemon->mScheduler;
 			synchronized(schd)
 			{
-				TiLogCoreMini cmini = *this;
+				TiLogCoreMini cmini = static_cast<TiLogCoreMini>(*this);
 				auto it = schd.mCoreMap.find(cmini);
 				DEBUG_ASSERT(it != schd.mCoreMap.end());
 				it = std::next(it);
@@ -2985,9 +2982,9 @@ namespace tilogspace
 		//core should be locked
 		void TiLogDaemon::ChangeCoreSeq(TiLogCore* core, core_seq_t seq)
 		{
-			TiLogCoreMini cmini_old = *core;
+			TiLogCoreMini cmini_old = static_cast<TiLogCoreMini>(*core);
 			core->seq = seq;
-			TiLogCoreMini cmini_new = *core;
+			TiLogCoreMini cmini_new = static_cast<TiLogCoreMini>(*core);
 			synchronized(mScheduler)
 			{
 				mScheduler.mCoreMap.erase(cmini_old);
@@ -3226,7 +3223,7 @@ namespace tilogspace
 			CoreThrdStru* t = nextExitThrd;
 			if (t)
 			{
-				auto lk = GetCoreThrdLock(*t);	  // wait for "current may working nextExitThrd"
+				auto lk = GetCoreThrdLock(*t);	  // wait for "current may be working nextExitThrd"
 				thrd->mStatus = WAIT_NEXT_THREAD;
 				lk.unlock();
 				t->mStatus = PREPARE_FINAL_LOOP;
