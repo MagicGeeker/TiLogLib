@@ -1092,14 +1092,16 @@ namespace tilogspace
 		struct ThreadStru : public TiLogObject
 		{
 			TiLogDaemon* pDaemon;
+			TiLogCompactString* crcq_mem[TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE];
 			CrcQueueLogCache qCache;
 			ThreadLocalSpinMutex spinMtx;	 // protect cache
 			uint32_t notify_flag{};
 
+			const String* tid;
+
 			mempoolspace::linear_mem_pool_list* lmempoolist;
 			core_seq_t pollseq_when_thrd_dead = core_seq_t::SEQ_INVALID;
 			core_seq_t inno_pollseq_when_thrd_dead = core_seq_t::SEQ_INVALID;
-			const String* tid;
 			std::mutex thrdExistMtx;
 			std::condition_variable thrdExistCV;
 
@@ -1116,6 +1118,7 @@ namespace tilogspace
 					delete (tid);
 					// DEBUG_RUN(tid = NULL);
 				}
+				qCache.pMem = nullptr;
 			}
 
 		};
@@ -2340,6 +2343,7 @@ namespace tilogspace
 
 		inline bool TiLogDaemon::LocalCircularQueuePushBack(ThreadStru& stru, TiLogCompactString* obj)
 		{
+			DEBUG_ASSERT(stru.tid == obj->ext.tid);
 			stru.qCache.emplace_back(obj);
 			return stru.qCache.full();
 		}
@@ -2572,12 +2576,12 @@ namespace tilogspace
 				};
 
 				size_t qCachePreSize = qCache.size();
-				const char* tid =(threadStru.tid == nullptr ? "" : threadStru.tid->c_str());
-				DEBUG_PRINTD(
-					"MergeThreadStruQueueToSet ptid %p , tid %s , qCachePreSize= %u\n", threadStru.tid,
-					tid, (unsigned)qCachePreSize);
+				auto ptid = threadStru.tid;
+				DEBUG_ASSERT(ptid != nullptr);
+				const char* tid = ptid->c_str();
+				DEBUG_PRINTD("MergeThreadStruQueueToSet ptid %p , tid %s , qCachePreSize= %u\n", ptid, tid, (unsigned)qCachePreSize);
 
-				VecLogCache& v = mMerge.mRawDatas.get(threadStru.tid);
+				VecLogCache& v = mMerge.mRawDatas.get(ptid);
 				size_t vsizepre = v.size();
 				DEBUG_PRINTD("v %p size pre: %u\n", &v, (unsigned)vsizepre);
 
@@ -2610,17 +2614,15 @@ namespace tilogspace
 				}
 
 			loopend:
-				DEBUG_RUN(CheckVecLogCacheOrdered(v,&bean));
+				DEBUG_RUN(CheckVecLogCacheOrdered(v, &bean));
 
 				DEBUG_PRINTD(
-					"ptid %p, tid %s, v %p size after: %u diff %u\n", threadStru.tid, tid, &v, (unsigned)v.size(),
-					(unsigned)(v.size() - vsizepre));
+					"ptid %p, tid %s, v %p size after: %u diff %u\n", ptid, tid, &v, (unsigned)v.size(), (unsigned)(v.size() - vsizepre));
 				if (!v.empty())
 				{
 					auto first_log = v.front();
 					auto final_log = v.back();
-					DEBUG_PRINTD(
-						"ptid %p, tid %s, first log [%.30s], final log [%.30s]", threadStru.tid, tid, first_log->buf(), final_log->buf());
+					DEBUG_PRINTD("ptid %p, tid %s, first log [%.30s], final log [%.30s]", ptid, tid, first_log->buf(), final_log->buf());
 				}
 				mMerge.mMergeLogVecVec[mMerge.mMergeLogVecVec.mIndex++].swap(v);
 			}
@@ -3275,6 +3277,7 @@ namespace tilogspace
 			bool mNeedWoking{};
 			core_seq_t mPoolSeq{core_seq_t::SEQ_INVALID};
 			atomic<uint32_t> mPollPeriodMs = { TILOG_POLL_THREAD_MAX_SLEEP_MS };
+			std::chrono::steady_clock::time_point mLastSync{};
 			TILOG_MUTEXABLE_CLASS_MACRO_WITH_CV(OptimisticMutex, mtx, cv_type, cv);
 			thread logthrd;
 
@@ -3319,11 +3322,14 @@ namespace tilogspace
 					to_free.clear();
 					mCaches.clear();
 					mBeanShrinker.ShrinkIoBeansMem(&mDeliver.mIoBean);
+					auto now_tp = std::chrono::steady_clock::now();
 					if (mPollPeriodMs > std::max(TILOG_POLL_THREAD_SLEEP_MS_IF_EXIST_THREAD_DYING, TILOG_POLL_THREAD_SLEEP_MS_IF_SYNC)
-						&& mDeliver.mIoBean.size() <= TILOG_FILE_BUFFER && stat != TO_STOP)
+						&& mDeliver.mIoBean.size() <= TILOG_FILE_BUFFER && stat != TO_STOP
+						&& mLastSync + std::chrono::milliseconds(mPollPeriodMs) > now_tp)
 					{
 						continue;
 					}
+					mLastSync = now_tp;
 
 					mDeliver.mIoBean.make_aligned_to_sector();
 					TiLogStringView sv{ mDeliver.mIoBean.data(), mDeliver.mIoBean.size() };
@@ -3483,9 +3489,9 @@ namespace tilogspace
 		}
 
 		ThreadStru::ThreadStru(TiLogDaemon* daemon)
-			: pDaemon(daemon), qCache(), spinMtx(),
-			  lmempoolist(mempoolspace::tilogstream_mempool::acquire_localthread_mempool(daemon->GetEngine()->subsys)),
-			  tid(GetThreadIDString()), thrdExistMtx(), thrdExistCV()
+			: pDaemon(daemon), qCache(crcq_mem), spinMtx(), tid(GetThreadIDString()),
+			  lmempoolist(mempoolspace::tilogstream_mempool::acquire_localthread_mempool(daemon->GetEngine()->subsys)), thrdExistMtx(),
+			  thrdExistCV()
 		{
 			DEBUG_PRINTI("ThreadStru ator pDaemon %p this %p tid [%p %s]\n", pDaemon, this, tid, tid->c_str());
 			IncTidStrRefCnt(tid);
