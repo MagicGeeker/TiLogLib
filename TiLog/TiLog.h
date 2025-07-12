@@ -1513,6 +1513,49 @@ namespace tilogspace
 		{
 		};
 
+		template <typename T>
+		struct DataSet
+		{
+			using arr_t = T[16];
+			constexpr DataSet() : n(0), data() {}
+			constexpr DataSet(T&& t) : n(1), data{ t } {}
+
+			// clang-format off
+			constexpr static size_t line0 = __LINE__ ;
+			constexpr static size_t baseline = __LINE__ + 4;
+		#define InDeX_DaTa  (__LINE__-baseline)
+			constexpr DataSet(const DataSet& s, T t) :
+				n(s.n + 1), data{
+					s.n > InDeX_DaTa ? s[InDeX_DaTa] : s.n == InDeX_DaTa ? std::move(t) : nullt() ,
+					s.n > InDeX_DaTa ? s[InDeX_DaTa] : s.n == InDeX_DaTa ? std::move(t) : nullt() ,
+					s.n > InDeX_DaTa ? s[InDeX_DaTa] : s.n == InDeX_DaTa ? std::move(t) : nullt() ,
+					s.n > InDeX_DaTa ? s[InDeX_DaTa] : s.n == InDeX_DaTa ? std::move(t) : nullt() ,
+					s.n > InDeX_DaTa ? s[InDeX_DaTa] : s.n == InDeX_DaTa ? std::move(t) : nullt() ,
+					s.n > InDeX_DaTa ? s[InDeX_DaTa] : s.n == InDeX_DaTa ? std::move(t) : nullt() ,
+					s.n > InDeX_DaTa ? s[InDeX_DaTa] : s.n == InDeX_DaTa ? std::move(t) : nullt() ,
+					s.n > InDeX_DaTa ? s[InDeX_DaTa] : s.n == InDeX_DaTa ? std::move(t) : nullt() ,
+					s.n > InDeX_DaTa ? s[InDeX_DaTa] : s.n == InDeX_DaTa ? std::move(t) : nullt() ,
+					s.n > InDeX_DaTa ? s[InDeX_DaTa] : s.n == InDeX_DaTa ? std::move(t) : nullt() ,
+					s.n > InDeX_DaTa ? s[InDeX_DaTa] : s.n == InDeX_DaTa ? std::move(t) : nullt() ,
+					s.n > InDeX_DaTa ? s[InDeX_DaTa] : s.n == InDeX_DaTa ? std::move(t) : nullt() ,
+					s.n > InDeX_DaTa ? s[InDeX_DaTa] : s.n == InDeX_DaTa ? std::move(t) : nullt() ,
+					s.n > InDeX_DaTa ? s[InDeX_DaTa] : s.n == InDeX_DaTa ? std::move(t) : nullt() ,
+					s.n > InDeX_DaTa ? s[InDeX_DaTa] : s.n == InDeX_DaTa ? std::move(t) : nullt() ,
+					s.n > InDeX_DaTa ? s[InDeX_DaTa] : s.n == InDeX_DaTa ? std::move(t) : nullt() ,
+				}
+			{
+				static_assert(__LINE__ == line0 + 23, "never format this area's code");
+			}
+		#undef InDeX_DaTa
+			// clang-format on
+			constexpr static T nullt() { return T(); }
+
+			constexpr size_t size() const { return n; }
+			constexpr const T& operator[](size_t i) const { return data[i]; }
+
+			size_t n;
+			alignas(32) arr_t data;
+		};
 
 		enum EStaticStringTrait
 		{
@@ -2368,11 +2411,27 @@ namespace tilogspace
 		struct TiLogEngine;
 		struct TiLogEngines;
 
+		using brace_index_t = uint32_t;
+
+		struct tiny_meta_pack : DataSet<brace_index_t>
+		{
+			TiLogStringView fmt;
+			constexpr tiny_meta_pack(DataSet<brace_index_t> d, TiLogStringView f) : DataSet(d), fmt(f) {}
+		};
+
+
 		struct TiLogStreamHelper /*: public TiLogObject*/
 		{
 			using ExtType = TiLogBean;
 			using ObjectType = TiLogStream;
 			using TiLogCompactString = TiLogStringExtend<tilogspace::internal::TiLogStreamHelper>::Core;
+
+			inline constexpr static tiny_meta_pack tiny_format_parse(TiLogStringView fmt);
+
+			template <typename... Args>
+			inline static void tiny_format_append_impl(TiLogStream& outs, const tiny_meta_pack& pack, std::tuple<Args...>&& args);
+			template <typename... Args>
+			inline static void tiny_format_append(TiLogStream& outs, const tiny_meta_pack& pack, Args&&... args);
 
 			template <typename... Args>
 			static void mini_format_impl(TiLogStream& outs, TiLogStringView fmt, std::tuple<Args...>&& args);
@@ -2382,6 +2441,17 @@ namespace tilogspace
 		using TiLogCompactString = TiLogStreamHelper::TiLogCompactString;
 	}	 // namespace internal
 
+	inline constexpr internal::tiny_meta_pack operator""_tiny(const char* fmt, std::size_t len)
+	{
+		return internal::TiLogStreamHelper::tiny_format_parse(internal::TiLogStringView(fmt, len));
+	}
+
+#define TINY_META_PACK_CREATE_GLOABL_CONSTEXPR(fmt)                                                                                        \
+	[]() -> const tilogspace::internal::tiny_meta_pack& {                                                                                  \
+		using namespace tilogspace;                                                                                                        \
+		constexpr static auto f = fmt##_tiny;                                                                                              \
+		return f;                                                                                                                          \
+	}()
 
 	TILOG_ABSTRACT class TiLogPrinter : public TiLogObject
 	{
@@ -2658,6 +2728,12 @@ namespace tilogspace
 			TiLogStreamHelper::mini_format_append(*this, fmt, std::forward<Args>(args)...);
 			return *this;
 		}
+		template <typename... Args>
+		inline TiLogStream& tiny_print(const internal::tiny_meta_pack& pack, Args&&... args)
+		{
+			TiLogStreamHelper::tiny_format_append(*this, pack, std::forward<Args>(args)...);
+			return *this;
+		}
 
 	public:
 		inline constexpr explicit operator bool() const { return true; }
@@ -2744,7 +2820,24 @@ namespace tilogspace
 	protected:
 		inline TiLogStream& resetLogLevel(ELevel lv)
 		{
+			const auto* slex = ext()->source_location_str;
 			ext()->source_location_str = (internal::static_str_t*)&SOURCE_LOCATION_PREFIX[lv];
+			if (lv > ELevel::WARN) { return *this; }
+			// reserve source location for warn/error/fatal logs
+			auto& self = *this;
+			if (slex->size() < LOG_LEVELS_STRING_LEN)
+			{
+				std::abort();	 // unknown exception
+			}
+			size_type sl_true_size_no_level = slex->size() - LOG_LEVELS_STRING_LEN;
+			size_type app_size = 2 + sl_true_size_no_level;
+			size_type size = self.size();
+			self.reserve(size + app_size);
+			self.resetsize(size + app_size);
+			memmove((char*)self.c_str() + app_size, self.c_str(), size);
+			self[0] = ' ';
+			memcpy(&self[1], slex->data() + LOG_LEVELS_STRING_LEN, sl_true_size_no_level);
+			self[app_size - 1] = ' ';
 			return *this;
 		}
 
@@ -2805,6 +2898,7 @@ namespace tilogspace
 	namespace internal
 	{
 
+#define PARSER_CONSTEXPR constexpr
 		struct Functor
 		{
 			template <typename T>
@@ -2829,6 +2923,104 @@ namespace tilogspace
 				for_index<I + 1, FuncT, Tp...>(index - 1, t, f, s);
 		}
 
+#if __cplusplus >= 201402L
+		PARSER_CONSTEXPR inline DataSet<brace_index_t> tiny_format_parse_impl_cpp14(TiLogStringView fmt)
+		{
+			int r = -1;
+			uint32_t pos = 0;
+			uint32_t i = 0;
+			DataSet<brace_index_t> ret;
+
+			while (1)
+			{
+				if (pos == uint32_t(fmt.size())) { break; }
+				if (i >= ret.size()) {}	   // index overflow
+				r = find(&fmt[pos], "{}");
+				if (r == -1)
+				{
+					break;
+				} else
+				{
+					pos += r;
+					ret = { ret, pos };
+					pos += 2;
+					i++;
+				}
+			}
+			return ret;
+		}
+#endif
+
+		class TinyFormatParser
+		{
+			TiLogStringView fmt;
+			uint32_t pos;
+			DataSet<brace_index_t> data;
+
+			PARSER_CONSTEXPR TinyFormatParser(TiLogStringView fmt) : fmt(fmt), pos(0), data() {}
+			PARSER_CONSTEXPR TinyFormatParser(TiLogStringView fmt, uint32_t pos, DataSet<brace_index_t> data)
+				: fmt(fmt), pos(pos), data(data)
+			{
+			}
+
+			PARSER_CONSTEXPR TinyFormatParser setPos(uint32_t pos) const { return { fmt, pos, data }; }
+
+			PARSER_CONSTEXPR TinyFormatParser addData(brace_index_t d) const { return { fmt, pos, DataSet<brace_index_t>{ data, d } }; }
+
+			PARSER_CONSTEXPR TinyFormatParser add_meta() const { return addData(pos).setPos(pos + 2); }
+
+			PARSER_CONSTEXPR TinyFormatParser handle_match(int r) const { return r == -1 ? *this : parse(setPos(pos + r).add_meta()); }
+
+			PARSER_CONSTEXPR static TinyFormatParser parse(const TinyFormatParser& P)
+			{
+				return P.pos == P.fmt.size() ? P : (P.handle_match(find(&P.fmt[P.pos], "{}")));
+			}
+
+		public:
+			PARSER_CONSTEXPR static DataSet<brace_index_t> tiny_format_parse_impl_cpp11(TiLogStringView fmt)
+			{
+				return parse(TinyFormatParser(fmt)).data;
+			}
+		};
+
+
+		PARSER_CONSTEXPR inline tiny_meta_pack TiLogStreamHelper::tiny_format_parse(TiLogStringView fmt)
+		{
+#if __cplusplus >= 201402L
+			return { tiny_format_parse_impl_cpp14(fmt), fmt };
+#else
+			return { TinyFormatParser::tiny_format_parse_impl_cpp11(fmt), fmt };
+#endif
+		}
+
+		template <typename... Args>
+		void TiLogStreamHelper::tiny_format_append_impl(TiLogStream& outs, const tiny_meta_pack& pack, std::tuple<Args...>&& args)
+		{
+			auto& fmt = pack.fmt;
+			size_t pos = 0, i = 0, j = 0;
+			for (; i < pack.size(); i++)
+			{
+				auto& brace_pos = pack[i];
+				if (pos < brace_pos) { outs.append(fmt.begin() + pos, brace_pos - pos); }
+				if (j >= sizeof...(Args))
+				{
+					outs.append(TILOG_ERROR_FORMAT_STRING "Too much {}\n");
+					outs.resetLogLevel(ELevel::ERROR);
+					return;
+				}
+				for_index(j, args, Functor(), outs);
+				j++;
+				pos = brace_pos + 2;
+			}
+			if (pos < fmt.size()) { outs.append(fmt.begin() + pos, fmt.size() - pos); }
+		}
+
+
+		template <typename... Args>
+		void TiLogStreamHelper::tiny_format_append(TiLogStream& outs, const tiny_meta_pack& pack, Args&&... args)
+		{
+			tiny_format_append_impl(outs, std::move(pack), std::forward_as_tuple(args...));
+		}
 
 		template <typename... Args>
 		void TiLogStreamHelper::mini_format_impl(TiLogStream& outs, TiLogStringView fmt, std::tuple<Args...>&& args)
@@ -2931,6 +3123,8 @@ namespace tilogspace
 		{
 			mini_format_impl(outs, fmt, std::forward_as_tuple(args...));
 		}
+#undef PARSER_CONSTEXPR
+
 	}	 // namespace internal
 
 	class TiLogStreamEx

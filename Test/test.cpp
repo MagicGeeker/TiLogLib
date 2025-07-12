@@ -27,10 +27,14 @@ using namespace tilogspace;
 #define file_single_thread_benchmark_test_____________________
 #define file_multi_thread_benchmark_test_____________________
 #define file_multi_thread_benchmark_test_with_format_____________________
+#define file_multi_thread_benchmark_test_with_tiny_format_____________________
+#define file_multi_thread_benchmark_test_with_tiny_global_format_____________________
 #define file_single_thread_operator_test_____________________
 #define terminal_single_thread_long_string_log_test_____________________
 #define file_static_log_test_____________________
 #define terminal_multi_way_log_test_____________________
+
+#define S TINY_META_PACK_CREATE_GLOABL_CONSTEXPR
 
 
 //__________________________________________________long time test__________________________________________________//
@@ -367,6 +371,50 @@ TEST_CASE("file_multi_thread_benchmark_test_with_format_____________________")
 }
 #endif
 
+#ifdef file_multi_thread_benchmark_test_with_tiny_format_____________________
+TEST_CASE("file_multi_thread_benchmark_test_with_tiny_format_____________________")
+{
+	using namespace tilogspace;
+	struct testLoop_t : multi_thread_test_loop_t
+	{
+		constexpr static int32_t THREADS() { return 6; }
+		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return test_release ? 2 * testpow10(7) : testpow10(5); }
+		constexpr static bool PRINT_LOOP_TIME() { return true; }
+	};
+
+	MultiThreadTest<testLoop_t>(
+		"file_multi_thread_benchmark_test_with_tiny_format_____________________", tilogspace::EPrinterID::PRINTER_TILOG_FILE,
+		[](int index) {
+			for (uint64_t j = 0; j < testLoop_t::GET_SINGLE_THREAD_LOOPS(); j++)
+			{
+				constexpr auto fmt = "index= {} j= {}"_tiny;
+				TILOGE.tiny_print(fmt, index, j);
+			}
+		});
+}
+#endif
+
+#ifdef file_multi_thread_benchmark_test_with_tiny_global_format_____________________
+TEST_CASE("file_multi_thread_benchmark_test_with_tiny_global_format_____________________")
+{
+	using namespace tilogspace;
+	struct testLoop_t : multi_thread_test_loop_t
+	{
+		constexpr static int32_t THREADS() { return 6; }
+		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return test_release ? 2 * testpow10(7) : testpow10(5); }
+		constexpr static bool PRINT_LOOP_TIME() { return true; }
+	};
+
+	MultiThreadTest<testLoop_t>(
+		"file_multi_thread_benchmark_test_with_tiny_global_format_____________________", tilogspace::EPrinterID::PRINTER_TILOG_FILE,
+		[](int index) {
+			for (uint64_t j = 0; j < testLoop_t::GET_SINGLE_THREAD_LOOPS(); j++)
+			{
+				TILOGE.tiny_print(S("index= {} j= {}"), index, j);
+			}
+		});
+}
+#endif
 
 #ifdef file_multi_thread_close_print_benchmark_test_____________________
 
@@ -813,6 +861,26 @@ TEST_CASE("terminal_multi_way_log_test_____________________")
 
 		TIDLOGI.print("hello {{, my name is {}\n\n", std::string("C"), std::string("C++"));
 	}
+	{
+		using namespace tilogspace;
+		TILOGI.tiny_print("\n\n"_tiny);
+		TILOGI.tiny_print(""_tiny);
+		TILOGI.tiny_print("{}"_tiny);
+		TILOGI.tiny_print("tiny_print test 1"_tiny);
+		TILOGI.tiny_print("tiny_print test {}"_tiny,2);
+		TILOGI.tiny_print("{} test 3"_tiny, "tiny_print");
+		TILOGI.tiny_print("{}"_tiny,"tiny_print test 4");
+		TILOGI.tiny_print("{}{}"_tiny,"tiny_print"," test 5");
+		TILOGI.tiny_print(S("{}{}"),"tiny_print"," test 6");
+		TILOGI.tiny_print(S("{0}{}"),"tiny_print"," test 7");
+		TILOGI.tiny_print(S("tiny_print{"),""," test 8");
+		TILOGI.tiny_print(S("tiny_print}"),""," test 8.1");
+		TILOGI.tiny_print(S("tiny_print}"),""," test 8.2");
+		TILOGI.tiny_print(S("{0} test 9"),"tiny_print");
+		TILOGI.tiny_print(S("{{} test 9.1"),"tiny_print");
+		TILOGI.tiny_print(S("{{}} test 9.2"),"tiny_print");
+		TILOGI.tiny_print(S("tiny_print test 10 {}"),Student());
+	}
 }
 #endif
 
@@ -965,6 +1033,8 @@ TEST_CASE("dynamic_log_level_multi_thread_benchmark_test_____________________")
 		});
 }
 #endif
+
+#undef S
 
 #if USE_COMPLEX_TEST == TEST_WAY
 }
