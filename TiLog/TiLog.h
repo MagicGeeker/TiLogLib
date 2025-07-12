@@ -473,9 +473,9 @@ namespace tilogspace
 			*((void**)p - 1) = ptr;
 			return p;
 		}
-		//NOT support nullptr p
 		inline static void operator delete(void* p, tilog_align_val_t alignv)
 		{
+			if (!p) { return; }
 			DEBUG_ASSERT((uintptr_t)p % (alignv) == 0);
 			void* ptr = *((void**)p - 1);
 			TILOG_FREE_FUNCTION(ptr);

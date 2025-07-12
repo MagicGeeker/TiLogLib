@@ -94,7 +94,7 @@ namespace tilogspace
 	static void init_tilog_buffer()
 	{
 		memset(TILOG_BLANK_BUFFER, ' ', sizeof(TILOG_BLANK_BUFFER));
-		for (size_t i = 0; i < sizeof(TILOG_BLANK_BUFFER); i += 64)
+		for (size_t i = 0; i < sizeof(TILOG_BLANK_BUFFER); i += 128)
 		{
 			TILOG_BLANK_BUFFER[i] = '\n';
 		}
@@ -959,6 +959,7 @@ namespace tilogspace
 
 		protected:
 			TiLogTerminalPrinter();
+			~TiLogTerminalPrinter() override { TiLogTerminalPrinter::fsync(); }
 		};
 
 		struct IOBean;
@@ -1106,24 +1107,15 @@ namespace tilogspace
 			std::condition_variable thrdExistCV;
 
 			explicit ThreadStru(TiLogDaemon* daemon);
-			
+
 			~ThreadStru()
 			{
 				mempoolspace::tilogstream_mempool::release_localthread_mempool(lmempoolist);
-
-				uint32_t refcnt = DecTidStrRefCnt(tid);
-				if (refcnt == 0)
-				{
-					DEBUG_PRINTI("ThreadStru dtor pDaemon %p this %p tid [%p %s]\n", pDaemon, this, tid, tid->c_str());
-					delete (tid);
-					// DEBUG_RUN(tid = NULL);
-				}
+				DEBUG_PRINTI("ThreadStru dtor pDaemon %p this %p tid [%p %s]\n", pDaemon, this, tid, tid->c_str());
+				DecTidStrRefCnt(tid);
 				qCache.pMem = nullptr;
 			}
-
 		};
-
-		class TiLogCore;
 
 		struct MergeRawDatasHashMapFeat : TiLogConcurrentHashMapDefaultFeat<const String*, VecLogCache>
 		{
@@ -3484,7 +3476,11 @@ namespace tilogspace
 		uint32_t DecTidStrRefCnt(const String* s)
 		{
 			uint32_t cnt = --TiLogEngines::getRInstance().threadIdStrRefCount.get(s);
-			if (cnt == 0) { TiLogEngines::getRInstance().threadIdStrRefCount.remove(s); }
+			if (cnt == 0)
+			{
+				TiLogEngines::getRInstance().threadIdStrRefCount.remove(s);
+				delete s;
+			}
 			return cnt;
 		}
 
