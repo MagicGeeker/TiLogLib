@@ -254,7 +254,7 @@ static std::unique_ptr<lat_t> SingleLoopTimeTestFunc(const char* testName = "")
 	struct testLoop_t : multi_thread_test_loop_t
 	{
 		constexpr static int32_t THREADS() { return 10; }
-		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return test_release ? testpow10(6) : testpow10(5); }
+		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return (test_release ? testpow10(8) : testpow10(7)) / N * 0.6; }
 		constexpr static bool PRINT_LOOP_TIME() { return false; }
 		constexpr static bool PRINT_TOTAL_TIME() { return false; }
 	};

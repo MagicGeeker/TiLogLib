@@ -1586,7 +1586,6 @@ namespace tilogspace
 			atomic_bool mToExit{};
 			atomic_bool mInited{};
 
-			atomic_uint64_t mPrintedLogs{ 0 };
 			atomic<uint64_t> mCoreLoopCount{};
 
 			ThreadStruQueue mThreadStruQueue;
@@ -2896,7 +2895,7 @@ namespace tilogspace
 
 				AppendToMergeCacheByMetaData(mDeliver, bean);
 			}
-			mPrintedLogs += deliverCache.size();
+			mPrintedLogs.fetch_add(deliverCache.size(), std::memory_order_relaxed);
 			DEBUG_PRINTI("End of mergeLogsToOneString,string size= %llu\n", (long long unsigned)mDeliver.mIoBean.size());
 			TiLogTime firstLogTime = deliverCache[0]->ext.time();
 			mDeliver.mIoBean.mTime = firstLogTime;
@@ -3235,9 +3234,22 @@ namespace tilogspace
 			thrd->mStatus = DEAD;
 		}
 
-		inline uint64_t TiLogDaemon::GetPrintedLogs() { return mPrintedLogs; }
+		inline uint64_t TiLogDaemon::GetPrintedLogs()
+		{
+			uint64_t ret = 0;
+			for (auto c : mScheduler.mCoreArr)
+			{
+				ret += c->mPrintedLogs.load(std::memory_order_relaxed);
+			}
+			return ret;
+		}
 
-		inline void TiLogDaemon::ClearPrintedLogsNumber() { mPrintedLogs = 0; }
+		inline void TiLogDaemon::ClearPrintedLogsNumber()
+		{
+			std::for_each(mScheduler.mCoreArr.begin(), mScheduler.mCoreArr.end(), [](TiLogCore* c) {
+				c->mPrintedLogs.store(0, std::memory_order_relaxed);
+			});
+		}
 
 #endif
 

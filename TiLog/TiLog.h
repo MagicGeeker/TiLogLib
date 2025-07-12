@@ -336,16 +336,21 @@ namespace tilogspace
 		{ TILOG_SUB_SYSTEM_GLOBAL_TERMINAL, "global_terminal", "a:/global_t/", PRINTER_TILOG_TERMINAL, INFO, true },
 		{ TILOG_SUB_SYSTEM_GLOBAL_FILE_TERMINAL, "global_ft", "a:/global_ft/", PRINTER_TILOG_FILE | PRINTER_TILOG_TERMINAL, INFO, false }
 	};
-	constexpr static size_t TILOG_STATIC_SUB_SYS_SIZE = sizeof(TILOG_STATIC_SUB_SYS_CFGS) / sizeof(TILOG_STATIC_SUB_SYS_CFGS[0]);
+	
 }	 // namespace tilogspace
 #endif
+
+// clang-format on
+
+namespace tilogspace
+{
+	constexpr static size_t TILOG_STATIC_SUB_SYS_SIZE = sizeof(TILOG_STATIC_SUB_SYS_CFGS) / sizeof(TILOG_STATIC_SUB_SYS_CFGS[0]);
+}
 
 #define TILOG_CURRENT_SUB_SYSTEM tilogspace::TiLog::GetSubSystemRef(TILOG_CURRENT_SUBSYS_ID)
 #define TILOG_SUB_SYSTEM(sub_sys_id) tilogspace::TiLog::GetSubSystemRef(sub_sys_id)
 #define TILOG_CURRENT_SUB_SYSTEM_CONFIG tilogspace::TILOG_STATIC_SUB_SYS_CFGS[TILOG_CURRENT_SUBSYS_ID]
 #define TILOG_SUB_SYSTEM_CONFIG(sub_sys_id) tilogspace::TILOG_STATIC_SUB_SYS_CFGS[sub_sys_id]
-
-// clang-format on
 
 
 
@@ -440,8 +445,8 @@ namespace tilogspace
 
 
 	inline constexpr bool is_power_of_two(uint64_t num) { return num != 0 && (num & (num - 1)) == 0; }
-	inline size_t round_up(size_t size, size_t align) { return (size + align - 1) / align * align; }
-	inline size_t round_down(size_t size, size_t align) { return size / align * align; }
+	inline constexpr size_t round_up(size_t size, size_t align) { return (size + align - 1) / align * align; }
+	inline constexpr size_t round_down(size_t size, size_t align) { return size / align * align; }
 
 	struct TiLogCppMemoryManager
 	{
@@ -1460,7 +1465,7 @@ namespace tilogspace
 			V = 'V',
 		};
 
-		constexpr ELevel ELogLevelChar2ELevel(char c)
+		constexpr inline ELevel ELogLevelChar2ELevel(char c)
 		{
 			return (ELevel)(("\x03"	   // ALWAYS
 							 "BC"
@@ -3245,7 +3250,7 @@ namespace tilogspace
 	static_assert(TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE > 0, "fatal err!");
 	static_assert(TILOG_DISK_SECTOR_SIZE % 512 == 0, "fatal err!");
 	static_assert(TILOG_FILE_IO_SIZE % TILOG_DISK_SECTOR_SIZE == 0 && TILOG_FILE_IO_SIZE >= TILOG_DISK_SECTOR_SIZE, "fatal err!");
-	static_assert(TILOG_FILE_BUFFER % TILOG_FILE_IO_SIZE == 0 && TILOG_FILE_BUFFER >= TILOG_FILE_IO_SIZE, "fatal err!");
+	static_assert(TILOG_FILE_BUFFER % TILOG_DISK_SECTOR_SIZE == 0 && TILOG_FILE_BUFFER >= TILOG_FILE_IO_SIZE, "fatal err!");
 
 }	 // namespace tilogspace
 

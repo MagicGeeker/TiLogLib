@@ -710,21 +710,21 @@ TEST_CASE("file_multi_thread_print_level_test_____________________")
 
 	struct testLoop_t : multi_thread_test_loop_t
 	{
-		constexpr static int32_t THREADS() { return (int32_t)ELevel::VERBOSE - (int32_t)ELevel::ALWAYS; }
+		constexpr static int32_t THREADS() { return 1 + (int32_t)ELevel::VERBOSE - (int32_t)ELevel::ALWAYS; }
 		constexpr static bool PRINT_LOOP_TIME() { return false; }
 		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return test_release ? testApow10N(2, 6) : testpow10(4); }
 	};
-	uint64_t ns = MultiThreadTest(
+	uint64_t ns = MultiThreadTest<testLoop_t>(
 		"file_multi_thread_print_level_test_____________________", tilogspace::EPrinterID::PRINTER_TILOG_FILE, [](uint32_t index) {
 			constexpr uint64_t loops = testLoop_t::GET_SINGLE_THREAD_LOOPS();
 			index = index + (int32_t)ELevel::ALWAYS - 1;
 			for (uint64_t j = 1; j <= loops; j++)
 			{
-				TIDLOG(TILOG_CURRENT_SUBSYS_ID,index) << "index= " << index << " j= " << j;
-				if (index == ELevel::ALWAYS && (j * 8) % loops == 0)
+				TIDLOG(TILOG_CURRENT_SUBSYS_ID, (ELevel)index) << "index= " << index << " j= " << j;
+				if (index == ELevel::ALWAYS && (j * 1024) % loops == 0)
 				{
-					uint64_t v = j * 8 / loops;	   // 1-8
-					TILOG_CURRENT_SUB_SYSTEM.SetLogLevel((tilogspace::ELevel)(9 - v));
+					uint64_t v = j % ((uint64_t)ELevel::VERBOSE - (uint64_t)ELevel::ALWAYS + 1) + (uint64_t)ELevel::ALWAYS;
+					TILOG_CURRENT_SUB_SYSTEM.SetLogLevel((tilogspace::ELevel)v);
 				}
 			}
 		});
@@ -887,6 +887,7 @@ TEST_CASE("terminal_multi_way_log_test_____________________")
 #ifdef user_subsystem_test_____________________
 TEST_CASE("user_subsystem_test_____________________")
 {
+	static_assert(TILOG_STATIC_SUB_SYS_SIZE >= 4, "enable all sub sys to test");
 	TILOG_CURRENT_SUB_SYSTEM.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
 
 	struct testLoop_t : multi_thread_test_loop_t

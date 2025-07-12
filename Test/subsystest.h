@@ -23,7 +23,6 @@ namespace tilogspace
 		{ TILOG_SUB_STOR, "stor", "a:/stor/", PRINTER_TILOG_FILE, VERBOSE, false },
 		{ TILOG_SUB_NETWORK, "network", "a:/network/", PRINTER_TILOG_FILE, VERBOSE, false },
 	};
-	constexpr static size_t TILOG_STATIC_SUB_SYS_SIZE = sizeof(TILOG_STATIC_SUB_SYS_CFGS) / sizeof(TILOG_STATIC_SUB_SYS_CFGS[0]);
 }	 // namespace tilogspace
 #endif
 
