@@ -968,21 +968,18 @@ namespace tilogspace
 			constexpr static size_t CAPACITY = TILOG_FILE_BUFFER;
 
 			alignas(TILOG_DISK_SECTOR_SIZE) char datamem[CAPACITY];
-			TrivialCircularQueue<char, CAPACITY> datas{ datamem };	  // meta never full before data
-			// TrivialCircularQueue<buf_t, CAPACITY / TILOG_DISK_SECTOR_SIZE> metas;
+			TrivialCircularQueue<char, CAPACITY> datas{ datamem };
 
 			~FilePrinterCrcQueue() { datas.pMem = nullptr; }
 			bool emplace_back(const buf_t& p)
 			{
 				size_t aligned_size = round_up(p.size(), TILOG_DISK_SECTOR_SIZE);
-				if (aligned_size <= datas.available_size())
-				{
+				DEBUG_ASSERT(aligned_size == p.size());
+
 					bool succ = datas.emplace_back(p.data(), p.size(), adapt_memcpy);
-					DEBUG_ASSERT(succ);
-					succ = datas.emplace_back(TILOG_BLANK_BUFFER, aligned_size - p.size());
-					DEBUG_ASSERT(succ);
-					// metas.emplace_back(p);
-					DEBUG_PRINTI("emplace_back %llu bytes ok\n",(long long unsigned)aligned_size);
+				if (succ)
+				{
+					DEBUG_PRINTI("emplace_back %llu bytes ok\n", (long long unsigned)aligned_size);
 					return true;
 				}
 				return false;
@@ -994,16 +991,18 @@ namespace tilogspace
 		{
 			~TiLogFileRotater()
 			{
-				if (mPrintedBytesOnFile < TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE)
+				if (mCurFile.logs_size < TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE)
 				{
-					DEBUG_ASSERT(mPrintedBytesOnFile % TILOG_DISK_SECTOR_SIZE == 0);
-					file().trunc(mPrintedBytesOnFile);
+					DEBUG_ASSERT(mCurFile.logs_size % TILOG_DISK_SECTOR_SIZE == 0);
+					file().trunc(mCurFile.logs_size);
 				}
 			}
 
 			TiLogFileRotater(String folderPath0, TiLogFile& file) : mFolderPath(std::move(folderPath0)), mFile(file)
 			{
 				if (mFolderPath.empty() || mFolderPath.back() != '/') { std::abort(); }
+				mCurFile.logTime = TiLogTime::max();
+				mCurFile.logs_size = SIZE_MAX;
 			}
 
 			void onAcceptLogs(TiLogPrinter::MetaData metaData);
@@ -1011,7 +1010,7 @@ namespace tilogspace
 			void CreateNewFile(TiLogPrinter::MetaData metaData);
 			TiLogFile& file() { return mFile; }
 
-			size_t mPrintedBytesOnFile = SIZE_MAX;
+			buf_t mCurFile;
 			uint64_t sPrintedBytesTotal = 0;
 
 		protected:
@@ -1044,9 +1043,11 @@ namespace tilogspace
 
 			void pop();
 			void push(const buf_t& b);
+			void push_force();
 			void push_big_str(const buf_t& metaData);
 
 		protected:
+			TiLogTime mFileTime{TiLogTime::max()};
 			TiLogFile mFile;
 			TiLogFileRotater mRotater;
 
@@ -1056,11 +1057,6 @@ namespace tilogspace
 			{
 				TILOG_MUTEXABLE_CLASS_MACRO_WITH_CV(MutexType, mtx, CondType, cv)
 			} loop_ctx;
-			struct wait_ctx_t
-			{
-				size_t acquire_size{};
-				TILOG_MUTEXABLE_CLASS_MACRO_WITH_CV(MutexType, mtx, CondType, cv)
-			} wait_ctx{};
 
 			FilePrinterCrcQueue buffer;
 		};
@@ -1845,16 +1841,9 @@ namespace tilogspace
 		inline static void func_sync(HANDLE fd) { FlushFileBuffers(fd); }
 		inline static int64_t func_write(HANDLE fd, TiLogStringView buf)
 		{
-			int64_t ret = 0;
-			constexpr static size_t B = TILOG_FILE_IO_SIZE;
-			for (size_t j = 0; j < buf.size(); j += B)
-			{
-				DWORD r = 0;
-				DWORD cnt = static_cast<DWORD>((j + B) < buf.size() ? B : (buf.size() - j));
-				WriteFile(fd, &buf[j], cnt, &r, 0);
-				ret += r;
-			}
-			return ret;
+			DWORD r = 0;
+			WriteFile(fd, buf.data(), (DWORD)buf.size(), &r, 0);
+			return (int64_t)r;
 		}
 #elif defined(TILOG_OS_POSIX)
 		inline static int func_trunc(int fd, size_t size, bool inc = false) { return ftruncate(fd, size); }
@@ -1921,18 +1910,20 @@ namespace tilogspace
 
 		void TiLogFileRotater::onAcceptLogs(TiLogPrinter::MetaData metaData)
 		{
-			if (mPrintedBytesOnFile > TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE)
+			if (mCurFile.logs_size > TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE)
 			{
 				{
-					sPrintedBytesTotal += mPrintedBytesOnFile;
-					mPrintedBytesOnFile = 0;
+					sPrintedBytesTotal += mCurFile.logs_size;
 					file().close();
 					DEBUG_PRINTV("sync and write index=%u \n", (unsigned)mIndex);
 				}
 
-				CreateNewFile(metaData);
+				if (metaData->logTime < mCurFile.logTime) { mCurFile.logTime = metaData->logTime; }
+				CreateNewFile(&mCurFile);
+				mCurFile.logTime=TiLogTime::max();
+				mCurFile.logs_size = 0;
 			}
-			mPrintedBytesOnFile += metaData->logs_size;
+			mCurFile.logs_size += metaData->logs_size;
 		}
 
 		void TiLogFileRotater::CreateNewFile(TiLogFilePrinter::MetaData metaData)
@@ -2002,39 +1993,45 @@ namespace tilogspace
 
 		void TiLogFilePrinter::sync()
 		{
-			mTaskQueue->pushTaskSynced([] {});
-			// do nothing, only wait for mTaskQueue to handle previous tasks
+			push_force();
 		}
 		void TiLogFilePrinter::fsync()
 		{
+			push_force();
 			mTaskQueue->pushTaskSynced([this] { mFile.fsync(); });
 		}
 
 		EPrinterID TiLogFilePrinter::getUniqueID() const { return PRINTER_TILOG_FILE; }
 #endif
 
+		void TiLogFilePrinter::push_force()
+		{
+			buf_t buf;
+			buf.logs_size = buffer.datas.size();
+			if (buf.logs_size == 0) { return; }
+			buf.logTime = mFileTime;
+			mTaskQueue->pushTaskSynced([this, &buf] {
+				mRotater.onAcceptLogs(&buf);
+				pop();
+			});
+			mFileTime = TiLogTime::max();
+		}
+
 		// small str,write async
 		void TiLogFilePrinter::push(const buf_t& b)
 		{
+		retry:
 			bool ret = false;
-			do
+			synchronized(loop_ctx)
 			{
-				std::unique_lock<MutexType> lk(loop_ctx.mtx);
+				if (b.logTime < mFileTime) { mFileTime = b.logTime; }
 				ret = buffer.emplace_back(b);	 // copy str to cache
-				if (!ret)
-				{
-					lk.unlock();
-					loop_ctx.cv.notify_one();
-					std::unique_lock<MutexType> lk_wait(wait_ctx.mtx);
-					wait_ctx.acquire_size = b.size();
-					wait_ctx.cv.wait_for(lk_wait, std::chrono::microseconds(1));
-				}
-			} while (!ret);
+				if (ret) { return; }
+			}
 
-			mTaskQueue->pushTask([this, b] {
-				mRotater.onAcceptLogs(&b);
-				pop();
-			});
+			// queue has not enough space
+			push_force();
+			goto retry;
 		}
 
 		// big str,write through
@@ -2049,26 +2046,28 @@ namespace tilogspace
 		void TiLogFilePrinter::pop()
 		{
 			std::unique_lock<MutexType> lk(loop_ctx.mtx);
-			size_t data_size = buffer.datas.first_sub_queue_size();
-			char* data_begin = buffer.datas.first_sub_queue_begin();
-			mFile.write(TiLogStringView{ data_begin, data_size });
-			DEBUG_PRINTI("write1 %llu bytes ok\n",(long long unsigned)data_size);
+			size_t data_size;
+			char* data_begin;
+
+			data_size = buffer.datas.first_sub_queue_size();
+			if (data_size != 0)
+			{
+				data_begin = buffer.datas.first_sub_queue_begin();
+				mFile.write(TiLogStringView{ data_begin, data_size });
+				DEBUG_PRINTI("write1 %llu bytes ok\n", (long long unsigned)data_size);
+			}
+
 			data_size = buffer.datas.second_sub_queue_size();
-			data_begin = buffer.datas.second_sub_queue_begin();
-			mFile.write(TiLogStringView{ data_begin, data_size });
-			DEBUG_PRINTI("write2 %llu bytes ok\n",(long long unsigned)data_size);
+			if (data_size != 0)
+			{
+				data_begin = buffer.datas.second_sub_queue_begin();
+				mFile.write(TiLogStringView{ data_begin, data_size });
+				DEBUG_PRINTI("write2 %llu bytes ok\n", (long long unsigned)data_size);
+			}
+
 			buffer.datas.clear();
 
 			lk.unlock();
-			if (buffer.datas.available_size() >= wait_ctx.acquire_size)
-			{
-				std::unique_lock<MutexType> lk_wait(wait_ctx.mtx);
-				if (buffer.datas.available_size() >= wait_ctx.acquire_size)
-				{
-					lk_wait.unlock();
-					wait_ctx.cv.notify_one();
-				}
-			}
 		}
 
 #ifdef __________________________________________________TiLogPrinterManager__________________________________________________
@@ -2836,7 +2835,7 @@ namespace tilogspace
 				memcpy_small<4>(&mDeliver.mlogprefix[26], &TiLogEngines::getRInstance().tilogmap.m_map_us[us]);	   // update us only
 			} else
 			{
-				size_t len = TimePointToTimeCStr(mDeliver.mctimestr, us_tp);				// parse bt us
+				size_t len = TimePointToTimeCStr(mDeliver.mctimestr, us_tp);				// parse by us
 				mDeliver.mPreLogTime = len == 0 ? TiLogTime::origin_time_type() : ms_tp;	// stor ms only
 				mDeliver.mlogprefix[29] = ']';
 			}
