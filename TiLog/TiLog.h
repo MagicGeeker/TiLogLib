@@ -219,6 +219,7 @@ namespace tilogspace
 #else
 		constexpr static bool ON_RELEASE = false, ON_DEV = true;
 #endif
+	constexpr static uint16_t TILOG_CACHE_LINE_SIZE = 64;
 	constexpr static uint16_t TILOG_SOURCE_LOCATION_MAX_SIZE = 368;
 	// interval of user mode clock sync with kernel(microseconds),should be smaller than timestamp print accuracy
 	constexpr static uint32_t TILOG_USER_MODE_CLOCK_UPDATE_NS = TILOG_TIMESTAMP_SORT/4;
@@ -1342,7 +1343,7 @@ namespace tilogspace
 		{
 			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_MEMBER_DECLARE(tilogstream_pool_controler, instance)
 			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_FUNC_IMPL(tilogstream_pool_controler, instance)
-			std::atomic<ssize_t> plist_cnt{};
+			alignas(TILOG_CACHE_LINE_SIZE) std::atomic<ssize_t> plist_cnt{};
 			constexpr static ssize_t max_plist_cnt{ (ssize_t)TILOG_STREAM_MEMPOOLIST_MAX_NUM };
 
 			inline bool may_full() { return plist_cnt >= max_plist_cnt; }
@@ -2006,7 +2007,7 @@ namespace tilogspace
 				static constexpr inline steady_flag_t min() { return std::numeric_limits<steady_flag_t>::min(); }
 
 				static constexpr inline steady_flag_t max() { return std::numeric_limits<steady_flag_t>::max(); }
-				std::atomic<steady_flag_t> count{ min() };
+				alignas(TILOG_CACHE_LINE_SIZE) std::atomic<steady_flag_t> count{ min() };
 			};
 
 			// for customize timer，must be similar to BaseTimeImpl
@@ -2128,7 +2129,7 @@ namespace tilogspace
 			protected:
 				static uint64_t instance[];
 				TILOG_MUTEXABLE_CLASS_MACRO_WITH_CV(OptimisticMutex, mtx, cv_type, cv)
-				std::atomic<TimePoint> s_now{ TimePoint::min() };
+				alignas(TILOG_CACHE_LINE_SIZE) std::atomic<TimePoint> s_now{ TimePoint::min() };
 				std::thread th{};
 				uint32_t magic{ 0xf001a001 };
 				volatile bool toExit{};
@@ -2227,7 +2228,14 @@ namespace tilogspace
 				using SystemTimePoint = std::chrono::system_clock::time_point;
 
 			public:
-				static inline void init()
+				struct SteadyClockImplHelper
+				{
+					TimePoint initSteadyTime;
+					SystemTimePoint initSystemTime;
+					TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_FUNC_IMPL(SteadyClockImplHelper, instance)
+					TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_MEMBER_DECLARE(SteadyClockImplHelper, instance)
+
+				inline SteadyClockImplHelper()
 				{
 					auto t1 = SystemClock::now();
 					auto t = Clock::now();
@@ -2243,11 +2251,13 @@ namespace tilogspace
 					auto final_ts = ts_mill + dur_avg_ms;
 					// force sync microseconds of steady time and system time,‌
 					// prevent out-of-order timestamps in AppendToMergeCacheByMetaData
-					*(TimePoint*)&initSteadyTimeBuf = std::chrono::time_point_cast<std::chrono::microseconds>(final_t);
-					*(SystemTimePoint*)&initSystemTimeBuf = std::chrono::time_point_cast<std::chrono::microseconds>(final_ts);
+					initSteadyTime = std::chrono::time_point_cast<std::chrono::microseconds>(final_t);
+					initSystemTime = std::chrono::time_point_cast<std::chrono::microseconds>(final_ts);
 				}
-				static inline SystemTimePoint getInitSystemTime() { return *(SystemTimePoint*)&initSystemTimeBuf; }
-				static inline TimePoint getInitSteadyTime() { return *(TimePoint*)&initSteadyTimeBuf; }
+				};
+
+				static inline SystemTimePoint getInitSystemTime() { return SteadyClockImplHelper::getRInstance().initSystemTime; }
+				static inline TimePoint getInitSteadyTime() { return SteadyClockImplHelper::getRInstance().initSteadyTime; }
 				inline SteadyClockImpl() { chronoTime = TimePoint::min(); }
 
 				inline SteadyClockImpl(TimePoint t) { chronoTime = t; }
@@ -2283,8 +2293,6 @@ namespace tilogspace
 
 			protected:
 				TimePoint chronoTime;
-				static uint8_t initSystemTimeBuf[sizeof(SystemTimePoint)];
-				static uint8_t initSteadyTimeBuf[sizeof(TimePoint)];
 			};
 
 			template <typename TimeImplType>

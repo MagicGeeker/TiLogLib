@@ -108,9 +108,8 @@ namespace tilogspace
 	{
 		namespace tilogtimespace
 		{
-			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_OUTSIDE(steady_flag_helper,steady_flag_helper_buf)
-			uint8_t SteadyClockImpl::initSystemTimeBuf[sizeof(SystemTimePoint)];
-			uint8_t SteadyClockImpl::initSteadyTimeBuf[sizeof(TimePoint)];
+			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_OUTSIDE(steady_flag_helper, steady_flag_helper_buf)
+			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_OUTSIDE(SteadyClockImpl::SteadyClockImplHelper, instance)
 		}	 // namespace tilogtimespace
 	}		 // namespace internal
 
@@ -1785,8 +1784,10 @@ namespace tilogspace
 
 			using engines_t = std::array<engine_t, TILOG_STATIC_SUB_SYS_SIZE>;
 			engines_t engines;
+			Map<void*, String> gv_infos;
 
 			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE(TiLogEngines)
+			void GetGlobalVaribleInfo();
 			TiLogEngines();
 			~TiLogEngines();
 		};
@@ -2856,12 +2857,12 @@ namespace tilogspace
 			}
 #endif
 
-#if 0 && !defined(IUILS_NDEBUG_WITHOUT_ASSERT) && TILOG_TIME_IMPL_TYPE == TILOG_INTERNAL_STD_STEADY_CLOCK
+#if 1 && !defined(IUILS_NDEBUG_WITHOUT_ASSERT) && TILOG_TIME_IMPL_TYPE == TILOG_INTERNAL_STD_STEADY_CLOCK
 			if (mDeliver.mlogprefix_pre[0] != 0)
 			{
 				if (memcmp(&mDeliver.mlogprefix_pre[0], &mDeliver.mlogprefix[0], sizeof(mDeliver.mlogprefix)) > 0) { abort(); }
 			}
-			memcpy(mDeliver.mlogprefix_pre, mDeliver.mlogprefix, sizeof(mDeliver.mlogprefix));
+			adapt_memcpy(mDeliver.mlogprefix_pre, mDeliver.mlogprefix, sizeof(mDeliver.mlogprefix));
 			mDeliver.mPreLogTimeUs = us_tp;
 #endif
 
@@ -3408,7 +3409,7 @@ namespace tilogspace
 			tilogspace::internal::tilogtimespace::UserModeClock::init();
 #endif
 #if TILOG_TIME_IMPL_TYPE == TILOG_INTERNAL_STD_STEADY_CLOCK
-			tilogspace::internal::tilogtimespace::SteadyClockImpl::init();
+			tilogspace::internal::tilogtimespace::SteadyClockImpl::SteadyClockImplHelper::init();
 #endif
 		}
 
@@ -3508,6 +3509,30 @@ namespace tilogspace
 	}	 // namespace internal
 
 	TiLogSubSystem& TiLog::GetSubSystemRef(sub_sys_t subsys) { return TiLogEngines::getRInstance().engines[subsys].e.subsystem; }
+
+	void TiLogEngines::GetGlobalVaribleInfo()
+	{
+		gv_infos.emplace(TiLog::getInstance(), "TiLog");
+		gv_infos.emplace(TiLogEngines::getInstance(), "TiLogEngines");
+		gv_infos.emplace(mempoolspace::tilogstream_pool_controler::getInstance(), "tilogstream_pool_controler");
+		gv_infos.emplace(tilogtimespace::steady_flag_helper::getInstance(), "steady_flag_helper");
+#if TILOG_USE_USER_MODE_CLOCK
+		gv_infos.emplace(tilogtimespace::UserModeClock::getInstance(), "UserModeClock");
+#endif
+#if TILOG_TIME_IMPL_TYPE == TILOG_INTERNAL_STD_STEADY_CLOCK
+		gv_infos.emplace(tilogtimespace::SteadyClockImpl::SteadyClockImplHelper::getInstance(), "SteadyClockImplHelper");
+#endif
+		gv_infos.emplace(TiLogNonePrinter::getInstance(), "TiLogNonePrinter");
+		gv_infos.emplace(TiLogTerminalPrinter::getInstance(), "TiLogTerminalPrinter");
+		gv_infos.emplace(ti_iostream_mtx_t::getInstance(), "ti_iostream_mtx_t");
+		gv_infos.emplace(TiLogInnerLogMgr::getInstance(), "TiLogInnerLogMgr");
+		gv_infos.emplace(ti_iostream_mtx_t::getInstance(), "ti_iostream_mtx_t");
+		for (auto it = gv_infos.begin(), itp = gv_infos.begin(); it != gv_infos.end(); itp = it, ++it)
+		{
+			DEBUG_PRINTA("%p %s ptr diff%lld", it->first, it->second.c_str(), (long long)it->first - (long long)itp->first);
+		}
+	}
+
 	TiLogEngines::TiLogEngines()
 	{
 		init_tilog_buffer();
@@ -3528,8 +3553,7 @@ namespace tilogspace
 		{
 			new (&engines[i].e) TiLogEngine(TILOG_STATIC_SUB_SYS_CFGS[i].subsys);
 		}
-		TICLOG << "TiLog " << &TiLog::getRInstance() << " TiLogEngines " << TiLogEngines::getInstance() << " in thrd "
-			   << std::this_thread::get_id() << '\n';
+		GetGlobalVaribleInfo();
 	}
 	TiLogEngines::~TiLogEngines()
 	{
