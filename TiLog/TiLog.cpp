@@ -1106,7 +1106,7 @@ namespace tilogspace
 			~ThreadStru()
 			{
 				mempoolspace::tilogstream_mempool::release_localthread_mempool(lmempoolist);
-				DEBUG_PRINTI("ThreadStru dtor pDaemon %p this %p tid [%p %s]\n", pDaemon, this, tid, tid->c_str());
+				DEBUG_PRINTI("ThreadStru dtor pDaemon {} this {} tid [{} {}]\n", pDaemon, this, tid, tid->c_str());
 				DecTidStrRefCnt(tid);
 				qCache.pMem = nullptr;
 			}
@@ -1293,7 +1293,7 @@ namespace tilogspace
 				this->initerFunc = std::move(initerFunc);
 				stat = RUN;
 				creator_tid = GetNewThreadIDString();
-				DEBUG_PRINTI("Create TiLogTaskQueueBasic %p by thread %s\n", this, creator_tid.data());
+				DEBUG_PRINTI("Create TiLogTaskQueueBasic {} by thread {}\n", this, creator_tid.data());
 				if (runAtOnce) { start(); }
 			}
 			explicit TiLogTaskQueueBasic(bool runAtOnce = true) : TiLogTaskQueueBasic({}, {}, runAtOnce) {}
@@ -1303,15 +1303,15 @@ namespace tilogspace
 			{
 				loopThread = std::thread(&TiLogTaskQueueBasic::loop, this);
 				looptid = GetStringByStdThreadID(loopThread.get_id());
-				DEBUG_PRINTI("loop %p start loop, thread id %s\n", this, looptid.c_str());
+				DEBUG_PRINTI("loop {} start loop, thread id {}\n", this, looptid.c_str());
 			}
 
 			void wait_stop()
 			{
 				stop();
-				DEBUG_PRINTI("loop %p wait end loop, thread id %s\n", this, looptid.c_str());
+				DEBUG_PRINTI("loop {} wait end loop, thread id {}\n", this, looptid.c_str());
 				if (loopThread.joinable()) { loopThread.join(); }	 // wait for not handled tasks
-				DEBUG_PRINTI("loop %p end loop, thread id %s\n", this, looptid.c_str());
+				DEBUG_PRINTI("loop {} end loop, thread id {}\n", this, looptid.c_str());
 			}
 
 			void stop()
@@ -1972,7 +1972,7 @@ namespace tilogspace
 		TiLogFilePrinter::TiLogFilePrinter(TiLogEngine* e, String folderPath0)
 			: TiLogPrinter(e), mFile(), mRotater(folderPath0, mFile), mTaskQueue(new TiLogPrinterTaskQueue())
 		{
-			DEBUG_PRINTA("file printer %p path %s\n", this, folderPath0.c_str());
+			DEBUG_PRINTA("file printer {} path {}\n", this, folderPath0.c_str());
 			mTaskQueue->pushTask([this] { mData->SetPrinterThreadName(); });
 		}
 
@@ -2206,7 +2206,7 @@ namespace tilogspace
 	{
 		struct ThreadExitWatcher
 		{
-			ThreadExitWatcher() { DEBUG_PRINTA("ThreadExitWatcher ctor [this %p pCore %p pThreadStru %p]\n", this, pCore, pThreadStru); }
+			ThreadExitWatcher() { DEBUG_PRINTA("ThreadExitWatcher ctor [this {} pCore {} pThreadStru {}]\n", this, pCore, pThreadStru); }
 			void init(TiLogDaemon* pCore, ThreadStru* pThreadStru)
 			{
 				this->pCore = pCore, this->pThreadStru = pThreadStru;
@@ -2216,7 +2216,7 @@ namespace tilogspace
 			}
 			~ThreadExitWatcher()
 			{
-				DEBUG_PRINTA("ThreadExitWatcher dtor [this %p pCore %p pThreadStru %p]\n", this, pCore, pThreadStru);
+				DEBUG_PRINTA("ThreadExitWatcher dtor [this {} pCore {} pThreadStru {}]\n", this, pCore, pThreadStru);
 				if (pCore) { pCore->MarkThreadDying((ThreadStru*)pThreadStru); }
 			}
 			// pThreadStru will be always nullptr if thread not push ang log and not call init()
@@ -2235,7 +2235,7 @@ namespace tilogspace
 			: TiLogCoreMini(SEQ_FREE, this), mTiLogDaemon(d), mTiLogEngine(d->mTiLogEngine),
 			  mTiLogMap(&TiLogEngines::getRInstance().tilogmap), mID(id)
 		{
-			DEBUG_PRINTA("TiLogCore::TiLogCore %p ID {}\n", this,mID);
+			DEBUG_PRINTA("TiLogCore::TiLogCore {} ID {}\n", this,mID);
 			snprintf(mThrdName, sizeof(mThrdName), "PROC~%u", (unsigned)mID);
 
 			mThread = mTiLogDaemon->CreateCoreThread(*this, this);
@@ -2370,7 +2370,7 @@ namespace tilogspace
 				++mThreadStruQueue.handledUserThreadCnt;
 				synchronized(mThreadStruQueue)
 				{
-					DEBUG_PRINTI("pDstQueue %p insert thrd tid= %s\n", pDstQueue, pStru->tid->c_str());
+					DEBUG_PRINTI("pDstQueue {} insert thrd tid= {}\n", pDstQueue, pStru->tid->c_str());
 					pDstQueue->emplace_back(pStru);
 				}
 				unique_lock<mutex> lk(pStru->thrdExistMtx);
@@ -2384,7 +2384,7 @@ namespace tilogspace
 
 		inline void TiLogDaemon::MarkThreadDying(ThreadStru* pStru)
 		{
-			DEBUG_PRINTI("pStru %p dying\n", pStru);
+			DEBUG_PRINTI("pStru {} dying\n", pStru);
 			if (this->mMagicNumber == MAGIC_NUMBER_DEAD)
 			{
 				printf("skip handle pStru %p because TiLogCore is destroyed\n",pStru);
@@ -2399,7 +2399,7 @@ namespace tilogspace
 		TiLogDaemon::TiLogDaemon(TiLogEngine* e)
 			: mTiLogEngine(e), mTiLogPrinterManager(&e->tiLogPrinterManager), mTiLogMap(&TiLogEngines::getRInstance().tilogmap)
 		{
-			DEBUG_PRINTA("TiLogDaemon::TiLogDaemon %p\n", this);
+			DEBUG_PRINTA("TiLogDaemon::TiLogDaemon {}\n", this);
 
 			for (uint32_t i = 0; i < TILOG_DAEMON_PROCESSER_NUM; ++i)
 			{
@@ -2416,7 +2416,7 @@ namespace tilogspace
 
 		TiLogDaemon::~TiLogDaemon()
 		{
-			DEBUG_PRINTI("TiLogCore %p exit,wait poll\n", this);
+			DEBUG_PRINTI("TiLogCore {} exit,wait poll\n", this);
 			mToExit = true;
 			mPoll.SetPollPeriodMs(TILOG_POLL_THREAD_SLEEP_MS_IF_TO_EXIT);
 			NotifyPoll();
@@ -2431,7 +2431,7 @@ namespace tilogspace
 				"engine %p subsys %u tilogcore %p handledUserThreadCnt %llu diedUserThreadCnt %llu\n", this->mTiLogEngine,
 				(unsigned)this->mTiLogEngine->subsys, this, (unsigned long long)mThreadStruQueue.handledUserThreadCnt,
 				(unsigned long long)mThreadStruQueue.diedUserThreadCnt);
-			DEBUG_PRINTI("TiLogCore %p exit\n", this);
+			DEBUG_PRINTI("TiLogCore {} exit\n", this);
 			this->mMagicNumber = MAGIC_NUMBER_DEAD;
 		}
 
@@ -2448,7 +2448,7 @@ namespace tilogspace
 		void TiLogDaemon::WaitPrepared(TiLogStringView msg)
 		{
 			if (Prepared()) { return; }
-			DEBUG_PRINTA("WaitPrepared: %s", msg.data());
+			DEBUG_PRINTA("WaitPrepared: {}", msg.data());
 			while (!Prepared())
 			{
 				std::this_thread::yield();
@@ -2570,11 +2570,11 @@ namespace tilogspace
 				auto ptid = threadStru.tid;
 				DEBUG_ASSERT(ptid != nullptr);
 				const char* tid = ptid->c_str();
-				DEBUG_PRINTD("MergeThreadStruQueueToSet ptid %p , tid %s , qCachePreSize= {}\n", ptid, tid, qCachePreSize);
+				DEBUG_PRINTD("MergeThreadStruQueueToSet ptid {} , tid {} , qCachePreSize= {}\n", ptid, tid, qCachePreSize);
 
 				VecLogCache& v = mMerge.mRawDatas.get(ptid);
 				size_t vsizepre = v.size();
-				DEBUG_PRINTD("v %p size pre: {}\n", &v, vsizepre);
+				DEBUG_PRINTD("v {} size pre: {}\n", &v, vsizepre);
 
 				auto it_greater_than_bean = CrcQueueLogCache::iterator();
 
@@ -2613,7 +2613,7 @@ namespace tilogspace
 				{
 					auto first_log = v.front();
 					auto final_log = v.back();
-					DEBUG_PRINTD("ptid %p, tid %s, first log [%.30s], final log [%.30s]", ptid, tid, first_log->buf(), final_log->buf());
+					DEBUG_PRINTD("ptid {}, tid {}, first log [%.30s], final log [%.30s]", ptid, tid, first_log->buf(), final_log->buf());
 				}
 				mMerge.mMergeLogVecVec[mMerge.mMergeLogVecVec.mIndex++].swap(v);
 			}
@@ -3033,7 +3033,7 @@ namespace tilogspace
 						DEBUG_ASSERT(currCore->mMerge.mMergeLogVecVec.mIndex == 0);
 						currCore->mMerge.mMergeLogVecVec.swap(mMerge.mMergeLogVecVec);	  // exchange logs to core's mMergeLogVecVec
 						currCore->mNeedWoking = true;
-						DEBUG_PRINTI("choose core {} %p to handle seq {}", currCore->mID, currCore, seq);
+						DEBUG_PRINTI("choose core {} {} to handle seq {}", currCore->mID, currCore, seq);
 					}
 					synchronized(mScheduler) { ++mScheduler.mPollSeq; }
 					currCore->mCV.notify_one();
@@ -3105,10 +3105,10 @@ namespace tilogspace
 						} else if (
 							handledseq <= threadStru.pollseq_when_thrd_dead || inno_pollseq <= threadStru.inno_pollseq_when_thrd_dead)
 						{
-							DEBUG_PRINTA("thrd %s exit but some logs remians in core Entry\n", threadStru.tid->c_str());
+							DEBUG_PRINTA("thrd {} exit but some logs remians in core Entry\n", threadStru.tid->c_str());
 						} else
 						{
-							DEBUG_PRINTA("thrd %s exit delete thread stru\n", threadStru.tid->c_str());
+							DEBUG_PRINTA("thrd {} exit delete thread stru\n", threadStru.tid->c_str());
 							mMerge.mRawDatas.remove(threadStru.tid);
 							delete (&threadStru);
 							it = mThreadStruQueue.toDelQueue.erase(it);
@@ -3124,7 +3124,7 @@ namespace tilogspace
 					// no need to lock threadStru.spinMtx here because the thread of threadStru has died
 					if (threadStru.qCache.empty())
 					{
-						DEBUG_PRINTI("thrd %s exit and has been merged.move to toDelQueue\n", threadStru.tid->c_str());
+						DEBUG_PRINTI("thrd {} exit and has been merged.move to toDelQueue\n", threadStru.tid->c_str());
 						mThreadStruQueue.toDelQueue.emplace_back(*it);
 						it = mThreadStruQueue.waitMergeQueue.erase(it);
 					} else
@@ -3152,7 +3152,7 @@ namespace tilogspace
 					if (mtx.try_lock())
 					{
 						mtx.unlock();
-						DEBUG_PRINTI("thrd %s exit.move to waitMergeQueue\n", threadStru.tid->c_str());
+						DEBUG_PRINTI("thrd {} exit.move to waitMergeQueue\n", threadStru.tid->c_str());
 						mThreadStruQueue.waitMergeQueue.emplace_back(*it);
 						it = mThreadStruQueue.availQueue.erase(it);
 						mThreadStruQueue.dyingQueue.erase(pThreadStru);
@@ -3202,7 +3202,7 @@ namespace tilogspace
 
 		inline void TiLogDaemon::InitCoreThreadBeforeRun(const char* tag)
 		{
-			DEBUG_PRINTA("InitCoreThreadBeforeRun %s\n", tag);
+			DEBUG_PRINTA("InitCoreThreadBeforeRun {}\n", tag);
 			while (!mInited)	// make sure all variables are inited
 			{
 				this_thread::yield();
@@ -3211,7 +3211,7 @@ namespace tilogspace
 
 		inline void TiLogDaemon::AtInternalThreadExit(CoreThrdStru* thrd, CoreThrdStru* nextExitThrd)
 		{
-			DEBUG_PRINTI("thrd %s to exit.\n", thrd->GetName());
+			DEBUG_PRINTI("thrd {} to exit.\n", thrd->GetName());
 			thrd->mStatus = TO_EXIT;
 			CoreThrdStru* t = nextExitThrd;
 			if (t)
@@ -3230,7 +3230,7 @@ namespace tilogspace
 				thrd->mStatus = WAIT_NEXT_THREAD;
 			}
 
-			DEBUG_PRINTI("thrd %s exit.\n", thrd->GetName());
+			DEBUG_PRINTI("thrd {} exit.\n", thrd->GetName());
 			thrd->mStatus = DEAD;
 		}
 
@@ -3501,7 +3501,7 @@ namespace tilogspace
 			  lmempoolist(mempoolspace::tilogstream_mempool::acquire_localthread_mempool(daemon->GetEngine()->subsys)), thrdExistMtx(),
 			  thrdExistCV()
 		{
-			DEBUG_PRINTI("ThreadStru ator pDaemon %p this %p tid [%p %s]\n", pDaemon, this, tid, tid->c_str());
+			DEBUG_PRINTI("ThreadStru ator pDaemon {} this {} tid [{} {}]\n", pDaemon, this, tid, tid->c_str());
 			IncTidStrRefCnt(tid);
 		};
 
@@ -3528,7 +3528,7 @@ namespace tilogspace
 		gv_infos.emplace(ti_iostream_mtx_t::getInstance(), "ti_iostream_mtx_t");
 		for (auto it = gv_infos.begin(), itp = gv_infos.begin(); it != gv_infos.end(); itp = it, ++it)
 		{
-			DEBUG_PRINTA("%p %s ptr diff{}", it->first, it->second.c_str(), it->first - (long long)itp->first);
+			DEBUG_PRINTA("{} {} ptr diff{}", it->first, it->second.c_str(), it->first - (long long)itp->first);
 		}
 	}
 
