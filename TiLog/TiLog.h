@@ -2429,6 +2429,8 @@ namespace tilogspace
 		{
 			TiLogStringView fmt;
 			constexpr tiny_meta_pack(DataSet<brace_index_t> d, TiLogStringView f) : DataSet(d), fmt(f) {}
+			template<size_t N>
+			constexpr tiny_meta_pack(const char (&fmt)[N]);
 		};
 
 
@@ -2438,6 +2440,7 @@ namespace tilogspace
 			using ObjectType = TiLogStream;
 			using TiLogCompactString = TiLogStringExtend<tilogspace::internal::TiLogStreamHelper>::Core;
 
+			inline constexpr static DataSet<brace_index_t> tiny_format_parse_to_data(TiLogStringView fmt);
 			inline constexpr static tiny_meta_pack tiny_format_parse(TiLogStringView fmt);
 
 			template <typename... Args>
@@ -2451,6 +2454,10 @@ namespace tilogspace
 			static void mini_format_append(TiLogStream& outs, TiLogStringView fmt, Args&&... args);
 		};
 		using TiLogCompactString = TiLogStreamHelper::TiLogCompactString;
+		template <size_t N>
+		constexpr tiny_meta_pack::tiny_meta_pack(const char (&fmt)[N]) : tiny_meta_pack(TiLogStreamHelper::tiny_format_parse(fmt))
+		{
+		}
 	}	 // namespace internal
 
 	inline constexpr internal::tiny_meta_pack operator""_tiny(const char* fmt, std::size_t len)
@@ -2996,13 +3003,19 @@ namespace tilogspace
 		};
 
 
-		PARSER_CONSTEXPR inline tiny_meta_pack TiLogStreamHelper::tiny_format_parse(TiLogStringView fmt)
+		PARSER_CONSTEXPR inline DataSet<brace_index_t> TiLogStreamHelper::tiny_format_parse_to_data(TiLogStringView fmt)
 		{
 #if __cplusplus >= 201402L
-			return { tiny_format_parse_impl_cpp14(fmt), fmt };
+			return tiny_format_parse_impl_cpp14(fmt);
 #else
-			return { TinyFormatParser::tiny_format_parse_impl_cpp11(fmt), fmt };
+			return TinyFormatParser::tiny_format_parse_impl_cpp11(fmt);
 #endif
+		}
+
+
+		PARSER_CONSTEXPR inline tiny_meta_pack TiLogStreamHelper::tiny_format_parse(TiLogStringView fmt)
+		{
+			return { tiny_format_parse_to_data(fmt), fmt };
 		}
 
 		template <typename... Args>
@@ -3031,7 +3044,7 @@ namespace tilogspace
 		template <typename... Args>
 		void TiLogStreamHelper::tiny_format_append(TiLogStream& outs, const tiny_meta_pack& pack, Args&&... args)
 		{
-			tiny_format_append_impl(outs, std::move(pack), std::forward_as_tuple(args...));
+			tiny_format_append_impl(outs, pack, std::forward_as_tuple(args...));
 		}
 
 		template <typename... Args>

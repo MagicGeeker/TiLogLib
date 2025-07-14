@@ -36,7 +36,7 @@
 #define TILOG_INNO_STREAM_CREATE(lv) TiLogStreamInner(TILOG_GET_LEVEL_SOURCE_LOCATION(lv))
 #define TIINNOLOG(constexpr_lv) tilogspace::should_log(TILOG_SUB_SYSTEM_INTERNAL, constexpr_lv) && TILOG_INNO_STREAM_CREATE(constexpr_lv)
 
-#define DEBUG_PF(LV, ...) TIINNOLOG(LV).Stream()->printf(__VA_ARGS__)
+#define DEBUG_PF(LV, ...) TIINNOLOG(LV).Stream()->tiny_print(__VA_ARGS__)
 #define DEBUG_PRINTA(...) DEBUG_PF(ALWAYS, __VA_ARGS__)
 #define DEBUG_PRINTF(...) DEBUG_PF(FATAL, __VA_ARGS__)
 #define DEBUG_PRINTE(...) DEBUG_PF(ERROR, __VA_ARGS__)
