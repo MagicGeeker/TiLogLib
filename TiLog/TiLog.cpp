@@ -979,7 +979,7 @@ namespace tilogspace
 					bool succ = datas.emplace_back(p.data(), p.size(), adapt_memcpy);
 				if (succ)
 				{
-					DEBUG_PRINTI("emplace_back %llu bytes ok\n", (long long unsigned)aligned_size);
+					DEBUG_PRINTI("emplace_back {} bytes ok\n", aligned_size);
 					return true;
 				}
 				return false;
@@ -2054,7 +2054,7 @@ namespace tilogspace
 			{
 				data_begin = buffer.datas.first_sub_queue_begin();
 				mFile.write(TiLogStringView{ data_begin, data_size });
-				DEBUG_PRINTI("write1 %llu bytes ok\n", (long long unsigned)data_size);
+				DEBUG_PRINTI("write1 {} bytes ok\n", data_size);
 			}
 
 			data_size = buffer.datas.second_sub_queue_size();
@@ -2062,7 +2062,7 @@ namespace tilogspace
 			{
 				data_begin = buffer.datas.second_sub_queue_begin();
 				mFile.write(TiLogStringView{ data_begin, data_size });
-				DEBUG_PRINTI("write2 %llu bytes ok\n", (long long unsigned)data_size);
+				DEBUG_PRINTI("write2 {} bytes ok\n", data_size);
 			}
 
 			buffer.datas.clear();
@@ -2896,7 +2896,7 @@ namespace tilogspace
 				AppendToMergeCacheByMetaData(mDeliver, bean);
 			}
 			mPrintedLogs.fetch_add(deliverCache.size(), std::memory_order_relaxed);
-			DEBUG_PRINTI("End of mergeLogsToOneString,string size= %llu\n", (long long unsigned)mDeliver.mIoBean.size());
+			DEBUG_PRINTI("End of mergeLogsToOneString,string size= {}\n", mDeliver.mIoBean.size());
 			TiLogTime firstLogTime = deliverCache[0]->ext.time();
 			mDeliver.mIoBean.mTime = firstLogTime;
 			return firstLogTime;
@@ -3033,7 +3033,7 @@ namespace tilogspace
 						DEBUG_ASSERT(currCore->mMerge.mMergeLogVecVec.mIndex == 0);
 						currCore->mMerge.mMergeLogVecVec.swap(mMerge.mMergeLogVecVec);	  // exchange logs to core's mMergeLogVecVec
 						currCore->mNeedWoking = true;
-						DEBUG_PRINTI("choose core {} %p to handle seq %llu", currCore->mID, currCore, (long long unsigned)seq);
+						DEBUG_PRINTI("choose core {} %p to handle seq {}", currCore->mID, currCore, seq);
 					}
 					synchronized(mScheduler) { ++mScheduler.mPollSeq; }
 					currCore->mCV.notify_one();
