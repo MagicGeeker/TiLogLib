@@ -98,8 +98,10 @@
 
 #if __cplusplus>=202002L
 #define TILOG_CPP20_FEATURE(...)  __VA_ARGS__
+#define TILOG_CPP20_CONSTEVAL consteval
 #else
 #define TILOG_CPP20_FEATURE(...)
+#define TILOG_CPP20_CONSTEVAL constexpr
 #endif
 
 #if defined(__GNUC__)
@@ -1207,7 +1209,7 @@ namespace tilogspace
 		{
 			LINEAR_MEM_POOL_SIZEOF = sizeof(linear_mem_pool)
 		};
-		static_assert(LINEAR_MEM_POOL_SIZEOF >= 0.95 * LINEAR_MEM_POOL_ALIGN, "fatal");
+		static_assert(double(LINEAR_MEM_POOL_SIZEOF) >= 0.95 * double(LINEAR_MEM_POOL_ALIGN), "fatal,too much mem used");
 		using linear_mem_pool_blocks_t = TiLogAlignedBlockPool<TiLogAlignedBlockPoolFeat<
 			LINEAR_MEM_POOL_SIZEOF, LINEAR_MEM_POOL_ALIGN, OptimisticMutex, TILOG_STREAM_LINEAR_MEM_POOL_BLOCK_ALLOC_SIZE>>;
 		using ssize_t = std::make_signed<size_t>::type;
@@ -1622,6 +1624,7 @@ namespace tilogspace
 		{
 			return string_concat(string_concat(s1, s2), s3);
 		}
+		using static_str_t = static_string<32, CONCAT>;
 
 		// Search the str for the first occurrence of c
 		// return index in str(finded) or -1(not find)
@@ -1653,14 +1656,16 @@ namespace tilogspace
 			return substr[0] == '\0' ? 0 : ((str[0] == '\0') ? -1 : (is_prefix(str, substr) ? pos : find(str + 1, substr, 1 + pos)));
 		}
 
-		using static_str_t = static_string<32, CONCAT>;
-
+#if __cplusplus >= 201703L
+		using TiLogStringView = std::string_view;
+#else
 		class TiLogStringView
 		{
 			const char* m_front;
 			const char* m_end;
 
 		public:
+			using iterator = const char*;
 			constexpr TiLogStringView() : m_front(nullptr), m_end(nullptr) {}
 			constexpr TiLogStringView(const char* front, size_t sz) : m_front(front), m_end(front + sz) {}
 			template <size_t N>
@@ -1683,6 +1688,7 @@ namespace tilogspace
 			constexpr inline const char& operator[](size_t i) const { return m_front[i]; }
 			constexpr static auto npos = String::npos;
 		};
+#endif
 
 		inline constexpr TiLogStringView operator""_tsv(const char* fmt, std::size_t len) { return TiLogStringView(fmt, len); }
 
@@ -1693,6 +1699,26 @@ namespace tilogspace
 		public:
 			// length without '\0'
 			inline TStr& append(const char* cstr, sz_t length) { return append_s(length, cstr, length); }
+#if __cplusplus >= 201703L
+			template <typename Iter>
+			inline auto append(Iter it_beg, size_t count) -> typename std::enable_if<
+				!std::is_same_v<Iter, char*>
+					&& (std::is_same_v<Iter, TiLogStringView::const_iterator> || std::is_same_v<Iter, TiLogStringView::iterator>),
+				TStr&>::type
+			{
+				if (count == 0) { return thiz; }
+				auto cstr = &it_beg[0];
+				return append(cstr, count);
+			}
+			template <typename Iter>
+			inline auto append(Iter it_beg, Iter it_end) -> typename std::enable_if<
+				!std::is_same_v<Iter, char*>
+					&& (std::is_same_v<Iter, TiLogStringView::const_iterator> || std::is_same_v<Iter, TiLogStringView::iterator>),
+				TStr&>::type
+			{
+				return append(it_beg, it_end - it_beg);
+			}
+#endif
 			inline TStr& append(const char* cstr, const char* cstrend) { return append(cstr, cstrend - cstr); }
 			inline TStr& append(const char* cstr) { return append(cstr, (sz_t)strlen(cstr)); }
 			inline TStr& append(const String& str) { return append(str.data(), (sz_t)str.size()); }
@@ -2425,6 +2451,8 @@ namespace tilogspace
 		struct TiLogEngine;
 		struct TiLogEngines;
 
+#define PARSER_CONSTEXPR TILOG_CPP20_CONSTEVAL
+
 		using brace_index_t = uint32_t;
 
 		using tiny_meta_pack_basic = DataSet<brace_index_t>;
@@ -2443,8 +2471,8 @@ namespace tilogspace
 			using ObjectType = TiLogStream;
 			using TiLogCompactString = TiLogStringExtend<tilogspace::internal::TiLogStreamHelper>::Core;
 
-			inline constexpr static DataSet<brace_index_t> tiny_format_parse_to_data(TiLogStringView fmt);
-			inline constexpr static tiny_meta_pack tiny_format_parse(TiLogStringView fmt);
+			inline PARSER_CONSTEXPR static DataSet<brace_index_t> tiny_format_parse_to_data(TiLogStringView fmt);
+			inline PARSER_CONSTEXPR static tiny_meta_pack tiny_format_parse(TiLogStringView fmt);
 
 			template <typename... Args>
 			inline static void
@@ -2464,12 +2492,12 @@ namespace tilogspace
 		}
 	}	 // namespace internal
 
-	inline constexpr internal::tiny_meta_pack_basic operator""_tinypkb(const char* fmt, std::size_t len)
+	inline PARSER_CONSTEXPR internal::tiny_meta_pack_basic operator""_tinypkb(const char* fmt, std::size_t len)
 	{
 		return internal::TiLogStreamHelper::tiny_format_parse_to_data(internal::TiLogStringView(fmt, len));
 	}
 
-	inline constexpr internal::tiny_meta_pack operator""_tinypk(const char* fmt, std::size_t len)
+	inline PARSER_CONSTEXPR internal::tiny_meta_pack operator""_tinypk(const char* fmt, std::size_t len)
 	{
 		return internal::TiLogStreamHelper::tiny_format_parse(internal::TiLogStringView(fmt, len));
 	}
@@ -2946,8 +2974,6 @@ namespace tilogspace
 
 	namespace internal
 	{
-
-#define PARSER_CONSTEXPR constexpr
 		struct Functor
 		{
 			template <typename T>
@@ -2984,7 +3010,12 @@ namespace tilogspace
 			{
 				if (pos == uint32_t(fmt.size())) { break; }
 				if (i >= ret.size()) {}	   // index overflow
+#if __cplusplus >= 201703L
+				auto r0 = fmt.find("{}", pos, 2);
+				r = r0 == TiLogStringView::npos ? -1 : (uint32_t)r0 - pos;
+#else
 				r = find(&fmt[pos], "{}");
+#endif
 				if (r == -1)
 				{
 					break;
@@ -3415,7 +3446,7 @@ namespace tilogspace
 	}()
 
 #define TILOG_GET_LEVEL_SOURCE_LOCATION_DLV(lv)                                                                                            \
-	[](ELevel elv) {                                                                                                                       \
+	[](tilogspace::ELevel elv) {                                                                                                                       \
 		constexpr static auto sources = tilogspace::internal::tiLog_level_sources(TILOG_INTERNAL_GET_SOURCE_LOCATION_STRING);              \
 		return (tilogspace::internal::static_str_t*)&sources[elv];                                                                         \
 	}(lv)
