@@ -2634,7 +2634,7 @@ namespace tilogspace
 			size_t init_size = 0;
 			TiLogCompactString referenceBean;
 			referenceBean.ext.time() = mPoll.s_log_last_time = TiLogTime::now();	// referenceBean's time is the biggest up to now
-			DEBUG_PRINTI("Begin,poll time %lld\n",(long long)mPoll.s_log_last_time.toSteadyFlag());
+			DEBUG_PRINTI("Begin,poll time {}\n",mPoll.s_log_last_time.toSteadyFlag());
 
 			synchronized(mThreadStruQueue)
 			{
@@ -3528,7 +3528,7 @@ namespace tilogspace
 		gv_infos.emplace(ti_iostream_mtx_t::getInstance(), "ti_iostream_mtx_t");
 		for (auto it = gv_infos.begin(), itp = gv_infos.begin(); it != gv_infos.end(); itp = it, ++it)
 		{
-			DEBUG_PRINTA("%p %s ptr diff%lld", it->first, it->second.c_str(), (long long)it->first - (long long)itp->first);
+			DEBUG_PRINTA("%p %s ptr diff{}", it->first, it->second.c_str(), it->first - (long long)itp->first);
 		}
 	}
 
