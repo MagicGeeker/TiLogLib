@@ -1623,7 +1623,7 @@ namespace tilogspace
 				bool IsBusy() override { return mDoing; };
 				void SetPollPeriodMs(uint32_t ms)
 				{
-					DEBUG_PRINTI("SetPollPeriodMs %u to %u\n", (unsigned)mPollPeriodMs, ms);
+					DEBUG_PRINTI("SetPollPeriodMs {} to %u\n", mPollPeriodMs, ms);
 					mPollPeriodMs = ms;
 				}
 			} mPoll;
@@ -1915,7 +1915,7 @@ namespace tilogspace
 				{
 					sPrintedBytesTotal += mCurFile.logs_size;
 					file().close();
-					DEBUG_PRINTV("sync and write index=%u \n", (unsigned)mIndex);
+					DEBUG_PRINTV("sync and write index={} \n", mIndex);
 				}
 
 				if (metaData->logTime < mCurFile.logTime) { mCurFile.logTime = metaData->logTime; }
@@ -2156,7 +2156,7 @@ namespace tilogspace
 			Vector<TiLogPrinter*> printers = TiLogPrinterManager::getPrinters(printerIds);
 			if (printers.empty()) { return; }
 			bufPtr->make_aligned_to_sector();
-			DEBUG_PRINTI("prepare to push %u bytes\n", (unsigned)bufPtr->size());
+			DEBUG_PRINTI("prepare to push {} bytes\n", bufPtr->size());
 			m_pushedLogBytes+=bufPtr->size();
 
 			for (TiLogPrinter* printer : printers)
@@ -2235,7 +2235,7 @@ namespace tilogspace
 			: TiLogCoreMini(SEQ_FREE, this), mTiLogDaemon(d), mTiLogEngine(d->mTiLogEngine),
 			  mTiLogMap(&TiLogEngines::getRInstance().tilogmap), mID(id)
 		{
-			DEBUG_PRINTA("TiLogCore::TiLogCore %p ID %u\n", this,(unsigned)mID);
+			DEBUG_PRINTA("TiLogCore::TiLogCore %p ID {}\n", this,mID);
 			snprintf(mThrdName, sizeof(mThrdName), "PROC~%u", (unsigned)mID);
 
 			mThread = mTiLogDaemon->CreateCoreThread(*this, this);
@@ -2570,11 +2570,11 @@ namespace tilogspace
 				auto ptid = threadStru.tid;
 				DEBUG_ASSERT(ptid != nullptr);
 				const char* tid = ptid->c_str();
-				DEBUG_PRINTD("MergeThreadStruQueueToSet ptid %p , tid %s , qCachePreSize= %u\n", ptid, tid, (unsigned)qCachePreSize);
+				DEBUG_PRINTD("MergeThreadStruQueueToSet ptid %p , tid %s , qCachePreSize= {}\n", ptid, tid, qCachePreSize);
 
 				VecLogCache& v = mMerge.mRawDatas.get(ptid);
 				size_t vsizepre = v.size();
-				DEBUG_PRINTD("v %p size pre: %u\n", &v, (unsigned)vsizepre);
+				DEBUG_PRINTD("v %p size pre: {}\n", &v, vsizepre);
 
 				auto it_greater_than_bean = CrcQueueLogCache::iterator();
 
@@ -2685,7 +2685,7 @@ namespace tilogspace
 				}
 			}
 			mMerge.mMergedSize += mMerge.mMergeCaches.size();
-			DEBUG_PRINTI("End of MergeSortForGlobalQueue mMergeCaches size= %u\n", (unsigned)mMerge.mMergeCaches.size());
+			DEBUG_PRINTI("End of MergeSortForGlobalQueue mMergeCaches size= {}\n", mMerge.mMergeCaches.size());
 		}
 
 #if 0
@@ -2703,9 +2703,9 @@ namespace tilogspace
 				size_t availQueueSize = mThreadStruQueue.availQueue.size();
 				size_t waitMergeQueueSize = mThreadStruQueue.waitMergeQueue.size();
 				InitMergeSort(availQueueSize + waitMergeQueueSize);
-				DEBUG_PRINTI("MergeThreadStruQueueToSet availQueue.size()= %u\n", (unsigned)availQueueSize);
+				DEBUG_PRINTI("MergeThreadStruQueueToSet availQueue.size()= {}\n", availQueueSize);
 				MergeThreadStruQueueToSet(mThreadStruQueue.availQueue, referenceBean);
-				DEBUG_PRINTI("MergeThreadStruQueueToSet waitMergeQueue.size()= %u\n", (unsigned)waitMergeQueueSize);
+				DEBUG_PRINTI("MergeThreadStruQueueToSet waitMergeQueue.size()= {}\n", waitMergeQueueSize);
 				MergeThreadStruQueueToSet(mThreadStruQueue.waitMergeQueue, referenceBean);
 			}
 
@@ -3033,7 +3033,7 @@ namespace tilogspace
 						DEBUG_ASSERT(currCore->mMerge.mMergeLogVecVec.mIndex == 0);
 						currCore->mMerge.mMergeLogVecVec.swap(mMerge.mMergeLogVecVec);	  // exchange logs to core's mMergeLogVecVec
 						currCore->mNeedWoking = true;
-						DEBUG_PRINTI("choose core %u %p to handle seq %llu", (unsigned)currCore->mID, currCore, (long long unsigned)seq);
+						DEBUG_PRINTI("choose core {} %p to handle seq %llu", currCore->mID, currCore, (long long unsigned)seq);
 					}
 					synchronized(mScheduler) { ++mScheduler.mPollSeq; }
 					currCore->mCV.notify_one();
