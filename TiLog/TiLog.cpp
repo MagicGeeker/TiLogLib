@@ -2909,14 +2909,14 @@ namespace tilogspace
 			auto& schd = mTiLogDaemon->mScheduler;
 			synchronized(schd)
 			{
-				if (mDeliver.mIoBeanForPush == nullptr) { DEBUG_PRINTI("%llu no need push empty log\n", (unsigned long long)this->seq); }
+				if (mDeliver.mIoBeanForPush == nullptr) { DEBUG_PRINTI("{} no need push empty log\n", this->seq); }
 				schd.mWaitPushLogs[this->seq] = { mDeliver.mIoBeanForPush, IOBeanTracker::HANDLED };
 				if (schd.mWaitPushLogs.empty()) { return; }
 				auto it = schd.mWaitPushLogs.begin();
 				if (it->first != this->seq)
 				{
 					++mDeliver.mPushLogBlockCount;
-					DEBUG_PRINTI("%llu cannot push log for ordered-logs\n", (unsigned long long)this->seq);
+					DEBUG_PRINTI("{} cannot push log for ordered-logs\n", this->seq);
 					return;
 				}
 				// first log in mWaitPushLogs
@@ -2928,7 +2928,7 @@ namespace tilogspace
 						return;
 					} else
 					{
-						DEBUG_PRINTI("%llu help %llu push log\n", (unsigned long long)this->seq, (unsigned long long)it->first);
+						DEBUG_PRINTI("{} help {} push log\n", this->seq, it->first);
 						auto p = tracker.bean;
 						if (p) { p->core->pushLogsToPrinters(p); }
 						schd.mHandledSeq = it->first;
