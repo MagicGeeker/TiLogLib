@@ -1623,7 +1623,7 @@ namespace tilogspace
 				bool IsBusy() override { return mDoing; };
 				void SetPollPeriodMs(uint32_t ms)
 				{
-					DEBUG_PRINTI("SetPollPeriodMs {} to %u\n", mPollPeriodMs, ms);
+					DEBUG_PRINTI("SetPollPeriodMs {} to {}\n", mPollPeriodMs, ms);
 					mPollPeriodMs = ms;
 				}
 			} mPoll;
@@ -2140,8 +2140,7 @@ namespace tilogspace
 		{
 			EPrinterID e = printer->getUniqueID();
 			int32_t u = GetIndexFromPUID(e);
-			DEBUG_PRINTA(
-				"addPrinter printer[addr: %p id: %d index: %d]\n", printer, (int)e, (int)u);
+			DEBUG_PRINTA("addPrinter printer[addr: {} id: {} index: {}]\n", printer, e, u);
 			DEBUG_ASSERT2(u >= 0, e, u);
 			DEBUG_ASSERT2(u < PRINTER_ID_MAX, e, u);
 			m_printers[u] = printer;
@@ -2211,8 +2210,8 @@ namespace tilogspace
 			{
 				this->pCore = pCore, this->pThreadStru = pThreadStru;
 				DEBUG_PRINTA(
-					"ThreadExitWatcher init [this %p pCore %p pThreadStru %p] tid %s,subsys %u\n", this, pCore, pThreadStru,
-					pThreadStru->tid->c_str(), (unsigned)pCore->mTiLogEngine->subsys);
+					"ThreadExitWatcher init [this {} pCore {} pThreadStru {}] tid {},subsys {}\n", this, pCore, pThreadStru,
+					pThreadStru->tid->c_str(), pCore->mTiLogEngine->subsys);
 			}
 			~ThreadExitWatcher()
 			{
@@ -2312,7 +2311,7 @@ namespace tilogspace
 				mNeedWoking = false;
 			}
 			using llu = long long unsigned;
-			DEBUG_PRINTA(
+			TIINNOLOG(ALWAYS).Stream()->printf(
 				"mMerge.mMergedSize %llu mDeliver{ mPushLogCount %llu mPushLogBlockCount %llu mShrinkCount %llu no-block "
 				"rate %4.1f%% no-shrink rate %4.1f%% }\n",
 				(llu)mMerge.mMergedSize, (llu)mDeliver.mPushLogCount, (llu)mDeliver.mPushLogBlockCount, (llu)mDeliver.mBeanShrinker.mShrinkCount,
@@ -2428,9 +2427,8 @@ namespace tilogspace
 			}
 			mTiLogPrinterManager->fsync();	   // make sure printers output all logs and free to SyncedIOBeanPool
 			DEBUG_PRINTI(
-				"engine %p subsys %u tilogcore %p handledUserThreadCnt %llu diedUserThreadCnt %llu\n", this->mTiLogEngine,
-				(unsigned)this->mTiLogEngine->subsys, this, (unsigned long long)mThreadStruQueue.handledUserThreadCnt,
-				(unsigned long long)mThreadStruQueue.diedUserThreadCnt);
+				"engine {} subsys {} tilogcore {} handledUserThreadCnt {} diedUserThreadCnt {}\n", this->mTiLogEngine,
+				this->mTiLogEngine->subsys, this, mThreadStruQueue.handledUserThreadCnt, mThreadStruQueue.diedUserThreadCnt);
 			DEBUG_PRINTI("TiLogCore {} exit\n", this);
 			this->mMagicNumber = MAGIC_NUMBER_DEAD;
 		}
@@ -2550,8 +2548,7 @@ namespace tilogspace
 		void TiLogDaemon::MergeThreadStruQueueToSet(List<ThreadStru*>& thread_queue, TiLogCompactString& bean)
 		{
 			using ThreadSpinLock = std::unique_lock<ThreadLocalSpinMutex>;
-			unsigned may_size = (unsigned)mMerge.mRawDatas.may_size();
-			DEBUG_PRINTD("mMerge.mRawDatas may_size %u\n", may_size);
+			DEBUG_PRINTD("mMerge.mRawDatas may_size {}\n", mMerge.mRawDatas.may_size());
 			for (auto it = thread_queue.begin(); it != thread_queue.end(); ++it)
 			{
 				ThreadStru& threadStru = **it;
@@ -2607,13 +2604,13 @@ namespace tilogspace
 			loopend:
 				DEBUG_RUN(CheckVecLogCacheOrdered(v, &bean));
 
-				DEBUG_PRINTD(
-					"ptid %p, tid %s, v %p size after: %u diff %u\n", ptid, tid, &v, (unsigned)v.size(), (unsigned)(v.size() - vsizepre));
+				DEBUG_PRINTD("ptid {}, tid {}, v {} size after: {} diff {}\n", ptid, tid, &v, v.size(), (v.size() - vsizepre));
 				if (!v.empty())
 				{
 					auto first_log = v.front();
 					auto final_log = v.back();
-					DEBUG_PRINTD("ptid {}, tid {}, first log [%.30s], final log [%.30s]", ptid, tid, first_log->buf(), final_log->buf());
+					TIINNOLOG(DEBUG).Stream()->printf(
+						"ptid {}, tid {}, first log [%.30s], final log [%.30s]", ptid, tid, first_log->buf(), final_log->buf());
 				}
 				mMerge.mMergeLogVecVec[mMerge.mMergeLogVecVec.mIndex++].swap(v);
 			}
@@ -2643,8 +2640,7 @@ namespace tilogspace
 				init_size = availQueueSize + waitMergeQueueSize;
 				InitMergeLogVecVec(mMerge.mMergeLogVecVec,init_size);
 				MergeThreadStruQueueToSet(mThreadStruQueue.availQueue, referenceBean);
-				DEBUG_PRINTI(
-					"CollectRawDatas availQueueSize %u waitMergeQueueSize %u\n", (unsigned)availQueueSize, (unsigned)waitMergeQueueSize);
+				DEBUG_PRINTI("CollectRawDatas availQueueSize {} waitMergeQueueSize {}\n", availQueueSize, waitMergeQueueSize);
 				MergeThreadStruQueueToSet(mThreadStruQueue.waitMergeQueue, referenceBean);
 			}
 		}
@@ -2951,9 +2947,7 @@ namespace tilogspace
 			mDeliver.mIoBeanForPush = nullptr;
 			if (mDeliver.mDeliverCache.empty()) { return; }
 			VecLogCache& c = mDeliver.mDeliverCache;
-			DEBUG_PRINTI(
-				"logs c range [%lld,%lld]", (long long)c.front()->ext.time().toSteadyFlag(),
-				(long long)c.back()->ext.time().toSteadyFlag());
+			DEBUG_PRINTI("logs c range [{},{}]", c.front()->ext.time().toSteadyFlag(), c.back()->ext.time().toSteadyFlag());
 			{
 				mDeliver.mIoBean.clear();
 				mergeLogsToOneString(c);
@@ -3076,11 +3070,9 @@ namespace tilogspace
 				}
 				lastPoolTime = nowTime;
 
-				using llu = long long unsigned;
 				DEBUG_PRINTI(
-					"poll thread get lock %llu %llu %llu %llu\n", (llu)mThreadStruQueue.availQueue.size(),
-					(llu)mThreadStruQueue.dyingQueue.size(), (llu)mThreadStruQueue.waitMergeQueue.size(),
-					(llu)mThreadStruQueue.toDelQueue.size());
+					"poll thread get lock {} {} {} {}\n", mThreadStruQueue.availQueue.size(), mThreadStruQueue.dyingQueue.size(),
+					mThreadStruQueue.waitMergeQueue.size(), mThreadStruQueue.toDelQueue.size());
 
 				if (!mThreadStruQueue.toDelQueue.empty())
 				{
@@ -3190,7 +3182,7 @@ namespace tilogspace
 			}
 
 			DEBUG_ASSERT(mToExit);
-			DEBUG_PRINTA(
+			TIINNOLOG(ALWAYS).Stream()->printf(
 				"poll thrd prepare to exit,try last poll mPoll.free_core_use_cnt %llu mPoll.nofree_core_use_cnt %llu hit %4.1f%%\n",
 				(long long unsigned)mPoll.free_core_use_cnt, (long long unsigned)mPoll.nofree_core_use_cnt,
 				(100.0 * mPoll.free_core_use_cnt / (mPoll.free_core_use_cnt + mPoll.nofree_core_use_cnt)));
@@ -3528,7 +3520,7 @@ namespace tilogspace
 		gv_infos.emplace(ti_iostream_mtx_t::getInstance(), "ti_iostream_mtx_t");
 		for (auto it = gv_infos.begin(), itp = gv_infos.begin(); it != gv_infos.end(); itp = it, ++it)
 		{
-			DEBUG_PRINTA("{} {} ptr diff{}", it->first, it->second.c_str(), it->first - (long long)itp->first);
+			DEBUG_PRINTA("{} {} ptr diff{}", it->first, it->second.c_str(), (intptr_t)it->first - (intptr_t)itp->first);
 		}
 	}
 
@@ -3545,7 +3537,7 @@ namespace tilogspace
 		InitClocks();
 		TiLogInnerLogMgr::init();
 		// TODO only happens in mingw64,Windows,maybe a mingw64 bug? see DEBUG_PRINTA("test printf lf %lf\n",1.0)
-		DEBUG_PRINTA("fix dtoa deadlock in (s)printf for mingw64 %f %f", 1.0f, 1.0);
+		TIINNOLOG(ALWAYS).Stream()->printf("fix dtoa deadlock in (s)printf for mingw64 %f %f", 1.0f, 1.0);
 		ctor_single_instance_printers();
 
 		for (size_t i = TILOG_SUB_SYSTEM_START; i < engines.size(); i++)

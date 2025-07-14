@@ -2781,6 +2781,12 @@ namespace tilogspace
 		inline TiLogStream& operator<<(const String& s) { return append(s.data(), s.size()), *this; }
 		TILOG_CPP17_FEATURE(inline TiLogStream& operator<<(const StringView& s) { return append(s.data(), s.size()), *this; })
 
+		template <typename T, typename = typename std::enable_if<std::is_enum<T>::value && sizeof(T) == 1>::type>
+		inline TiLogStream& operator<<(T t)
+		{
+			return *this << (int)t;
+		}
+
 		template <
 			typename T, typename = typename std::enable_if<!std::is_array<T>::value>::type,
 			typename = typename std::enable_if<std::is_pointer<T>::value>::type,
