@@ -36,14 +36,14 @@
 #define TILOG_INNO_STREAM_CREATE(lv) TiLogStreamInner(TILOG_GET_LEVEL_SOURCE_LOCATION(lv))
 #define TIINNOLOG(constexpr_lv) tilogspace::should_log(TILOG_SUB_SYSTEM_INTERNAL, constexpr_lv) && TILOG_INNO_STREAM_CREATE(constexpr_lv)
 
-#define DEBUG_PF(LV, ...) TIINNOLOG(LV).Stream()->tiny_print(__VA_ARGS__)
-#define DEBUG_PRINTA(...) DEBUG_PF(ALWAYS, __VA_ARGS__)
-#define DEBUG_PRINTF(...) DEBUG_PF(FATAL, __VA_ARGS__)
-#define DEBUG_PRINTE(...) DEBUG_PF(ERROR, __VA_ARGS__)
-#define DEBUG_PRINTW(...) DEBUG_PF(WARNING, __VA_ARGS__)
-#define DEBUG_PRINTI(...) DEBUG_PF(INFO, __VA_ARGS__)
-#define DEBUG_PRINTD(...) DEBUG_PF(DEBUG, __VA_ARGS__)
-#define DEBUG_PRINTV(...) DEBUG_PF(VERBOSE, __VA_ARGS__)
+#define DEBUG_PF(LV,fmt, ...) TIINNOLOG(LV).Stream()->tiny_print(TINY_META_PACK_BASIC_CREATE_GLOABL_CONSTEXPR(fmt),fmt##_tsv,std::forward_as_tuple(__VA_ARGS__))
+#define DEBUG_PRINTA(fmt,...) DEBUG_PF(ALWAYS, fmt,__VA_ARGS__)
+#define DEBUG_PRINTF(fmt,...) DEBUG_PF(FATAL, fmt,__VA_ARGS__)
+#define DEBUG_PRINTE(fmt,...) DEBUG_PF(ERROR, fmt,__VA_ARGS__)
+#define DEBUG_PRINTW(fmt,...) DEBUG_PF(WARNING, fmt,__VA_ARGS__)
+#define DEBUG_PRINTI(fmt,...) DEBUG_PF(INFO, fmt,__VA_ARGS__)
+#define DEBUG_PRINTD(fmt,...) DEBUG_PF(DEBUG, fmt,__VA_ARGS__)
+#define DEBUG_PRINTV(fmt,...) DEBUG_PF(VERBOSE, fmt,__VA_ARGS__)
 
 
 

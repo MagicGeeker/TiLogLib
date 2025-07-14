@@ -1684,6 +1684,8 @@ namespace tilogspace
 			constexpr static auto npos = String::npos;
 		};
 
+		inline constexpr TiLogStringView operator""_tsv(const char* fmt, std::size_t len) { return TiLogStringView(fmt, len); }
+
 #define thiz ((TStr&)*this)
 		template <typename TStr, typename sz_t>
 		class TiLogStrBase
@@ -2425,6 +2427,7 @@ namespace tilogspace
 
 		using brace_index_t = uint32_t;
 
+		using tiny_meta_pack_basic = DataSet<brace_index_t>;
 		struct tiny_meta_pack : DataSet<brace_index_t>
 		{
 			TiLogStringView fmt;
@@ -2444,7 +2447,8 @@ namespace tilogspace
 			inline constexpr static tiny_meta_pack tiny_format_parse(TiLogStringView fmt);
 
 			template <typename... Args>
-			inline static void tiny_format_append_impl(TiLogStream& outs, const tiny_meta_pack& pack, std::tuple<Args...>&& args);
+			inline static void
+			tiny_format_append_tuple(TiLogStream& outs, const tiny_meta_pack_basic& b, TiLogStringView fmt, std::tuple<Args...>&& args);
 			template <typename... Args>
 			inline static void tiny_format_append(TiLogStream& outs, const tiny_meta_pack& pack, Args&&... args);
 
@@ -2460,15 +2464,27 @@ namespace tilogspace
 		}
 	}	 // namespace internal
 
-	inline constexpr internal::tiny_meta_pack operator""_tiny(const char* fmt, std::size_t len)
+	inline constexpr internal::tiny_meta_pack_basic operator""_tinypkb(const char* fmt, std::size_t len)
+	{
+		return internal::TiLogStreamHelper::tiny_format_parse_to_data(internal::TiLogStringView(fmt, len));
+	}
+
+	inline constexpr internal::tiny_meta_pack operator""_tinypk(const char* fmt, std::size_t len)
 	{
 		return internal::TiLogStreamHelper::tiny_format_parse(internal::TiLogStringView(fmt, len));
 	}
 
+#define TINY_META_PACK_BASIC_CREATE_GLOABL_CONSTEXPR(fmt)                                                                                  \
+	[]() -> const tilogspace::internal::tiny_meta_pack_basic& {                                                                            \
+		using namespace tilogspace;                                                                                                        \
+		constexpr static auto f = fmt##_tinypkb;                                                                                           \
+		return f;                                                                                                                          \
+	}()
+
 #define TINY_META_PACK_CREATE_GLOABL_CONSTEXPR(fmt)                                                                                        \
 	[]() -> const tilogspace::internal::tiny_meta_pack& {                                                                                  \
 		using namespace tilogspace;                                                                                                        \
-		constexpr static auto f = fmt##_tiny;                                                                                              \
+		constexpr static auto f = fmt##_tinypk;                                                                                            \
 		return f;                                                                                                                          \
 	}()
 
@@ -2754,6 +2770,14 @@ namespace tilogspace
 			return *this;
 		}
 
+		template <typename... Args>
+		inline TiLogStream& tiny_print(const internal::tiny_meta_pack_basic& pack, TiLogStringView fmt, std::tuple<Args...>&& t)
+		{
+			TiLogStreamHelper::tiny_format_append_tuple(*this, pack, fmt, std::move(t));
+			return *this;
+		}
+
+
 	public:
 		inline constexpr explicit operator bool() const { return true; }
 		inline TiLogStream& operator<<(bool b) { return (b ? append("true", 4) : append("false", 5)), *this; }
@@ -2967,7 +2991,7 @@ namespace tilogspace
 				} else
 				{
 					pos += r;
-					ret = { ret, pos };
+					ret.data[ret.n++]=pos;
 					pos += 2;
 					i++;
 				}
@@ -3025,9 +3049,9 @@ namespace tilogspace
 		}
 
 		template <typename... Args>
-		void TiLogStreamHelper::tiny_format_append_impl(TiLogStream& outs, const tiny_meta_pack& pack, std::tuple<Args...>&& args)
+		void TiLogStreamHelper::tiny_format_append_tuple(
+			TiLogStream& outs, const tiny_meta_pack_basic& pack, TiLogStringView fmt, std::tuple<Args...>&& args)
 		{
-			auto& fmt = pack.fmt;
 			size_t pos = 0, i = 0, j = 0;
 			for (; i < pack.size(); i++)
 			{
@@ -3050,7 +3074,7 @@ namespace tilogspace
 		template <typename... Args>
 		void TiLogStreamHelper::tiny_format_append(TiLogStream& outs, const tiny_meta_pack& pack, Args&&... args)
 		{
-			tiny_format_append_impl(outs, pack, std::forward_as_tuple(args...));
+			tiny_format_append_tuple(outs, pack, pack.fmt, std::forward_as_tuple(args...));
 		}
 
 		template <typename... Args>

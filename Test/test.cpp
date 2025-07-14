@@ -387,7 +387,7 @@ TEST_CASE("file_multi_thread_benchmark_test_with_tiny_format____________________
 		[](int index) {
 			for (uint64_t j = 0; j < testLoop_t::GET_SINGLE_THREAD_LOOPS(); j++)
 			{
-				constexpr auto fmt = "index= {} j= {}"_tiny;
+				constexpr auto fmt = "index= {} j= {}"_tinypk;
 				TILOGE.tiny_print(fmt, index, j);
 			}
 		});
@@ -863,14 +863,14 @@ TEST_CASE("terminal_multi_way_log_test_____________________")
 	}
 	{
 		using namespace tilogspace;
-		TILOGI.tiny_print("\n\n"_tiny);
-		TILOGI.tiny_print(""_tiny);
-		TILOGI.tiny_print("{}"_tiny);
-		TILOGI.tiny_print("tiny_print test 1"_tiny);
-		TILOGI.tiny_print("tiny_print test {}"_tiny,2);
-		TILOGI.tiny_print("{} test 3"_tiny, "tiny_print");
-		TILOGI.tiny_print("{}"_tiny,"tiny_print test 4");
-		TILOGI.tiny_print("{}{}"_tiny,"tiny_print"," test 5");
+		TILOGI.tiny_print("\n\n"_tinypk);
+		TILOGI.tiny_print(""_tinypk);
+		TILOGI.tiny_print("{}"_tinypk);
+		TILOGI.tiny_print("tiny_print test 1"_tinypk);
+		TILOGI.tiny_print("tiny_print test {}"_tinypk,2);
+		TILOGI.tiny_print("{} test 3"_tinypk, "tiny_print");
+		TILOGI.tiny_print("{}"_tinypk,"tiny_print test 4");
+		TILOGI.tiny_print("{}{}"_tinypk,"tiny_print"," test 5");
 		TILOGI.tiny_print(S("{}{}"),"tiny_print"," test 6");
 		TILOGI.tiny_print(S("{0}{}"),"tiny_print"," test 7");
 		TILOGI.tiny_print(S("tiny_print{"),""," test 8");
