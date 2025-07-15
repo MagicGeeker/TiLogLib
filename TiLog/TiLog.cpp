@@ -33,7 +33,8 @@
 
 #define __________________________________________________TiLog__________________________________________________
 
-#define TILOG_INNO_STREAM_CREATE(lv) TiLogStreamInner(TILOG_GET_LEVEL_SOURCE_LOCATION(lv))
+#define INVALID_SUB_OTHER 0xFF
+#define TILOG_INNO_STREAM_CREATE(lv) TiLogStreamInner(CurSubSys(), TILOG_GET_LEVEL_SOURCE_LOCATION(lv))
 #define TIINNOLOG(constexpr_lv) tilogspace::should_log(TILOG_SUB_SYSTEM_INTERNAL, constexpr_lv) && TILOG_INNO_STREAM_CREATE(constexpr_lv)
 
 #define DEBUG_PF(LV,fmt, ...) TIINNOLOG(LV).Stream()->tiny_print(TINY_META_PACK_BASIC_CREATE_GLOABL_CONSTEXPR(fmt),fmt##_tsv,std::forward_as_tuple(__VA_ARGS__))
@@ -181,9 +182,10 @@ namespace tilogspace
 
 		struct TiLogStreamInner
 		{
-			inline TiLogStreamInner(const static_str_t* source)
+			inline TiLogStreamInner(sub_sys_t sub, const static_str_t* source)
 			{
 				new (&stream) TiLogStream(ETiLogSubSysID(TILOG_SUB_SYSTEM_INTERNAL), source);
+				Stream()->append(sub_sys_table[sub], 4);
 			}
 			~TiLogStreamInner();
 			inline TiLogStream* Stream() noexcept { return &stream; }
@@ -192,7 +194,21 @@ namespace tilogspace
 				uint8_t buf[1];
 				TiLogStream stream;
 			};
+			constexpr static size_t table_size = std::numeric_limits<sub_sys_t>::max() + 1;
+			static char sub_sys_table[table_size][4];
+			static void init()
+			{
+				static_assert(sizeof(sub_sys_t) == 1, "fatal");
+				char s[5];
+				for (unsigned i = 0; i < table_size; i++)
+				{
+					sprintf(s, "$%02X ", i);
+					memcpy(sub_sys_table[i], s, 4);
+				}
+			}
 		};
+		constexpr size_t TiLogStreamInner::table_size;
+		char TiLogStreamInner::sub_sys_table[table_size][4];
 
 		struct TiLogInnerLogMgrImpl;
 		struct TiLogInnerLogMgr
@@ -975,14 +991,8 @@ namespace tilogspace
 			{
 				size_t aligned_size = round_up(p.size(), TILOG_DISK_SECTOR_SIZE);
 				DEBUG_ASSERT(aligned_size == p.size());
-
-					bool succ = datas.emplace_back(p.data(), p.size(), adapt_memcpy);
-				if (succ)
-				{
-					DEBUG_PRINTI("emplace_back {} bytes ok\n", aligned_size);
-					return true;
-				}
-				return false;
+				bool succ = datas.emplace_back(p.data(), p.size(), adapt_memcpy);
+				return succ;
 			}
 		};
 
@@ -998,12 +1008,14 @@ namespace tilogspace
 				}
 			}
 
-			TiLogFileRotater(String folderPath0, TiLogFile& file) : mFolderPath(std::move(folderPath0)), mFile(file)
+			TiLogFileRotater(TiLogEngine* e, String folderPath0, TiLogFile& file)
+				: mEngine(e), mFolderPath(std::move(folderPath0)), mFile(file)
 			{
 				if (mFolderPath.empty() || mFolderPath.back() != '/') { std::abort(); }
 				mCurFile.logTime = TiLogTime::max();
 				mCurFile.logs_size = SIZE_MAX;
 			}
+			TiLogFileRotater(String folderPath0, TiLogFile& file) : TiLogFileRotater(nullptr, std::move(folderPath0), file) {}
 
 			void onAcceptLogs(TiLogPrinter::MetaData metaData);
 
@@ -1014,6 +1026,7 @@ namespace tilogspace
 			uint64_t sPrintedBytesTotal = 0;
 
 		protected:
+			TiLogEngine* mEngine;
 			const String mFolderPath;
 			TiLogFile& mFile;
 			uint32_t mFileIndex = 0;
@@ -1047,6 +1060,7 @@ namespace tilogspace
 			void push_big_str(const buf_t& metaData);
 
 		protected:
+			TiLogEngine* mEngine{};
 			TiLogTime mFileTime{TiLogTime::max()};
 			TiLogFile mFile;
 			TiLogFileRotater mRotater;
@@ -1110,6 +1124,8 @@ namespace tilogspace
 				DecTidStrRefCnt(tid);
 				qCache.pMem = nullptr;
 			}
+
+			sub_sys_t CurSubSys();
 		};
 
 		struct MergeRawDatasHashMapFeat : TiLogConcurrentHashMapDefaultFeat<const String*, VecLogCache>
@@ -1281,6 +1297,7 @@ namespace tilogspace
 		};
 		using VecLogCachePool = TiLogObjectPool<VecLogCache, VecLogCacheFeat>;
 
+		#define CurSubSys()  INVALID_SUB_OTHER
 		template <typename MutexType, typename task_t>
 		class TiLogTaskQueueBasic
 		{
@@ -1377,6 +1394,7 @@ namespace tilogspace
 				STOP
 			} stat;
 		};
+		#undef CurSubSys
 
 		class TiLogCore;
 		using CoreThrdEntryFuncType = void (*)(void*);
@@ -1608,6 +1626,9 @@ namespace tilogspace
 
 			struct PollStru : public CoreThrdStru
 			{
+				PollStru(sub_sys_t sys) : subsys(sys) {}
+				sub_sys_t CurSubSys() { return subsys; }
+				sub_sys_t subsys;
 				std::thread mThrd;
 				Vector<ThreadStru*> mDyingThreadStrus;
 				atomic<uint32_t> mPollPeriodMs = { TILOG_POLL_THREAD_MAX_SLEEP_MS };
@@ -1626,7 +1647,8 @@ namespace tilogspace
 					DEBUG_PRINTI("SetPollPeriodMs {} to {}\n", mPollPeriodMs, ms);
 					mPollPeriodMs = ms;
 				}
-			} mPoll;
+			};
+			PollStru mPoll;
 		};
 
 		constexpr size_t TiLogCoreAlign = alignof(TiLogCore);	   // debug for TiLogCore
@@ -1793,7 +1815,7 @@ namespace tilogspace
 			char tname[16];
 			if (mpEngine != nullptr)
 			{
-				snprintf(tname, 16, "printer@%d#%d", (int)mpEngine->subsys, (int)mpPrinter->getUniqueID());
+				snprintf(tname, 16, "printer$%d#%d", (int)mpEngine->subsys, (int)mpPrinter->getUniqueID());
 			} else
 			{
 				snprintf(tname, 16, "printer#%d", (int)mpPrinter->getUniqueID());
@@ -1807,6 +1829,22 @@ namespace tilogspace
 
 namespace tilogspace
 {
+	namespace internal
+	{
+		ThreadStru::ThreadStru(TiLogDaemon* daemon)
+			: pDaemon(daemon), qCache(crcq_mem), spinMtx(), tid(GetThreadIDString()),
+			  lmempoolist(mempoolspace::tilogstream_mempool::acquire_localthread_mempool(daemon->GetEngine()->subsys)), thrdExistMtx(),
+			  thrdExistCV()
+		{
+			DEBUG_PRINTI("ThreadStru ator pDaemon {} this {} tid [{} {}]\n", pDaemon, this, tid, tid->c_str());
+			IncTidStrRefCnt(tid);
+		};
+
+		sub_sys_t ThreadStru::CurSubSys() { return pDaemon->GetEngine()->subsys; }
+
+	}	 // namespace internal
+
+
 	namespace internal
 	{
 #ifdef __________________________________________________TiLogFile__________________________________________________
@@ -1906,6 +1944,7 @@ namespace tilogspace
 #endif
 
 
+#define CurSubSys() mEngine ? mEngine->subsys : INVALID_SUB_OTHER
 #ifdef __________________________________________________TiLogFileRotater__________________________________________________
 
 		void TiLogFileRotater::onAcceptLogs(TiLogPrinter::MetaData metaData)
@@ -1970,7 +2009,7 @@ namespace tilogspace
 #ifdef __________________________________________________TiLogFilePrinter__________________________________________________
 
 		TiLogFilePrinter::TiLogFilePrinter(TiLogEngine* e, String folderPath0)
-			: TiLogPrinter(e), mFile(), mRotater(folderPath0, mFile), mTaskQueue(new TiLogPrinterTaskQueue())
+			: TiLogPrinter(e), mEngine(e), mFile(), mRotater(e, folderPath0, mFile), mTaskQueue(new TiLogPrinterTaskQueue())
 		{
 			DEBUG_PRINTA("file printer {} path {}\n", this, folderPath0.c_str());
 			mTaskQueue->pushTask([this] { mData->SetPrinterThreadName(); });
@@ -2070,6 +2109,8 @@ namespace tilogspace
 			lk.unlock();
 		}
 
+#undef CurSubSys
+#define CurSubSys() m_engine->subsys
 #ifdef __________________________________________________TiLogPrinterManager__________________________________________________
 
 		TiLogPrinter* TiLogPrinterManager::CreatePrinter(TiLogEngine* e, EPrinterID id)
@@ -2199,10 +2240,12 @@ namespace tilogspace
 		}
 
 #endif
+#undef CurSubSys
 	}	 // namespace internal
 
 	namespace internal
 	{
+#define CurSubSys() pCore ? pCore->mTiLogEngine->subsys : INVALID_SUB_OTHER
 		struct ThreadExitWatcher
 		{
 			ThreadExitWatcher() { DEBUG_PRINTA("ThreadExitWatcher ctor [this {} pCore {} pThreadStru {}]\n", this, pCore, pThreadStru); }
@@ -2222,12 +2265,13 @@ namespace tilogspace
 			TiLogDaemon* pCore{ nullptr };
 			ThreadStru* pThreadStru{ nullptr };
 		};
-
+#undef CurSubSys
 	}	 // namespace internal
 
 	namespace internal
 	{
 #ifdef __________________________________________________TiLogCore__________________________________________________
+#define CurSubSys() mTiLogEngine->subsys
 		void static CheckVecLogCacheOrdered(VecLogCache& v, TiLogCompactString* max_tp_str = nullptr);
 
 		TiLogCore::TiLogCore(TiLogDaemon* d, uint32_t id)
@@ -2246,7 +2290,7 @@ namespace tilogspace
 		{
 			return std::thread([this, &thrd, p] {
 				char tname[16];
-				snprintf(tname, 16, "%s@%d", thrd.GetName(), (int)this->mTiLogEngine->subsys);
+				snprintf(tname, 16, "%s$%d", thrd.GetName(), (int)this->mTiLogEngine->subsys);
 				SetThreadName((thrd_t)-1, tname);
 				auto f = thrd.GetThrdEntryFunc();
 				thrd.mStatus = RUN;
@@ -2396,7 +2440,8 @@ namespace tilogspace
 		}
 
 		TiLogDaemon::TiLogDaemon(TiLogEngine* e)
-			: mTiLogEngine(e), mTiLogPrinterManager(&e->tiLogPrinterManager), mTiLogMap(&TiLogEngines::getRInstance().tilogmap)
+			: mTiLogEngine(e), mTiLogPrinterManager(&e->tiLogPrinterManager), mTiLogMap(&TiLogEngines::getRInstance().tilogmap),
+			  mPoll(e->subsys)
 		{
 			DEBUG_PRINTA("TiLogDaemon::TiLogDaemon {}\n", this);
 
@@ -3242,13 +3287,13 @@ namespace tilogspace
 				c->mPrintedLogs.store(0, std::memory_order_relaxed);
 			});
 		}
-
+#undef CurSubSys
 #endif
 
 	}	 // namespace internal
 }	 // namespace tilogspace
 
-
+#define CurSubSys() INVALID_SUB_OTHER
 namespace tilogspace
 {
 	namespace internal
@@ -3488,14 +3533,6 @@ namespace tilogspace
 			return cnt;
 		}
 
-		ThreadStru::ThreadStru(TiLogDaemon* daemon)
-			: pDaemon(daemon), qCache(crcq_mem), spinMtx(), tid(GetThreadIDString()),
-			  lmempoolist(mempoolspace::tilogstream_mempool::acquire_localthread_mempool(daemon->GetEngine()->subsys)), thrdExistMtx(),
-			  thrdExistCV()
-		{
-			DEBUG_PRINTI("ThreadStru ator pDaemon {} this {} tid [{} {}]\n", pDaemon, this, tid, tid->c_str());
-			IncTidStrRefCnt(tid);
-		};
 
 	}	 // namespace internal
 
@@ -3527,6 +3564,7 @@ namespace tilogspace
 	TiLogEngines::TiLogEngines()
 	{
 		init_tilog_buffer();
+		TiLogStreamInner::init();
 		mempoolspace::tilogstream_pool_controler::init();
 		ti_iostream_mtx_t::init();
 		atexit([] {
