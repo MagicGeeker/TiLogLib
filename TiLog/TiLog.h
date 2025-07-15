@@ -236,7 +236,7 @@ namespace tilogspace
 	constexpr static uint32_t TILOG_POLL_MS_ADJUST_PERCENT_RATE = 75;	// range(0,100),a percent number to adjust poll time
 	constexpr static uint32_t TILOG_MEM_TRIM_LEAST_MS = 500;	// range(0,) adjust mem least internal
 
-	constexpr static size_t TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE = ((size_t)1 << 8U);			 // single thread cache queue max length
+	constexpr static size_t TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE = ((size_t)1 << 10U);			 // single thread cache queue max length
 	
 	constexpr static size_t TILOG_IO_STRING_DATA_POOL_SIZE = ((size_t)6);	// io string data max szie
 	constexpr static size_t TILOG_SINGLE_LOG_RESERVE_LEN = 60 + 40;	// reserve size for every log(include sizeof TiLogBean)
@@ -260,13 +260,8 @@ namespace tilogspace
 
 	// user thread suspend and notify merge thread if merge rawdata size >= it.
 	// Set it smaller may make log latency lower but too small may make bandwidth even worse
-	constexpr static size_t TILOG_MERGE_RAWDATA_QUEUE_FULL_SIZE = (size_t)(TILOG_AVERAGE_CONCURRENT_THREAD_NUM * 2);
-	// user thread notify merge thread if merge rawdata size >= it.
-	// Set it smaller may make log latency lower but too small may make bandwidth even worse
-	constexpr static size_t TILOG_MERGE_RAWDATA_QUEUE_NEARLY_FULL_SIZE = (size_t)(TILOG_MERGE_RAWDATA_QUEUE_FULL_SIZE * 0.75);
-	constexpr static size_t TILOG_DELIVER_CACHE_DEFAULT_MEMORY_BYTES = TILOG_SINGLE_LOG_AVERAGE_LEN * TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE
-		* (TILOG_AVERAGE_CONCURRENT_THREAD_NUM + TILOG_MERGE_RAWDATA_QUEUE_FULL_SIZE);	  // default memory of a single deliver cache
-
+	constexpr static double TILOG_MERGE_RAWDATA_FULL_RATE = 1.2;   // [0.5,2.5]
+	constexpr static double TILOG_MERGE_RAWDATA_ONE_PROCESSER_FULL_RATE = 1.0;  //[0,2]
 
 	constexpr static uint32_t TILOG_DISK_SECTOR_SIZE= 4096;   // %32==0 && %512=0
 	constexpr static size_t TILOG_FILE_BUFFER= (2U << 20U);	//  must be an integer multiple of TILOG_DISK_SECTOR_SIZE
@@ -3325,8 +3320,8 @@ namespace tilogspace
 	static_assert(TILOG_STREAM_MEMPOOL_TRIM_MS > 0, "fatal err!");
 	static_assert(TILOG_STREAM_MEMPOOL_TRY_GET_CYCLE > 1, "fatal err!");
 
-	static_assert(TILOG_MERGE_RAWDATA_QUEUE_NEARLY_FULL_SIZE >= 1, "fatal error!too small");
-	static_assert(TILOG_MERGE_RAWDATA_QUEUE_FULL_SIZE >= TILOG_MERGE_RAWDATA_QUEUE_NEARLY_FULL_SIZE, "fatal error!too small");
+	static_assert(TILOG_MERGE_RAWDATA_FULL_RATE >= 0.5 && TILOG_MERGE_RAWDATA_FULL_RATE <= 2.5, "error range");
+	static_assert(TILOG_MERGE_RAWDATA_ONE_PROCESSER_FULL_RATE >= 0 && TILOG_MERGE_RAWDATA_ONE_PROCESSER_FULL_RATE <= 2, "error range");
 
 	static_assert(TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE > 0, "fatal err!");
 	static_assert(TILOG_DISK_SECTOR_SIZE % 512 == 0, "fatal err!");

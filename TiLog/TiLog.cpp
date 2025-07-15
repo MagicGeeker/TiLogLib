@@ -1134,12 +1134,16 @@ namespace tilogspace
 			constexpr static uint32_t CONCURRENT = TILOG_MAY_MAX_RUNNING_THREAD_NUM;
 		};
 		
-		struct MergeRawDatas : public TiLogObject, public TiLogConcurrentHashMap<const String*, VecLogCache,MergeRawDatasHashMapFeat>
+		struct MergeRawDatas : public TiLogObject, public TiLogConcurrentHashMap<const String*, VecLogCache, MergeRawDatasHashMapFeat>
 		{
 			using super = TiLogConcurrentHashMap<const String*, VecLogCache, MergeRawDatasHashMapFeat>;
+			inline void set_alive_thread_num(uint32_t num) { mAliveThreads = num; }
 			inline size_t may_size() const { return mSize; }
-			inline bool may_full() const { return mSize >= TILOG_MERGE_RAWDATA_QUEUE_FULL_SIZE; }
-			inline bool may_nearlly_full() const { return mSize >= TILOG_MERGE_RAWDATA_QUEUE_NEARLY_FULL_SIZE; }
+			inline bool may_full() const { return mSize >= 1 + TILOG_MERGE_RAWDATA_FULL_RATE * mAliveThreads; }
+			inline bool may_nearlly_full() const
+			{
+				return mSize >= 1 + mAliveThreads / TILOG_DAEMON_PROCESSER_NUM * TILOG_MERGE_RAWDATA_ONE_PROCESSER_FULL_RATE;
+			}
 			inline void clear() { mSize = 0; }
 			inline VecLogCache& get_for_append(const String* key)
 			{
@@ -1149,6 +1153,7 @@ namespace tilogspace
 
 		protected:
 			uint32_t mSize{ 0 };
+			uint32_t mAliveThreads{};
 		};
 
 		using VecVecLogCache = Vector<VecLogCache>;
@@ -2432,6 +2437,7 @@ namespace tilogspace
 				{
 					DEBUG_PRINTI("pDstQueue {} insert thrd tid= {}\n", pDstQueue, pStru->tid->c_str());
 					pDstQueue->emplace_back(pStru);
+					mMerge.mRawDatas.set_alive_thread_num(mThreadStruQueue.availQueue.size());
 				}
 				unique_lock<mutex> lk(pStru->thrdExistMtx);
 				notify_all_at_thread_exit(pStru->thrdExistCV, std::move(lk));
@@ -3223,6 +3229,7 @@ namespace tilogspace
 						++it;
 					}
 				}
+				mMerge.mRawDatas.set_alive_thread_num(mThreadStruQueue.availQueue.size());
 			loop_end:
 				if (mPoll.mStatus == RUN)
 				{
