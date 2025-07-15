@@ -39,6 +39,7 @@ using namespace tilogspace;
 
 //__________________________________________________long time test__________________________________________________//
 //#define terminal_multi_thread_poll__log_test_____________________
+//#define file_multi_thread_poll__log_test_____________________
 //#define none_multi_thread_memory_leak_stress_test_____________________
 //#define none_multi_thread_set_printer_test_____________________
 
@@ -491,6 +492,29 @@ TEST_CASE("terminal_multi_thread_poll__log_test_____________________")
 }
 
 #endif
+
+#ifdef file_multi_thread_poll__log_test_____________________
+TEST_CASE("file_multi_thread_poll__log_test_____________________")
+{
+	struct testLoop_t : multi_thread_test_loop_t
+	{
+		constexpr static int32_t THREADS() { return 10; }
+		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return 1500; }
+		constexpr static bool PRINT_LOOP_TIME() { return true; }
+	};
+	MultiThreadTest<testLoop_t>(
+		"file_multi_thread_poll__log_test_____________________", tilogspace::EPrinterID::PRINTER_TILOG_FILE, [](int index) {
+			constexpr uint64_t loops = testLoop_t::GET_SINGLE_THREAD_LOOPS();
+			for (uint64_t j = 0; j < loops; j++)
+			{
+				this_thread::sleep_for(chrono::milliseconds(50));
+				TILOGE << "index= " << index << " j= " << j;
+			}
+		});
+}
+#endif
+
+
 
 #ifdef none_multi_thread_memory_leak_stress_test_____________________
 

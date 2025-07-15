@@ -1634,6 +1634,8 @@ namespace tilogspace
 				atomic<uint32_t> mPollPeriodMs = { TILOG_POLL_THREAD_MAX_SLEEP_MS };
 				TiLogTime s_log_last_time{ tilogtimespace::ELogTime::MAX };
 				SteadyTimePoint mLastPolltime{ SteadyTimePoint::min() };
+				SteadyTimePoint mLastTrimtime{ SteadyTimePoint::min() };
+				SteadyTimePoint mLastSynctime{ SteadyTimePoint::min() };
 				uint64_t free_core_use_cnt = 0;
 				uint64_t nofree_core_use_cnt = 0;
 				const char* GetName() override { return "poll"; }
@@ -2201,8 +2203,12 @@ namespace tilogspace
 		{
 			SteadyTimePoint tp = SteadyClock::now();
 			auto ms = chrono::duration_cast<chrono::milliseconds>(tp - mLastSync).count();
-			if (ms >= TILOG_SYNC_MAX_INTERVAL_MS) { sync(); }
-			
+			if (ms >= TILOG_SYNC_MAX_INTERVAL_MS)
+			{
+				mLastSync = tp;
+				sync();
+			}
+
 			auto printerIds = GetPrinters();
 			Vector<TiLogPrinter*> printers = TiLogPrinterManager::getPrinters(printerIds);
 			if (printers.empty()) { return; }
@@ -3038,7 +3044,8 @@ namespace tilogspace
 		void TiLogDaemon::thrdFuncPoll()
 		{
 			InitCoreThreadBeforeRun(mPoll.GetName());
-			SteadyTimePoint &lastPoolTime = mPoll.mLastPolltime, nowTime{};
+			SteadyTimePoint nowTime{ SteadyClock::now() }, nextPollTime{ nowTime };
+			SteadyTimePoint &lastPoolTime = mPoll.mLastPolltime, &lastTrimTime = mPoll.mLastTrimtime, &lastSyncTime = mPoll.mLastSynctime;
 			for (;;)
 			{
 				if (mPoll.mStatus == ON_FINAL_LOOP) { break; }
@@ -3046,8 +3053,10 @@ namespace tilogspace
 				if (mPoll.mStatus == PREPARE_FINAL_LOOP) { mPoll.mStatus = ON_FINAL_LOOP; }
 				std::unique_lock<std::mutex> lk_poll(mPoll.mMtx);
 				auto cleaner = make_cleaner([this] { mPoll.mDoing = false; });
-				mPoll.mCV.wait_for(lk_poll,std::chrono::milliseconds(mPoll.mPollPeriodMs));
+				DEBUG_PRINTI("wati until {}", nextPollTime.time_since_epoch().count());
+				mPoll.mCV.wait_until(lk_poll, nextPollTime);
 				mPoll.mDoing = true;
+				nextPollTime = SteadyClock::now() + std::chrono::milliseconds(mPoll.mPollPeriodMs);
 
 				{
 					if (mPoll.mStatus == ON_FINAL_LOOP)
@@ -3095,9 +3104,10 @@ namespace tilogspace
 				}
 
 				nowTime = SteadyClock::now();
-				if (nowTime > mPoll.mLastPolltime + std::chrono::milliseconds(TILOG_STREAM_MEMPOOL_TRIM_MS))
+				if (nowTime > lastTrimTime + std::chrono::milliseconds(TILOG_STREAM_MEMPOOL_TRIM_MS))
 				{
-					mPoll.mLastPolltime = nowTime;
+					nextPollTime = std::min(nextPollTime, nowTime + std::chrono::milliseconds(TILOG_STREAM_MEMPOOL_TRIM_MS));
+					lastTrimTime = nowTime;
 					mempoolspace::tilogstream_mempool::trim();
 					for (TiLogCore* core : mScheduler.mCoreArr)
 					{
@@ -3107,10 +3117,14 @@ namespace tilogspace
 						}
 						core->mCV.notify_one();
 					}
-					synchronized(mScheduler){
-						mTiLogPrinterManager->sync();
-					}
 					DEBUG_PRINTA("creae inno log for trim mem");
+				}
+				nowTime = SteadyClock::now();
+				if (nowTime > lastSyncTime + std::chrono::milliseconds(TILOG_SYNC_MAX_INTERVAL_MS))
+				{
+					nextPollTime = std::min(nextPollTime, nowTime + std::chrono::milliseconds(TILOG_SYNC_MAX_INTERVAL_MS));
+					lastSyncTime = nowTime;
+					synchronized(mScheduler) { mTiLogPrinterManager->sync(); }
 				}
 				// try lock when first run or deliver complete recently
 				// force lock if in TiLogCore exit or exist dying threads or pool internal > TILOG_POLL_THREAD_MAX_SLEEP_MS
@@ -3377,7 +3391,7 @@ namespace tilogspace
 					auto now_tp = std::chrono::steady_clock::now();
 					if (mPollPeriodMs > std::max(TILOG_POLL_THREAD_SLEEP_MS_IF_EXIST_THREAD_DYING, TILOG_POLL_THREAD_SLEEP_MS_IF_SYNC)
 						&& mDeliver.mIoBean.size() <= TILOG_FILE_BUFFER && stat != TO_STOP
-						&& mLastSync + std::chrono::milliseconds(mPollPeriodMs) > now_tp)
+						&& mLastSync + std::chrono::milliseconds(TILOG_SYNC_MAX_INTERVAL_MS) > now_tp)
 					{
 						continue;
 					}

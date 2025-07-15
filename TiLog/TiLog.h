@@ -227,9 +227,9 @@ namespace tilogspace
 	constexpr static uint32_t TILOG_USER_MODE_CLOCK_UPDATE_NS = TILOG_TIMESTAMP_SORT/4;
 
 	constexpr static uint32_t TILOG_DAEMON_PROCESSER_NUM = 4;	// tilog daemon processer num
-	constexpr static uint32_t TILOG_SYNC_MAX_INTERVAL_MS = 500;	// max sync interval, to ensure print every logs for every thread
-	constexpr static uint32_t TILOG_POLL_THREAD_MAX_SLEEP_MS = 500;	// max poll period to ensure print every logs for every thread
-	constexpr static uint32_t TILOG_POLL_THREAD_MIN_SLEEP_MS = 100;	// min poll period to ensure print every logs for every thread
+	constexpr static uint32_t TILOG_SYNC_MAX_INTERVAL_MS = 500;	// max sync interval(force sync)
+	constexpr static uint32_t TILOG_POLL_THREAD_MAX_SLEEP_MS = 500;	// max poll period(colletc log,handle threadstru,trim memory,...)
+	constexpr static uint32_t TILOG_POLL_THREAD_MIN_SLEEP_MS = 100;	// min poll period
 	constexpr static uint32_t TILOG_POLL_THREAD_SLEEP_MS_IF_EXIST_THREAD_DYING = 5;	// poll period if some user threads are dying
 	constexpr static uint32_t TILOG_POLL_THREAD_SLEEP_MS_IF_TO_EXIT = 1;	// poll period if some user threads are dying
 	constexpr static uint32_t TILOG_POLL_THREAD_SLEEP_MS_IF_SYNC = 2;	// poll period if sync or fsync
