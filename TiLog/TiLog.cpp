@@ -1849,17 +1849,24 @@ namespace tilogspace
 	{
 #ifdef __________________________________________________TiLogFile__________________________________________________
 #ifdef TILOG_OS_WIN
-		inline static void func_moveptr(HANDLE fd, size_t size)
+		inline static DWORD func_moveptr(HANDLE fd, size_t size)
 		{
 			LARGE_INTEGER li;
 			li.QuadPart = static_cast<LONGLONG>(size);
-			SetFilePointerEx(fd, li, NULL, FILE_BEGIN);
+			bool ok = !SetFilePointerEx(fd, li, NULL, FILE_BEGIN);
+			return ok ? 0 : GetLastError();
 		}
 		inline static int func_trunc(HANDLE fd, size_t size, bool inc = false)
 		{
-			func_moveptr(fd, size);
-			SetEndOfFile(fd);
-			if (inc) { SetFileValidData(fd, static_cast<LONGLONG>(size)); }
+			DWORD ret = func_moveptr(fd, size);
+			if (ret != 0) { return ret; }
+			bool ok = !SetEndOfFile(fd);
+			if (!ok) { return GetLastError(); }
+			if (inc)
+			{
+				ok = !SetFileValidData(fd, static_cast<LONGLONG>(size));
+				return ok ? 0 : GetLastError();
+			}
 			return 0;
 		}
 		inline static HANDLE func_open(const char* path)
@@ -1870,7 +1877,7 @@ namespace tilogspace
 			DWORD written = 0;
 			WriteFile(fd, TILOG_TITLE, sizeof(TILOG_TITLE), &written, NULL);
 			CloseHandle(fd);
-			fd = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_ALWAYS, FILE_FLAG_NO_BUFFERING, 0);
+			fd = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_FLAG_NO_BUFFERING, 0);
 			func_trunc(fd, TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE, true);
 			func_moveptr(fd, 0);
 			return fd;
@@ -1924,7 +1931,11 @@ namespace tilogspace
 		}
 		inline void TiLogFile::sync() { valid() ? func_sync(fctx.fd) : void(0); }
 		inline int64_t TiLogFile::write(TiLogStringView buf) { return valid() ? func_write(fctx.fd, buf) : -1; }
-		inline void TiLogFile::trunc(size_t size) { func_trunc(fctx.fd, size); }
+		inline void TiLogFile::trunc(size_t size)
+		{
+			func_sync(fctx.fd);
+			func_trunc(fctx.fd, size);
+		}
 
 #endif
 
