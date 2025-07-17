@@ -59,8 +59,6 @@
 #define TILOG_PREFIX_LOG_SIZE (32)		 // reserve for prefix static c-strings;
 #elif TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_MILLISECOND
 #define TILOG_PREFIX_LOG_SIZE (32)		 // reserve for prefix static c-strings;
-#elif TILOG_TIMESTAMP_SHOW TILOG_TIMESTAMP_SECOND
-#define TILOG_PREFIX_LOG_SIZE (24)		 // reserve for prefix static c-strings;
 #endif
 
 #define TILOG_RESERVE_LEN_L1 (TILOG_PREFIX_LOG_SIZE)	 // reserve for prefix static c-strings and other;
@@ -254,7 +252,6 @@ namespace tiloghelperspace
 
 	//or return string such as ||2022-06-06 19:35:08.064001|| (26Bytes)
 	//or return string such as ||2022-06-06  19:35:08.064|| (24Bytes)
-	//or return string such as ||2022-06-06 19:25:10|| (19Bytes)
 	static size_t TimePointToTimeCStr(char* dst, SystemTimePoint nowTime)
 	{
 		time_t t = std::chrono::system_clock::to_time_t(nowTime);
@@ -262,10 +259,7 @@ namespace tiloghelperspace
 		do
 		{
 			if (tmd == nullptr) { break; }
-#if TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_SECOND
-			size_t len = strftime(dst, TILOG_CTIME_MAX_LEN, "%Y-%m-%d %H:%M:%S", tmd);	   // 19B
-			if (len == 0) { break; }
-#elif TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_MILLISECOND
+#if TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_MILLISECOND
 			size_t len = strftime(dst, TILOG_CTIME_MAX_LEN, "%Y-%m-%d  %H:%M:%S", tmd);	   // 24B
 			// len without zero '\0'
 			if (len == 0) { break; }
@@ -1681,9 +1675,6 @@ namespace tilogspace
 #elif TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_MILLISECOND
 			memcpy(mlogprefix, "\n   [2022-06-06  19:25:10.763] #", sizeof(mlogprefix));
 			mctimestr = mlogprefix + 5;
-#else
-			memcpy(mlogprefix, "\n [2022-06-06 19:25:10]#", sizeof(mlogprefix));
-			mctimestr = mlogprefix + 3;
 #endif
 		}
 
@@ -2002,14 +1993,8 @@ namespace tilogspace
 				}
 				strcpy(mPreTimeStr, timeStr);
 				char indexs[9];
-				snprintf(indexs, 9, "_idx%04u", (unsigned)mFileIndex);	  // 0000-9999
-#if TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_SECOND
-				constexpr size_t LOG_FILE_MIN = (1U << 20U);
-#elif TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_MILLISECOND
-				constexpr size_t LOG_FILE_MIN = (1U << 10U);
-#elif TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_MICROSECOND
-				constexpr size_t LOG_FILE_MIN = (1U << 5U);
-#endif
+				snprintf(indexs, 9, "_idx%03u", (unsigned)mFileIndex);	  // 0000-9999
+				constexpr double LOG_FILE_MIN = 2.0 * TILOG_TIMESTAMP_SHOW / 10000;	// Assume‌ max bw is about 20GB/s(2log/ns)
 				static_assert(TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE >= LOG_FILE_MIN, "too small file size,logs may overlap");
 				s.append(mFolderPath).append(fileName, size).append(indexs).append(".log", 4);
 			} else
@@ -2904,6 +2889,13 @@ namespace tilogspace
 				mDeliver.mlogprefix[29] = ']';
 			}
 #else
+			TiLogTime show_time_ms = bean.ext.time();
+			show_time_ms.cast_to_ms();
+
+			TiLogTime::origin_time_type us_tp = show_time.get_origin_time();
+			TiLogTime::origin_time_type ms_tp = show_time_ms.get_origin_time();
+			uint32_t us = (uint32_t)chrono::duration_cast<chrono::microseconds>(us_tp - ms_tp).count();
+
 			TiLogTime::origin_time_type oriTime = show_time.get_origin_time();
 			if (oriTime == mDeliver.mPreLogTime)
 			{
@@ -2914,8 +2906,6 @@ namespace tilogspace
 				mDeliver.mPreLogTime = len == 0 ? TiLogTime::origin_time_type() : oriTime;
 #if TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_MILLISECOND
 				mDeliver.mlogprefix[29] = ']';
-#elif TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_SECOND
-				mDeliver.mlogprefix[22] = ']';
 #endif
 			}
 #endif
