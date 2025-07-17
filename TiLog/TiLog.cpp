@@ -107,7 +107,6 @@ namespace tilogspace
 	{
 		namespace tilogtimespace
 		{
-			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_OUTSIDE(steady_flag_helper, steady_flag_helper_buf)
 			TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_OUTSIDE(SteadyClockImpl::SteadyClockImplHelper, instance)
 		}	 // namespace tilogtimespace
 	}		 // namespace internal
@@ -3462,7 +3461,6 @@ namespace tilogspace
 	{
 		inline static void InitClocks()
 		{
-			tilogspace::internal::tilogtimespace::steady_flag_helper::init();
 #if TILOG_USE_USER_MODE_CLOCK
 			tilogspace::internal::tilogtimespace::UserModeClock::init();
 #endif
@@ -3476,7 +3474,6 @@ namespace tilogspace
 #if TILOG_USE_USER_MODE_CLOCK
 			tilogspace::internal::tilogtimespace::UserModeClock::uninit();
 #endif
-			tilogspace::internal::tilogtimespace::steady_flag_helper::uninit();
 		}
 
 		static void ctor_single_instance_printers()
@@ -3565,7 +3562,6 @@ namespace tilogspace
 		gv_infos.emplace(TiLog::getInstance(), "TiLog");
 		gv_infos.emplace(TiLogEngines::getInstance(), "TiLogEngines");
 		gv_infos.emplace(mempoolspace::tilogstream_pool_controler::getInstance(), "tilogstream_pool_controler");
-		gv_infos.emplace(tilogtimespace::steady_flag_helper::getInstance(), "steady_flag_helper");
 #if TILOG_USE_USER_MODE_CLOCK
 		gv_infos.emplace(tilogtimespace::UserModeClock::getInstance(), "UserModeClock");
 #endif

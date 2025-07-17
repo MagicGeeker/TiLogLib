@@ -2016,20 +2016,6 @@ namespace tilogspace
 			// it is enough
 			using steady_flag_t = int64_t;
 
-			struct steady_flag_helper /*: TiLogObject*/
-			{
-				TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_MEMBER_DECLARE(steady_flag_helper, steady_flag_helper_buf)
-				TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_FUNC_IMPL(steady_flag_helper,steady_flag_helper_buf)
-
-
-				static inline steady_flag_t now() { return getRInstance().count++; }
-
-				static constexpr inline steady_flag_t min() { return std::numeric_limits<steady_flag_t>::min(); }
-
-				static constexpr inline steady_flag_t max() { return std::numeric_limits<steady_flag_t>::max(); }
-				alignas(TILOG_CACHE_LINE_SIZE) std::atomic<steady_flag_t> count{ min() };
-			};
-
 			//Clock:  std::chrono::steady_clock  std::chrono::system_clock
 			template <typename Clock>
 			class UserModeClockT /*: public TiLogObject*/
