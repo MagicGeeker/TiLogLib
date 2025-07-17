@@ -129,7 +129,6 @@
 #define  TILOG_INTERNAL_REGISTER_PRINTERS_MACRO(...)  __VA_ARGS__
 
 #define TILOG_INTERNAL_STD_STEADY_CLOCK 1
-#define TILOG_INTERNAL_STD_SYSTEM_CLOCK 2
 
 #define TILOG_TIMESTAMP_SECOND (1000*1000*1000)
 #define TILOG_TIMESTAMP_MILLISECOND (1000*1000)
@@ -2032,64 +2031,6 @@ namespace tilogspace
 				alignas(TILOG_CACHE_LINE_SIZE) std::atomic<steady_flag_t> count{ min() };
 			};
 
-			// for customize timer，must be similar to BaseTimeImpl
-			TILOG_ABSTRACT class BaseTimeImpl /* : public TiLogObject*/
-			{
-				/**
-			public:
-				 using origin_time_type=xxx;
-				 using steady_flag_t = xxxx;
-			public:
-				inline BaseTimeImpl() ;
-
-				inline BaseTimeImpl(ELogTime);
-
-				//operators
-				inline bool operator<(const BaseTimeImpl &rhs);
-
-				inline bool operator<=(const BaseTimeImpl &rhs);
-
-				inline BaseTimeImpl &operator=(const BaseTimeImpl &rhs);
-
-				//member functions
-				inline steady_flag_t toSteadyFlag() const;
-
-				inline time_t to_time_t() const;
-
-				inline void cast_to_sec();
-
-				inline void cast_to_ms();
-
-				inline void cast_to_show_accu();
-
-				inline origin_time_type get_origin_time() const;
-
-				//static functions
-				inline static BaseTimeImpl now();
-
-				inline static BaseTimeImpl min();
-
-				inline static BaseTimeImpl max();
-				 */
-			};
-
-			// help transform no-steady time to steady time
-			TILOG_ABSTRACT class NoSteadyTimeHelper /*: public BaseTimeImpl*/
-			{
-			public:
-				using steady_flag_t = tilogtimespace::steady_flag_t;
-
-			public:
-				inline NoSteadyTimeHelper() { steadyT = steady_flag_helper::min(); }
-
-				inline bool operator<(const NoSteadyTimeHelper& rhs) const { return this->steadyT < rhs.steadyT; }
-
-				inline steady_flag_t toSteadyFlag() const { return steadyT; }
-
-			protected:
-				steady_flag_t steadyT;
-			};
-
 			//Clock:  std::chrono::steady_clock  std::chrono::system_clock
 			template <typename Clock>
 			class UserModeClockT /*: public TiLogObject*/
@@ -2164,78 +2105,6 @@ namespace tilogspace
 			using UserModeClock = typename std::conditional<
 				TILOG_TIME_IMPL_TYPE == TILOG_INTERNAL_STD_STEADY_CLOCK, UserModeClockT<std::chrono::steady_clock>,
 				UserModeClockT<std::chrono::system_clock>>::type;
-
-			TILOG_ABSTRACT class SystemClockBase /*: BaseTimeImpl*/
-			{
-			public:
-				using Clock =
-					std::conditional<TILOG_USE_USER_MODE_CLOCK, UserModeClockT<std::chrono::system_clock>, std::chrono::system_clock>::type;
-				using TimePoint = std::chrono::system_clock::time_point;
-				using origin_time_type = TimePoint;
-				constexpr static bool is_steady = Clock::is_steady;
-
-			public:
-				inline time_t to_time_t() const { return Clock::to_time_t(chronoTime); }
-				inline void cast_to_sec() { chronoTime = std::chrono::time_point_cast<std::chrono::seconds>(chronoTime); }
-				inline void cast_to_ms() { chronoTime = std::chrono::time_point_cast<std::chrono::milliseconds>(chronoTime); }
-				inline void cast_to_show_accu() { chronoTime = std::chrono::time_point_cast<show_dur_t>(chronoTime); }
-				inline size_t hash() const { return (size_t)chronoTime.time_since_epoch().count(); }
-
-				inline origin_time_type get_origin_time() const { return chronoTime; }
-
-			protected:
-				TimePoint chronoTime;
-			};
-
-			// to use this class ,make sure system_lock is steady
-			class NativeSteadySystemClockWrapper : public SystemClockBase
-			{
-			public:
-				using steady_flag_t = std::chrono::system_clock::rep;
-
-			public:
-				inline NativeSteadySystemClockWrapper() { chronoTime = TimePoint::min(); }
-
-				inline NativeSteadySystemClockWrapper(TimePoint t) { chronoTime = t; }
-
-				inline bool operator<(const NativeSteadySystemClockWrapper& r) const { return chronoTime < r.chronoTime; }
-
-				inline NativeSteadySystemClockWrapper(const NativeSteadySystemClockWrapper& t) = default;
-				inline NativeSteadySystemClockWrapper& operator=(const NativeSteadySystemClockWrapper& t) = default;
-
-				inline steady_flag_t toSteadyFlag() const { return chronoTime.time_since_epoch().count(); }
-
-				inline static NativeSteadySystemClockWrapper now() { return Clock::now(); }
-
-				inline static NativeSteadySystemClockWrapper min() { return TimePoint::min(); }
-
-				inline static NativeSteadySystemClockWrapper max() { return TimePoint::max(); }
-			};
-
-			class NativeNoSteadySystemClockWrapper : public SystemClockBase, public NoSteadyTimeHelper
-			{
-			public:
-				inline NativeNoSteadySystemClockWrapper() { chronoTime = TimePoint::min(); }
-
-				inline NativeNoSteadySystemClockWrapper(TimePoint t, steady_flag_t st)
-				{
-					steadyT = st;
-					chronoTime = t;
-				}
-
-				inline NativeNoSteadySystemClockWrapper(const NativeNoSteadySystemClockWrapper& t) = default;
-				inline NativeNoSteadySystemClockWrapper& operator=(const NativeNoSteadySystemClockWrapper& t) = default;
-
-				inline static NativeNoSteadySystemClockWrapper now() { return { Clock::now(), steady_flag_helper::now() }; }
-
-				inline static NativeNoSteadySystemClockWrapper min() { return { TimePoint::min(), steady_flag_helper::min() }; }
-
-				inline static NativeNoSteadySystemClockWrapper max() { return { TimePoint::max(), steady_flag_helper::max() }; }
-			};
-
-			using SystemClockImpl = std::conditional<
-				SystemClockBase::is_steady, NativeSteadySystemClockWrapper, NativeNoSteadySystemClockWrapper>::type;
-
 
 			class SteadyClockImpl /* : public BaseTimeImpl*/
 			{
@@ -2392,8 +2261,6 @@ namespace tilogspace
 			using TimePoint = std::chrono::system_clock::time_point;
 #if TILOG_TIME_IMPL_TYPE == TILOG_INTERNAL_STD_STEADY_CLOCK
 			using TiLogTime = tilogspace::internal::tilogtimespace::ITiLogTime<tilogtimespace::SteadyClockImpl>;
-#elif TILOG_TIME_IMPL_TYPE == TILOG_INTERNAL_STD_SYSTEM_CLOCK
-			using TiLogTime = tilogspace::internal::tilogtimespace::ITiLogTime<tilogtimespace::SystemClockImpl>;
 #endif
 			static_assert(std::is_trivially_copy_assignable<TiLogTime>::value, "TiLogBean will be realloc so must be trivally-assignable");
 			static_assert(std::is_trivially_destructible<TiLogTime>::value, "TiLogBean will be realloc so must be trivally-destructible");
