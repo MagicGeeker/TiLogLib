@@ -1995,11 +1995,31 @@ namespace tilogspace
 
 	constexpr size_t LOG_LEVELS_STRING_LEN = 8;
 	constexpr auto* SOURCE_LOCATION_PREFIX = LOG_LEVELS;
+}	 // namespace tilogspace
 
+#if _WIN32
+#include <intrin.h>
+#endif
+
+namespace tilogspace
+{
 	namespace internal
 	{
 		namespace tilogtimespace
 		{
+#if _WIN32
+			inline uint64_t rdtsc()	   // win
+			{
+				return __rdtsc();
+			}
+#else
+			inline uint64_t rdtsc()	   // linux
+			{
+				unsigned int lo, hi;
+				__asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
+				return ((uint64_t)hi << 32) | lo;
+			}
+#endif
 			using sort_dur_t = std::chrono::duration<
 				std::chrono::nanoseconds::rep, std::ratio_multiply<std::chrono::nanoseconds::period, std::ratio<TILOG_TIMESTAMP_SORT, 1>>>;
 			using show_dur_t = std::chrono::duration<
@@ -2040,6 +2060,25 @@ namespace tilogspace
 						std::this_thread::yield();
 					}
 				}
+				int64_t init_tsc_freq()
+				{
+					double tsc_per_ns;
+					while (true)
+					{
+						std::chrono::steady_clock::time_point end_tp{ std::chrono::steady_clock::now() };
+						uint64_t end_tsc_clk{ rdtsc() };
+						auto diff_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(end_tp - begin_tp).count();
+						if (diff_ns >= 1000 * 1000)	   // sleep at least 1ms
+						{
+							tsc_per_ns = 1.0 * (end_tsc_clk - begin_tsc_clk) / diff_ns;
+							break;
+						}
+						std::this_thread::yield();
+					}
+					tsc_freq = int64_t(tsc_per_ns * TILOG_TIMESTAMP_SHOW);
+					tsc_update_freq = int64_t(tsc_per_ns * TILOG_TIMESTAMP_SHOW * 0.95);
+					return tsc_freq;
+				}
 				~UserModeClockT()
 				{
 					toExit = true;
@@ -2048,18 +2087,33 @@ namespace tilogspace
 				}
 				void update_tp()
 				{
+					uint64_t tsc = rdtsc();	   // maybe < tsc_clk
+					if (int64_t(tsc - local_last_tsc_clk) < tsc_update_freq) { return; }
+					uint64_t g_last_tsc_clk = last_tsc_clk.load(std::memory_order_relaxed);
+					if (int64_t(tsc - g_last_tsc_clk) < tsc_update_freq)
+					{
+						local_last_tsc_clk = g_last_tsc_clk;
+						return;
+					}
+					bool updated = false;
 					constexpr bool multi_thrd_update = TILOG_TIMESTAMP_SHOW <= TILOG_TIMESTAMP_MICROSECOND;
 					if (Clock::is_steady && !multi_thrd_update)
 					{
 						TimePoint tp = Clock::now();
 						tp = std::chrono::time_point_cast<sort_dur_t>(tp);
 						s_now.store(tp, std::memory_order_release);
+						updated = true;
 					} else
 					{
 						TimePoint tp = Clock::now();
 						tp = std::chrono::time_point_cast<sort_dur_t>(tp);
-						TimePoint pre =  s_now.load(std::memory_order_acquire);
-						if (pre < tp) { s_now.compare_exchange_weak(pre, tp, std::memory_order_acq_rel); }
+						TimePoint pre = s_now.load(std::memory_order_acquire);
+						if (pre < tp) { updated = s_now.compare_exchange_weak(pre, tp, std::memory_order_acq_rel); }
+					}
+					if (updated)
+					{
+						local_last_tsc_clk = tsc;
+						last_tsc_clk.store(tsc, std::memory_order_relaxed);
 					}
 				}
 				void update()
@@ -2078,6 +2132,12 @@ namespace tilogspace
 				static uint64_t instance[];
 				TILOG_MUTEXABLE_CLASS_MACRO_WITH_CV(OptimisticMutex, mtx, cv_type, cv)
 				alignas(TILOG_CACHE_LINE_SIZE) std::atomic<TimePoint> s_now{ TimePoint::min() };
+				static thread_local uint64_t local_last_tsc_clk;
+				std::atomic<uint64_t> last_tsc_clk{};
+				std::chrono::steady_clock::time_point begin_tp{ std::chrono::steady_clock::now() };
+				uint64_t begin_tsc_clk{ rdtsc() };
+				int64_t tsc_freq{};
+				int64_t tsc_update_freq{};
 				std::thread th{};
 				uint32_t magic{ 0xf001a001 };
 				volatile bool toExit{};
@@ -2086,6 +2146,8 @@ namespace tilogspace
 			template <typename Clock>
 			uint64_t UserModeClockT<Clock>::instance[sizeof(UserModeClockT<Clock>) / sizeof(uint64_t) + 1];
 			// gcc compiler error if add alignas, so replace use uint64_t
+			template <typename Clock>
+			thread_local uint64_t UserModeClockT<Clock>::local_last_tsc_clk{};
 
 			using UserModeClock = typename std::conditional<
 				TILOG_TIME_IMPL_TYPE == TILOG_INTERNAL_STD_STEADY_CLOCK, UserModeClockT<std::chrono::steady_clock>,

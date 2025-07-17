@@ -1098,7 +1098,6 @@ namespace tilogspace
 			TiLogCompactString* crcq_mem[TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE];
 			CrcQueueLogCache qCache;
 			ThreadLocalSpinMutex spinMtx;	 // protect cache
-			uint32_t notify_flag{};
 
 			const String* tid;
 
@@ -1793,6 +1792,7 @@ namespace tilogspace
 			// fix segment fault for mingw64/Windows when use TICLOG in TiLogEngines::TiLogEngines()
 			std::ios_base::Init init_cout;
 			const String* mainThrdId = GetThreadIDString();
+			int64_t tsc_freq{};
 			
 			TiLogMap_t tilogmap;
 			TiLogConcurrentHashMap<const String*, uint32_t, ThreadIdStrRefCountFeat> threadIdStrRefCount;
@@ -2537,16 +2537,12 @@ namespace tilogspace
 		{
 			DEBUG_ASSERT(mMagicNumber == MAGIC_NUMBER);			// assert TiLogCore inited
 			ThreadStru& stru = *GetThreadStru();
-#if TILOG_USE_USER_MODE_CLOCK
-			if (++stru.notify_flag >= (TILOG_TIMESTAMP_SHOW / 100))
-			{
-				stru.notify_flag = 0;
-				tilogtimespace::UserModeClock::getRInstance().update();
-			}
-#endif
 			unique_lock<ThreadLocalSpinMutex> lk_local(stru.spinMtx);
 			bool isLocalFull = LocalCircularQueuePushBack(stru, pBean);
 			// init log time after stru is inited and push to local queue,to make sure log can be print ordered
+#if TILOG_USE_USER_MODE_CLOCK
+			tilogtimespace::UserModeClock::getRInstance().update();
+#endif
 			new (&pBean->ext.tiLogTime) TiLogTime(EPlaceHolder{});
 
 			if (isLocalFull)
@@ -3564,6 +3560,7 @@ namespace tilogspace
 		gv_infos.emplace(mempoolspace::tilogstream_pool_controler::getInstance(), "tilogstream_pool_controler");
 #if TILOG_USE_USER_MODE_CLOCK
 		gv_infos.emplace(tilogtimespace::UserModeClock::getInstance(), "UserModeClock");
+		DEBUG_PRINTA("tsc_freq: {}", tsc_freq);
 #endif
 #if TILOG_TIME_IMPL_TYPE == TILOG_INTERNAL_STD_STEADY_CLOCK
 		gv_infos.emplace(tilogtimespace::SteadyClockImpl::SteadyClockImplHelper::getInstance(), "SteadyClockImplHelper");
@@ -3581,6 +3578,7 @@ namespace tilogspace
 
 	TiLogEngines::TiLogEngines()
 	{
+		InitClocks();
 		init_tilog_buffer();
 		TiLogStreamInner::init();
 		mempoolspace::tilogstream_pool_controler::init();
@@ -3590,7 +3588,9 @@ namespace tilogspace
 			mempoolspace::tilogstream_pool_controler::uninit();
 		});
 		IncTidStrRefCnt(this->mainThrdId);	  // main thread thread_local varibles(tid,mempoool...) keep available
-		InitClocks();
+		#if TILOG_USE_USER_MODE_CLOCK
+			tsc_freq = tilogspace::internal::tilogtimespace::UserModeClock::getRInstance().init_tsc_freq();
+		#endif
 		TiLogInnerLogMgr::init();
 		// TODO only happens in mingw64,Windows,maybe a mingw64 bug? see DEBUG_PRINTA("test printf lf %lf\n",1.0)
 		TIINNOLOG(ALWAYS).Stream()->printf("fix dtoa deadlock in (s)printf for mingw64 %f %f", 1.0f, 1.0);
