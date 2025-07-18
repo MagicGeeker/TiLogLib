@@ -231,7 +231,7 @@ static std::string LatDump(lat_t& lat)
 	s += "\ncost " + std::to_string(100.0 * (lat.log_avg + lat.user_avg) / lat.user_avg) + '%';
 	s += "\n>65535 cnt:" + std::to_string(lat.log_his[0]) + " freq:" + std::to_string(lat.log_his[0] * 1.0 / lat.log_lat_num) + "\n";
 
-	std::deque<double> d = { 10, 20, 50, 75, 90, 99, 99.9, 99.99 };
+	std::deque<double> d = { 5,10, 20, 35,50, 75, 90, 99, 99.9, 99.99 };
 	for (size_t i = 1; i < UINT16_MAX; ++i)
 	{
 		num += lat.log_his[i];

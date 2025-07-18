@@ -2860,7 +2860,7 @@ namespace tilogspace
 			logs.reserve(reserveSize);
 
 
-#if TILOG_USE_USER_MODE_CLOCK && TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_SORT
+#if (TILOG_USE_USER_MODE_CLOCK && TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_SORT) || TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_MICROSECOND
 			const TiLogTime& show_time = bean.ext.time();
 #else
 			TiLogTime show_time = bean.ext.time();

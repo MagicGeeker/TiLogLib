@@ -685,22 +685,6 @@ namespace tilogspace
 
 
 // clang-format off
-#define TILOG_SINGLE_INSTANCE_DECLARE_OUTER(CLASS_NAME) CLASS_NAME* CLASS_NAME::s_instance;
-#define TILOG_SINGLE_INSTANCE_DECLARE(CLASS_NAME, ...)                                                                                     \
-	inline static CLASS_NAME* getInstance() { return CLASS_NAME::s_instance; };                                                            \
-	inline static CLASS_NAME& getRInstance() { return *CLASS_NAME::s_instance; };                                                          \
-	static inline void init()                                                                                                              \
-	{                                                                                                                                      \
-		DEBUG_ASSERT(CLASS_NAME::s_instance == nullptr); /*must be called only once*/                                                      \
-		CLASS_NAME::s_instance = new CLASS_NAME(__VA_ARGS__);                                                                              \
-	}                                                                                                                                      \
-	static inline void uninit()                                                                                                            \
-	{                                                                                                                                      \
-		DEBUG_ASSERT(CLASS_NAME::s_instance != nullptr);                                                                                   \
-		delete CLASS_NAME::s_instance;                                                                                                     \
-	}                                                                                                                                      \
-	static CLASS_NAME* s_instance;
-
 #define TILOG_CONCAT(a, b) TILOG_CONCAT_INNER(a, b)
 #define TILOG_CONCAT_INNER(a, b) a##b
 #define TILOG_SINGLE_INSTANCE_UNIQUE_NAME TILOG_CONCAT(s_instance, __LINE__)
@@ -2992,19 +2976,18 @@ namespace tilogspace
 		void TiLogStreamHelper::tiny_format_append_tuple(
 			TiLogStream& outs, const tiny_meta_pack_basic& pack, TiLogStringView fmt, std::tuple<Args...>&& args)
 		{
-			size_t pos = 0, i = 0, j = 0;
+			if (pack.size() > sizeof...(Args))
+			{
+				outs.append(TILOG_ERROR_FORMAT_STRING "Too much {}\n");
+				outs.resetLogLevel(ELevel::ERROR);
+				return;
+			}
+			size_t pos = 0, i = 0;
 			for (; i < pack.size(); i++)
 			{
 				auto& brace_pos = pack[i];
 				if (pos < brace_pos) { outs.append(fmt.begin() + pos, brace_pos - pos); }
-				if (j >= sizeof...(Args))
-				{
-					outs.append(TILOG_ERROR_FORMAT_STRING "Too much {}\n");
-					outs.resetLogLevel(ELevel::ERROR);
-					return;
-				}
-				for_index(j, args, Functor(), outs);
-				j++;
+				for_index(i, args, Functor(), outs);
 				pos = brace_pos + 2;
 			}
 			if (pos < fmt.size()) { outs.append(fmt.begin() + pos, fmt.size() - pos); }
