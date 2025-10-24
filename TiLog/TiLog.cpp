@@ -2393,6 +2393,9 @@ namespace tilogspace
 			
 			// bean's spinMtx protect both qCache and vec
 			VecLogCache& vec = mMerge.mRawDatas.get_for_append(bean.tid);
+			auto final_tp = vec.empty() ? 0 : vec.back()->ext.time().toSteadyFlag();
+			auto first_tp = bean.qCache.empty() ? 0 : bean.qCache.front();
+			DEBUG_PRINTD("qCache {} mv to vec {} final tp {}, first tp {}", &bean.qCache, &vec, final_tp, first_tp);
 			CrcQueueLogCache::append_to_vector(vec, bean.qCache);
 			DEBUG_RUN(CheckVecLogCacheOrdered(vec));
 			bean.qCache.clear();
@@ -2615,11 +2618,13 @@ namespace tilogspace
 				auto ptid = threadStru.tid;
 				DEBUG_ASSERT(ptid != nullptr);
 				const char* tid = ptid->c_str();
-				DEBUG_PRINTD("MergeThreadStruQueueToSet ptid {} , tid {} , qCachePreSize= {}\n", ptid, tid, qCachePreSize);
+				DEBUG_PRINTD(
+					" ptid {} , tid {} , qCache {} qCachePreSize= {} first tp {}\n", ptid, tid, &qCache, qCachePreSize,
+					qCachePreSize == 0 ? 0 : qCache.front()->ext.time().toSteadyFlag());
 
 				VecLogCache& v = mMerge.mRawDatas.get(ptid);
 				size_t vsizepre = v.size();
-				DEBUG_PRINTD("v {} size pre: {}\n", &v, vsizepre);
+				DEBUG_PRINTD("v {} size pre: {} final tp {}\n", &v, vsizepre, vsizepre == 0 ? 0 : v.back()->ext.time().toSteadyFlag());
 
 				auto it_greater_than_bean = CrcQueueLogCache::iterator();
 
@@ -2658,7 +2663,7 @@ namespace tilogspace
 					auto first_log = v.front();
 					auto final_log = v.back();
 					TIINNOLOG(DEBUG).Stream()->printf(
-						"ptid {}, tid {}, first log [%.30s], final log [%.30s]", ptid, tid, first_log->buf(), final_log->buf());
+						"ptid %p, tid %s, first log [%.30s], final log [%.30s]", ptid, tid, first_log->buf(), final_log->buf());
 				}
 				mMerge.mMergeLogVecVec[mMerge.mMergeLogVecVec.mIndex++].swap(v);
 			}
