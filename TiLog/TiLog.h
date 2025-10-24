@@ -2105,7 +2105,14 @@ namespace tilogspace
 					if_constexpr(TILOG_TIMESTAMP_SHOW <= TILOG_TIMESTAMP_MICROSECOND) { update_tp(); }
 					else
 					{
-						cv.notify_one();	// notify may lost, but ignore
+#ifdef TILOG_OS_POSIX
+// linux... use internal thread to update_tp
+#elif defined(TILOG_OS_WIN)
+						// Windows time period 16ms, must update
+						update_tp();
+#else
+						update_tp();
+#endif
 					}
 				}
 				TILOG_FORCEINLINE static TimePoint now() noexcept { return getRInstance().s_now.load(std::memory_order_acquire); };
