@@ -52,13 +52,14 @@
 #define TILOG_STRING_LEN_OF_CHAR_ARRAY(char_str) ((sizeof(char_str) - 1) / sizeof(char_str[0]))
 #define TILOG_STRING_AND_LEN(char_str) char_str, ((sizeof(char_str) - 1) / sizeof(char_str[0]))
 
-#define TILOG_CTIME_MAX_LEN 32
-
-
 #if TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_MICROSECOND
-#define TILOG_PREFIX_LOG_SIZE (32)		 // reserve for prefix static c-strings;
+#define TILOG_PREFIX_LOG_SIZE (32)		// reserve for prefix static c-strings;
+#define TILOG_CTIME_MAX_LEN (1 + 26)	// 2022-06-06 19:25:10.763001
+
 #elif TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_MILLISECOND
-#define TILOG_PREFIX_LOG_SIZE (32)		 // reserve for prefix static c-strings;
+#define TILOG_PREFIX_LOG_SIZE (32)		// reserve for prefix static c-strings;
+#define TILOG_CTIME_MAX_LEN (1 + 24)	// 2022-06-06  19:25:10.763
+
 #endif
 
 #define TILOG_RESERVE_LEN_L1 (TILOG_PREFIX_LOG_SIZE)	 // reserve for prefix static c-strings and other;
@@ -254,7 +255,14 @@ namespace tiloghelperspace
 	static size_t TimePointToTimeCStr(char* dst, SystemTimePoint nowTime)
 	{
 		time_t t = std::chrono::system_clock::to_time_t(nowTime);
-		struct tm* tmd = localtime(&t);
+		struct tm tm, *tmd = &tm;
+#ifdef TILOG_OS_WIN
+		localtime_s(tmd, &t);
+#elif defined(TILOG_OS_POSIX)
+		localtime_r(&t, tmd);
+#else
+#error "not impl"
+#endif
 		do
 		{
 			if (tmd == nullptr) { break; }
