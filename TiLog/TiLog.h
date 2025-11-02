@@ -206,9 +206,9 @@ namespace tilogspace
 		INVALID_0,
 		INVALID_1,
 		INVALID_2,
-		GLOBAL_CLOSED = 2,			//only used in TiLog::SetLogLevel()
+		GLOBAL_CLOSED = 2,			//only used in TiLogSubSystem::SetLogLevel()
 		ALWAYS, FATAL, ERROR, WARN, INFO, DEBUG, VERBOSE,
-		GLOBAL_OPEN = VERBOSE,
+		GLOBAL_OPEN = VERBOSE,		//only used in TiLogSubSystem::SetLogLevel()
 
 		MIN = ALWAYS,
 		MAX = VERBOSE + 1,
@@ -646,6 +646,11 @@ namespace tilogspace
 		return dest;
 	}
 }	 // namespace tilogspace
+#elif TILOG_ENABLE_SSE_4_1
+namespace tilogspace
+{
+	inline void* avx256_memcpy_aa(void* dest, const void* src, size_t size) { return sse128_memcpy_aa(dest, src, size); }
+}	 // namespace tilogspace
 #else
 namespace tilogspace
 {
@@ -655,6 +660,7 @@ namespace tilogspace
 
 namespace tilogspace
 {
+	// src dest MUST BE aligned to 256bit(32 byte)
 	inline void* adapt_memcpy(void* dest, const void* src, size_t size) { 
 		#if TILOG_ENABLE_AVX
 		return avx256_memcpy_aa(dest, src, size);
@@ -884,11 +890,11 @@ namespace tilogspace
 			return p;
 		}
 
-		void resize(size_t sz = UINT32_MAX)
+		void resize(size_t sz = SIZE_MAX)
 		{
 			synchronized(mtx)
 			{
-				if (sz == UINT32_MAX) { sz = size / 2; }
+				if (sz == SIZE_MAX) { sz = size / 2; }
 				if (sz >= pool.size()) { break; }
 				for (auto i = sz; i < pool.size(); i++)
 				{
@@ -1324,7 +1330,7 @@ namespace tilogspace
 			alignas(TILOG_CACHE_LINE_SIZE) std::atomic<ssize_t> plist_cnt{};
 			constexpr static ssize_t max_plist_cnt{ (ssize_t)TILOG_STREAM_MEMPOOLIST_MAX_NUM };
 
-			inline bool may_full() { return plist_cnt >= max_plist_cnt; }
+			inline bool may_full() { return plist_cnt.load(std::memory_order_relaxed) >= max_plist_cnt; }
 
 			inline linear_mem_pool_list* get_linear_mem_pool_list()
 			{
@@ -1394,7 +1400,7 @@ namespace tilogspace
 
 			// return a random iterator xmalloc from pool
 			template <typename it_t>
-			static it_t xfree_from_std(it_t bg, it_t ed)	//[bg,ed) must in same linear_mem_pool_list
+			static it_t xfree_to_std(it_t bg, it_t ed)	//[bg,ed) must in same linear_mem_pool_list
 			{
 				DEBUG_DECLARE(size_t total_cnt = ed - bg);
 				if (bg == ed) { return ed; }
@@ -1478,7 +1484,8 @@ namespace tilogspace
 		using positive_size_t = size_t;
 #endif
 
-		using EPlaceHolder = decltype(std::placeholders::_1);
+		using ENOTINIT = decltype(std::placeholders::_1);
+		using EPlaceHolder = decltype(std::placeholders::_2);
 
 
 
@@ -1814,8 +1821,8 @@ namespace tilogspace
 
 			explicit inline TiLogStringExtend() { create(); }
 
-			// init a invalid string,only use internally
-			explicit inline TiLogStringExtend(EPlaceHolder) noexcept {};
+			// init a invalid string(not init),only use internally
+			explicit inline TiLogStringExtend(ENOTINIT) noexcept {};
 
 			// init with capacity n
 			inline TiLogStringExtend(EPlaceHolder, positive_size_type n) { create(n); }
@@ -1966,18 +1973,18 @@ namespace tilogspace
 			constexpr static size_type DEFAULT_CAPACITY = 32;
 		};
 #undef thiz
-		
+
 	}	 // namespace internal
 
 	constexpr char LOG_PREFIX[] = "???AFEWIDV????";	   // begin ??? ,and end ???? is invalid
+	constexpr size_t LOG_LEVELS_STRING_LEN = 8;
+
 #define sc8l(s) internal::string_concat(internal::string_literal(s), internal::string_literal(""))
-	constexpr const internal::static_string<8, internal::CONCAT> LOG_LEVELS[] = {
+	constexpr const internal::static_string<LOG_LEVELS_STRING_LEN, internal::CONCAT> LOG_LEVELS[] = {
 		sc8l("????????"), sc8l("????????"), sc8l("????????"), sc8l("ALWAYS  "), sc8l("FATAL   "), sc8l("ERROR   "), sc8l("WARNING "),
 		sc8l("INFO    "), sc8l("DEBUG   "), sc8l("VERBOSE "), sc8l("????????"), sc8l("????????"), sc8l("????????"), sc8l("????????")
 	};
 #undef sc8l
-
-	constexpr size_t LOG_LEVELS_STRING_LEN = 8;
 	constexpr auto* SOURCE_LOCATION_PREFIX = LOG_LEVELS;
 }	 // namespace tilogspace
 
@@ -2523,6 +2530,7 @@ namespace tilogspace
 		friend struct internal::TiLogNiftyCounterIniter;
 
 	public:
+		// get TiLogSubSystem by sub_sys_t ,except for TILOG_SUB_SYSTEM_INTERNAL
 		static TiLogSubSystem& GetSubSystemRef(sub_sys_t subsys);
 
 		TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_FUNC_IMPL(TiLog, tilogbuf)
@@ -2616,7 +2624,7 @@ namespace tilogspace
 		using TiLogStringView = tilogspace::internal::TiLogStringView;
 		using TiLogStreamHelper = tilogspace::internal::TiLogStreamHelper;
 		using TiLogBean = tilogspace::internal::TiLogBean;
-		using EPlaceHolder = tilogspace::internal::EPlaceHolder;
+		using ENOTINIT = tilogspace::internal::ENOTINIT;
 		using ELogLevelFlag = tilogspace::internal::ELogLevelFlag;
 		using StringType::StringType;
 
@@ -2627,14 +2635,14 @@ namespace tilogspace
 
 	private:
 		// default constructor,make a invalid stream,is private for internal use
-		explicit inline TiLogStream() noexcept : StringType(EPlaceHolder{}) { pCore = nullptr; }
+		explicit inline TiLogStream() noexcept : StringType(ENOTINIT{}) { pCore = nullptr; }
 		// move constructor, after call, rhs will be a null stream and can NOT be used(any write operation to rhs will cause a segfault)
 		inline TiLogStream(TiLogStream&& rhs) noexcept { this->pCore = rhs.pCore, rhs.pCore = nullptr; }
 		inline TiLogStream& operator=(TiLogStream&& rhs) noexcept { return this->pCore = rhs.pCore, rhs.pCore = nullptr, *this; }
 
 	public:
 		// unique way to make a valid stream
-		inline TiLogStream(sub_sys_t subsys, const internal::static_str_t* source_location_p) : StringType(EPlaceHolder{})
+		inline TiLogStream(sub_sys_t subsys, const internal::static_str_t* source_location_p) : StringType(ENOTINIT{})
 		{
 			//force store ptr in pCore, then used in do_malloc
 			pCore = (Core*)mempoolspace::tilogstream_mempool::acquire_localthread_mempool(subsys);
@@ -2851,7 +2859,7 @@ namespace tilogspace
 		}
 
 	private:
-		// force overwrite super destructor,do nothing
+		// dtor has been hacked, force overwrite super destructor, do nothing
 		inline void do_destructor() {}
 
 		inline void* do_malloc(const size_type mem_size)
@@ -2865,7 +2873,7 @@ namespace tilogspace
 			auto* plist = mempoolspace::tilogstream_mempool::acquire_localthread_mempool(pCore->ext.subsys);
 			return mempoolspace::tilogstream_mempool::xreallocal(plist, pcore, mem_size);
 		}
-		inline void do_free();	  // DO NOT implement forerer(dtor has been hacked)
+		inline void do_free() = delete;	   // DO NOT implement forever(dtor has been hacked)
 	};
 	inline void swap(TiLogStream& lhs, TiLogStream& rhs) noexcept { lhs.swap(rhs); }
 #undef TILOG_INTERNAL_STRING_TYPE
@@ -3112,6 +3120,7 @@ namespace tilogspace
 
 	}	 // namespace internal
 
+	// similar to TiLogStream, but support move ctor/move assign
 	class TiLogStreamEx
 	{
 	public:

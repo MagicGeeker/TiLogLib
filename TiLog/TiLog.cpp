@@ -555,14 +555,6 @@ namespace tilogspace
 
 			inline void clear() { resetsize(0); }
 
-		public:
-			template <typename T>
-			inline TiLogString& operator+=(T&& val)
-			{
-				return append(std::forward<T>(val));
-			}
-			friend std::ostream& operator<<(std::ostream& os, const TiLogString& internal);
-
 		protected:
 			template <typename... Args>
 			inline TiLogString& append_s(const size_t new_size, Args&&... args)
@@ -655,23 +647,6 @@ namespace tilogspace
 			char* m_end;	  // the next of the last char of c-style str,
 			char* m_cap;	  // the next of buf end,also the position of '\0'
 		};
-
-		inline std::ostream& operator<<(std::ostream& os, const TiLogString& internal) { return os << internal.c_str(); }
-
-		inline String operator+(const String& lhs, const TiLogString& rhs) { return String(lhs + rhs.c_str()); }
-
-		template <typename T, typename = typename std::enable_if<std::is_arithmetic<T>::value, void>::type>
-		inline TiLogString operator+(TiLogString&& lhs, T rhs)
-		{
-			return std::move(lhs += rhs);
-		}
-
-		inline TiLogString operator+(TiLogString&& lhs, TiLogString& rhs) { return std::move(lhs += rhs); }
-
-		inline TiLogString operator+(TiLogString&& lhs, TiLogString&& rhs) { return std::move(lhs += rhs); }
-
-		inline TiLogString operator+(TiLogString&& lhs, const char* rhs) { return std::move(lhs += rhs); }
-
 
 	}	 // namespace internal
 
@@ -847,7 +822,7 @@ namespace tilogspace
 
 			T* pMem;
 			size_t len;
-			size_t hindex;
+			size_t hindex;	  // head element index
 		};
 
 #endif
@@ -2344,7 +2319,7 @@ namespace tilogspace
 					for (auto& vit : mGC.mTOGC)
 					{
 						if (vit.empty()) { continue; }
-						auto it_from_pool = mempoolspace::tilogstream_mempool::xfree_from_std(vit.begin(), vit.end());
+						auto it_from_pool = mempoolspace::tilogstream_mempool::xfree_to_std(vit.begin(), vit.end());
 						if (it_from_pool != vit.end())
 						{
 							TiLogCore* min_seq_core;
@@ -2491,7 +2466,7 @@ namespace tilogspace
 			mTiLogPrinterManager->fsync();	   // make sure printers output all logs and free to SyncedIOBeanPool
 			DEBUG_PRINTI(
 				"engine {} subsys {} tilogcore {} handledUserThreadCnt {} diedUserThreadCnt {}\n", this->mTiLogEngine,
-				this->mTiLogEngine->subsys, this, mThreadStruQueue.handledUserThreadCnt, mThreadStruQueue.diedUserThreadCnt);
+				(uint32_t)this->mTiLogEngine->subsys, this, mThreadStruQueue.handledUserThreadCnt, mThreadStruQueue.diedUserThreadCnt);
 			DEBUG_PRINTI("TiLogCore {} exit\n", this);
 			this->mMagicNumber = MAGIC_NUMBER_DEAD;
 		}
@@ -3121,7 +3096,7 @@ namespace tilogspace
 						}
 						core->mCV.notify_one();
 					}
-					DEBUG_PRINTA("creae inno log for trim mem");
+					DEBUG_PRINTA("create inno log for trim mem");
 				}
 				nowTime = SteadyClock::now();
 				if (nowTime > lastSyncTime + std::chrono::milliseconds(TILOG_SYNC_MAX_INTERVAL_MS))
@@ -3387,7 +3362,7 @@ namespace tilogspace
 					}
 					if (!to_free.empty())
 					{
-						auto it_from_pool = mempoolspace::tilogstream_mempool::xfree_from_std(to_free.begin(), to_free.end());
+						auto it_from_pool = mempoolspace::tilogstream_mempool::xfree_to_std(to_free.begin(), to_free.end());
 						if (it_from_pool != to_free.end()) { mempoolspace::tilogstream_mempool::xfree(*it_from_pool); }
 					}
 					to_free.clear();
@@ -3585,7 +3560,7 @@ namespace tilogspace
 		gv_infos.emplace(ti_iostream_mtx_t::getInstance(), "ti_iostream_mtx_t");
 		for (auto it = gv_infos.begin(), itp = gv_infos.begin(); it != gv_infos.end(); itp = it, ++it)
 		{
-			DEBUG_PRINTA("{} {} ptr diff{}", it->first, it->second.c_str(), (intptr_t)it->first - (intptr_t)itp->first);
+			DEBUG_PRINTA("addr:{} {} ptr diff{}", it->first, it->second.c_str(), (intptr_t)it->first - (intptr_t)itp->first);
 		}
 	}
 
@@ -3625,7 +3600,7 @@ namespace tilogspace
 		TiLogInnerLogMgr::uninit();
 		UnInitClocks();
 		TICLOG << "~TiLog " << &TiLog::getRInstance() << " TiLogEngines " << TiLogEngines::getInstance() << " in thrd "
-			   << std::this_thread::get_id() << '\n';
+			   << GetNewThreadIDString() << '\n';
 	}
 
 	TiLog::TiLog() { TiLogEngines::init(); }
