@@ -1833,18 +1833,18 @@ namespace tilogspace
 		{
 			LARGE_INTEGER li;
 			li.QuadPart = static_cast<LONGLONG>(size);
-			bool ok = !SetFilePointerEx(fd, li, NULL, FILE_BEGIN);
+			bool ok = !!SetFilePointerEx(fd, li, NULL, FILE_BEGIN);
 			return ok ? 0 : GetLastError();
 		}
 		inline static int func_trunc(HANDLE fd, size_t size, bool inc = false)
 		{
 			DWORD ret = func_moveptr(fd, size);
 			if (ret != 0) { return ret; }
-			bool ok = !SetEndOfFile(fd);
+			bool ok = !!SetEndOfFile(fd);
 			if (!ok) { return GetLastError(); }
 			if (inc)
 			{
-				ok = !SetFileValidData(fd, static_cast<LONGLONG>(size));
+				ok = !!SetFileValidData(fd, static_cast<LONGLONG>(size));
 				return ok ? 0 : GetLastError();
 			}
 			return 0;
