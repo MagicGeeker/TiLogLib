@@ -257,8 +257,8 @@ namespace tilogspace
 
 	// user thread suspend and notify merge thread if merge rawdata size >= it.
 	// Set it smaller may make log latency lower but too small may make bandwidth even worse
-	constexpr static double TILOG_MERGE_RAWDATA_FULL_RATE = 1.2;   // [0.5,2.5]
-	constexpr static double TILOG_MERGE_RAWDATA_ONE_PROCESSER_FULL_RATE = 1.0;  //[0,2]
+	constexpr static double TILOG_MERGE_RAWDATA_FULL_RATE = 0.35;   // [0.2,2.5]
+	constexpr static double TILOG_MERGE_RAWDATA_ONE_PROCESSER_FULL_RATE = 0.1;  //[0,2]
 
 	constexpr static uint32_t TILOG_DISK_SECTOR_SIZE= 4096;   // %32==0 && %512=0
 	constexpr static size_t TILOG_FILE_BUFFER= (2U << 20U);	//  must be an integer multiple of TILOG_DISK_SECTOR_SIZE
@@ -3229,7 +3229,7 @@ namespace tilogspace
 	static_assert(TILOG_STREAM_MEMPOOL_TRIM_MS > 0, "fatal err!");
 	static_assert(TILOG_STREAM_MEMPOOL_TRY_GET_CYCLE > 1, "fatal err!");
 
-	static_assert(TILOG_MERGE_RAWDATA_FULL_RATE >= 0.5 && TILOG_MERGE_RAWDATA_FULL_RATE <= 2.5, "error range");
+	static_assert(TILOG_MERGE_RAWDATA_FULL_RATE >= 0.2 && TILOG_MERGE_RAWDATA_FULL_RATE <= 2.5, "error range");
 	static_assert(TILOG_MERGE_RAWDATA_ONE_PROCESSER_FULL_RATE >= 0 && TILOG_MERGE_RAWDATA_ONE_PROCESSER_FULL_RATE <= 2, "error range");
 
 	static_assert(TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE > 0, "fatal err!");

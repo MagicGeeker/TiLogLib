@@ -1114,10 +1114,10 @@ namespace tilogspace
 			using super = TiLogConcurrentHashMap<const String*, VecLogCache, MergeRawDatasHashMapFeat>;
 			inline void set_alive_thread_num(uint32_t num) { mAliveThreads = num; }
 			inline size_t may_size() const { return mSize; }
-			inline bool may_full() const { return mSize >= 1 + TILOG_MERGE_RAWDATA_FULL_RATE * mAliveThreads; }
+			inline bool may_full() const { return mSize >= 1 + TILOG_DAEMON_PROCESSER_NUM * TILOG_MERGE_RAWDATA_FULL_RATE * mAliveThreads; }
 			inline bool may_nearlly_full() const
 			{
-				return mSize >= 1 + mAliveThreads / TILOG_DAEMON_PROCESSER_NUM * TILOG_MERGE_RAWDATA_ONE_PROCESSER_FULL_RATE;
+				return mSize >= 1 + mAliveThreads * TILOG_DAEMON_PROCESSER_NUM * TILOG_MERGE_RAWDATA_ONE_PROCESSER_FULL_RATE;
 			}
 			inline void clear() { mSize = 0; }
 			inline VecLogCache& get_for_append(const String* key)
