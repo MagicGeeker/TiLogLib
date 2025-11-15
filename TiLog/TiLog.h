@@ -137,7 +137,6 @@
 
 /**************************************************MACRO FOR USER**************************************************/
 #define TILOG_TIME_IMPL_TYPE TILOG_INTERNAL_STD_STEADY_CLOCK //choose what clock to use
-#define TILOG_USE_USER_MODE_CLOCK  TRUE  // TRUE or FALSE,if true use user mode clock,otherwise use kernel mode clock
 #define TILOG_TIMESTAMP_SORT (TILOG_TIMESTAMP_MICROSECOND/4)
 #define TILOG_TIMESTAMP_SHOW TILOG_TIMESTAMP_MICROSECOND
 
@@ -350,6 +349,12 @@ namespace tilogspace
 
 
 /**************************************************tilogspace codes**************************************************/
+#if defined(TILOG_OS_POSIX)
+#define TILOG_USE_USER_MODE_CLOCK (TILOG_TIMESTAMP_SHOW >= 10 * TILOG_TIMESTAMP_MICROSECOND)
+#else
+// Windows time period 16ms //or other system
+#define TILOG_USE_USER_MODE_CLOCK (TILOG_TIMESTAMP_SHOW >= 32 * TILOG_TIMESTAMP_MILLISECOND)
+#endif
 
 #define TILOG_COMPLEXITY_FOR_THIS_FUNCTION(N1, N2)
 #define TILOG_COMPLEXITY_FOR_THESE_FUNCTIONS(N1, N2)
@@ -2109,18 +2114,9 @@ namespace tilogspace
 				}
 				void update()
 				{
-					if_constexpr(TILOG_TIMESTAMP_SHOW <= TILOG_TIMESTAMP_MICROSECOND) { update_tp(); }
-					else
-					{
-#ifdef TILOG_OS_POSIX
-// linux... use internal thread to update_tp
-#elif defined(TILOG_OS_WIN)
-						// Windows time period 16ms, must update
-						update_tp();
-#else
-						update_tp();
+#if TILOG_USE_USER_MODE_CLOCK
+					update_tp();
 #endif
-					}
 				}
 				TILOG_FORCEINLINE static TimePoint now() noexcept { return getRInstance().s_now.load(std::memory_order_acquire); };
 				TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_FUNC_IMPL(UserModeClockT<Clock>, instance)
