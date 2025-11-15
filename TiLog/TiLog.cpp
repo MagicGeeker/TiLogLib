@@ -1858,6 +1858,7 @@ namespace tilogspace
 			WriteFile(fd, TILOG_TITLE, sizeof(TILOG_TITLE), &written, NULL);
 			CloseHandle(fd);
 			fd = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_FLAG_NO_BUFFERING, 0);
+			if (fd == nullfd) { fd = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, 0); }
 			func_trunc(fd, TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE, true);
 			func_moveptr(fd, 0);
 			return fd;
@@ -1876,6 +1877,7 @@ namespace tilogspace
 		{
 			int fd = nullfd;
 			fd = ::open(path, O_WRONLY | O_CREAT | O_DIRECT, 0644);
+			if (fg == nullfd) { fd = ::open(path, O_WRONLY | O_CREAT, 0644); }
 			// posix_fallocate(fd, 0, TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE);
 			func_trunc(fd, TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE);
 			return fd;
@@ -1885,7 +1887,13 @@ namespace tilogspace
 		inline static int64_t func_write(int fd, TiLogStringView buf) { return ::write(fd, buf.data(), buf.size()); }
 #else
 		inline static int func_trunc(int fd, size_t size, bool inc = false) { return 0; }
-		inline static FILE* func_open(const char* path) { return fopen(path, "w"); }
+		inline static FILE* func_open(const char* path)
+		{
+
+			FILE* fp = fopen(path, "w");
+			setbuf(fp, nullptr);
+			return fp;
+		}
 		inline static void func_close(FILE* fd) { fclose(fd); }
 		inline static void func_sync(FILE* fd) { fflush(fd); }
 		inline static int64_t func_write(FILE* fd, TiLogStringView buf) { return (int64_t)fwrite(buf.data(), buf.size(), 1, fd); }
