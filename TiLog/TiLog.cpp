@@ -1112,23 +1112,29 @@ namespace tilogspace
 		struct MergeRawDatas : public TiLogObject, public TiLogConcurrentHashMap<const String*, VecLogCache, MergeRawDatasHashMapFeat>
 		{
 			using super = TiLogConcurrentHashMap<const String*, VecLogCache, MergeRawDatasHashMapFeat>;
-			inline void set_alive_thread_num(uint32_t num) { mAliveThreads = num; }
-			inline size_t may_size() const { return mSize; }
-			inline bool may_full() const { return mSize >= 1 + TILOG_DAEMON_PROCESSER_NUM * TILOG_MERGE_RAWDATA_FULL_RATE * mAliveThreads; }
-			inline bool may_nearlly_full() const
+			inline void set_alive_thread_num(uint32_t num)
 			{
-				return mSize >= 1 + mAliveThreads * TILOG_DAEMON_PROCESSER_NUM * TILOG_MERGE_RAWDATA_ONE_PROCESSER_FULL_RATE;
+				mAliveThreads = num;
+				mMayFullLimit = 1 + TILOG_DAEMON_PROCESSER_NUM * TILOG_MERGE_RAWDATA_FULL_RATE * mAliveThreads;
+				mMayNearlyFullLimit = 1 + mAliveThreads * TILOG_DAEMON_PROCESSER_NUM * TILOG_MERGE_RAWDATA_ONE_PROCESSER_FULL_RATE;
 			}
-			inline void clear() { mSize = 0; }
+			inline size_t may_size() const { return mSize.load(std::memory_order_relaxed); }
+			inline bool may_full() const { return mSize.load(std::memory_order_relaxed) >= mMayFullLimit; }
+			inline bool may_nearlly_full() const { return mSize.load(std::memory_order_relaxed) >= mMayNearlyFullLimit; }
+			inline void clear() { mSize.store(0, std::memory_order_relaxed); }
 			inline VecLogCache& get_for_append(const String* key)
 			{
-				++mSize;
+				mSize.fetch_add(1, std::memory_order_relaxed);
 				return super::get(key);
 			}
 
 		protected:
-			uint32_t mSize{ 0 };
+			// multi thread write
+			atomic_uint32_t mSize{ 0 };
 			uint32_t mAliveThreads{};
+			// one thread(poll thread) write and multi thread read with low freq, no need strict atomic
+			volatile uint32_t mMayFullLimit{};
+			volatile uint32_t mMayNearlyFullLimit{};
 		};
 
 		using VecVecLogCache = Vector<VecLogCache>;
@@ -1407,7 +1413,6 @@ namespace tilogspace
 
 			std::condition_variable_any mCvWait;
 			MiniSpinMutex mMtxWait;			   // wait thread complete mutex
-			uint32_t mMayWaitingThrds{ 0 };	   // dirty thread num waiting thrd
 
 			std::atomic<bool> mDoing{ false };	  // not accurate,no need own mMtx
 			bool mNeedWoking{};					  // protected by mMtx
@@ -1416,7 +1421,7 @@ namespace tilogspace
 
 			inline void MayNotifyThrd()
 			{
-				if (!mDoing) { mCV.notify_one(); }
+				if (!mDoing.load(std::memory_order_relaxed)) { mCV.notify_one(); }
 			}
 		};
 
@@ -2550,10 +2555,10 @@ namespace tilogspace
 				if (mMerge.mRawDatas.may_nearlly_full())
 				{
 					NotifyPoll();
-				} else if (mMerge.mRawDatas.may_full())
+				} 
+				while (mMerge.mRawDatas.may_full())
 				{
 					NotifyPoll();
-					GetPollLock();
 				}
 			}
 		}
@@ -2829,7 +2834,6 @@ namespace tilogspace
 		{
 			constexpr static uint32_t NANOS[8] = { 256, 128, 320, 192, 512, 384, 768, 64 };
 			std::unique_lock<std::mutex> lk(thrd.mMtx);
-			++thrd.mMayWaitingThrds;
 			for (uint32_t i = 0; thrd.IsBusy(); i = (1 + i) % 8)
 			{
 				lk.unlock();
@@ -2838,7 +2842,6 @@ namespace tilogspace
 				synchronized_u(lk_wait, thrd.mMtxWait) { thrd.mCvWait.wait_for(lk_wait, std::chrono::nanoseconds(NANOS[i])); }
 				lk.lock();
 			}
-			--thrd.mMayWaitingThrds;
 			return lk;
 		}
 		inline std::unique_lock<std::mutex> TiLogDaemon::GetPollLock() { return GetCoreThrdLock(mPoll); }
@@ -3084,10 +3087,7 @@ namespace tilogspace
 					synchronized(mScheduler) { ++mScheduler.mPollSeq; }
 					currCore->mCV.notify_one();
 					mMerge.mRawDatas.clear();
-					if (mPoll.mMayWaitingThrds)
-					{
-						mPoll.mCvWait.notify_all();
-					}
+					mPoll.mCvWait.notify_all();
 				}
 
 				nowTime = SteadyClock::now();
