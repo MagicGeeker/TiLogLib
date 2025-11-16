@@ -572,6 +572,44 @@ namespace tilogspace
 
 namespace tilogspace
 {
+	// src dst size MUST BE aligned to 32bit(4 byte), size>=4
+	inline void* bit32_memcpy_aaa(void* dst, const void* src, size_t size)
+	{
+		DEBUG_ASSERT(((uintptr_t)src) % 4 == 0);
+		DEBUG_ASSERT(((uintptr_t)dst) % 4 == 0);
+		DEBUG_ASSERT(size % 4 == 0);
+		uint32_t* dst_ptr = (uint32_t*)dst;
+		const uint32_t* src_ptr = (const uint32_t*)src;
+		const uint32_t* src_end = (const uint32_t*)((const char*)src + size);
+		size_t thunk_count = size / 4;
+
+		switch (thunk_count)
+		{
+		case 8:
+			*dst_ptr++ = *src_ptr++;
+		case 7:
+			*dst_ptr++ = *src_ptr++;
+		case 6:
+			*dst_ptr++ = *src_ptr++;
+		case 5:
+			*dst_ptr++ = *src_ptr++;
+		case 4:
+			*dst_ptr++ = *src_ptr++;
+		case 3:
+			*dst_ptr++ = *src_ptr++;
+		case 2:
+			*dst_ptr++ = *src_ptr++;
+		case 1:
+			*dst_ptr = *src_ptr;
+			return dst;
+		default:
+			return memcpy(dst, src, size);
+		}
+	}
+}	 // namespace tilogspace
+
+namespace tilogspace
+{
 	constexpr static uint32_t TILOG_AVX_ALIGN = 32;
 	constexpr static uint32_t TILOG_SSE4_ALIGN = 16;
 #if TILOG_ENABLE_AVX
