@@ -1487,7 +1487,9 @@ namespace tilogspace
 	{
 		class TiLogBean;
 
-		const String* GetThreadIDString();
+		class TiLogString;
+		using TidString = TiLogString;
+		const TidString* GetThreadIDString();
 
 		enum ELogLevelFlag : char
 		{
@@ -2354,7 +2356,7 @@ namespace tilogspace
 		public:
 			DEBUG_CANARY_UINT32(flag1)
 			TiLogTime tiLogTime;
-			const String* tid;
+			const TidString* tid;
 			const static_str_t* source_location_str;	// like {21,"ERROR a.cpp:102 foo()"}
 			sub_sys_t subsys;
 
@@ -2691,7 +2693,7 @@ namespace tilogspace
 			TiLogBean& bean = *ext();
 			bean.subsys = subsys;
 			bean.source_location_str = source_location_p;
-			const String* tidstr = tilogspace::internal::GetThreadIDString();
+			auto tidstr = tilogspace::internal::GetThreadIDString();
 			DEBUG_ASSERT(tidstr);
 			bean.tid = tidstr;
 		}

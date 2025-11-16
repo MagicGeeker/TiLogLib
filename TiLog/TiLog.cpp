@@ -398,40 +398,7 @@ namespace tilogspace
 	class TiLogStream;
 	using MiniSpinMutex = OptimisticMutex;
 
-	namespace internal
-	{
-		String GetNewThreadIDString()
-		{
-			StringStream os;
-#ifdef TILOG_OS_WIN
-			os << (std::this_thread::get_id());
-#else  // linux mac freebsd...
-			os << std::hex << (std::this_thread::get_id());
-#endif
-			String id = os.str();
-			if_constexpr(TILOG_THREAD_ID_MAX_LEN != SIZE_MAX)
-			{
-				if (id.size() > TILOG_THREAD_ID_MAX_LEN) { id.resize(TILOG_THREAD_ID_MAX_LEN); }
-			}
-			return id;
-		}
 
-		const String* GetThreadIDString()
-		{
-			thread_local static const String* s_tid = new String(String(" @") + GetNewThreadIDString() + " ");
-			return s_tid;
-		}
-
-		String GetStringByStdThreadID(std::thread::id val)
-		{
-			StringStream os;
-			os << val;
-			return os.str();
-		}
-
-		uint32_t IncTidStrRefCnt(const String* s);
-		uint32_t DecTidStrRefCnt(const String* s);
-	}	 // namespace internal
 
 	namespace internal
 	{
@@ -648,6 +615,41 @@ namespace tilogspace
 			char* m_cap;	  // the next of buf end,also the position of '\0'
 		};
 
+	}	 // namespace internal
+
+	namespace internal
+	{
+		String GetStringByStdThreadID(std::thread::id val)
+		{
+#ifdef TILOG_OS_WIN
+			auto flag = std::dec;
+#else	 // linux mac freebsd...
+			auto flag = std::hex;
+#endif
+			StringStream os;
+			os << flag << val;
+			String id = os.str();
+			if_constexpr(TILOG_THREAD_ID_MAX_LEN != SIZE_MAX)
+			{
+				if (id.size() > TILOG_THREAD_ID_MAX_LEN) { id.resize(TILOG_THREAD_ID_MAX_LEN); }
+			}
+			return id;
+		}
+
+
+		String GetNewThreadIDString()
+		{
+			return GetStringByStdThreadID(std::this_thread::get_id());
+		}
+
+		const TidString* GetThreadIDString()
+		{
+			thread_local static const TidString* s_tid = new TidString(TidString(" @").append(GetNewThreadIDString()).append(" "));
+			return s_tid;
+		}
+
+		uint32_t IncTidStrRefCnt(const TidString* s);
+		uint32_t DecTidStrRefCnt(const TidString* s);
 	}	 // namespace internal
 
 	namespace internal
@@ -1082,7 +1084,7 @@ namespace tilogspace
 			CrcQueueLogCache qCache;
 			ThreadLocalSpinMutex spinMtx;	 // protect cache
 
-			const String* tid;
+			const TidString* tid;
 
 			mempoolspace::linear_mem_pool_list* lmempoolist;
 			core_seq_t pollseq_when_thrd_dead = core_seq_t::SEQ_INVALID;
@@ -1103,15 +1105,15 @@ namespace tilogspace
 			sub_sys_t CurSubSys();
 		};
 
-		struct MergeRawDatasHashMapFeat : TiLogConcurrentHashMapDefaultFeat<const String*, VecLogCache>
+		struct MergeRawDatasHashMapFeat : TiLogConcurrentHashMapDefaultFeat<const TidString*, VecLogCache>
 		{
 			using mutex_type = OptimisticMutex;
 			constexpr static uint32_t CONCURRENT = TILOG_MAY_MAX_RUNNING_THREAD_NUM;
 		};
 		
-		struct MergeRawDatas : public TiLogObject, public TiLogConcurrentHashMap<const String*, VecLogCache, MergeRawDatasHashMapFeat>
+		struct MergeRawDatas : public TiLogObject, public TiLogConcurrentHashMap<const TidString*, VecLogCache, MergeRawDatasHashMapFeat>
 		{
-			using super = TiLogConcurrentHashMap<const String*, VecLogCache, MergeRawDatasHashMapFeat>;
+			using super = TiLogConcurrentHashMap<const TidString*, VecLogCache, MergeRawDatasHashMapFeat>;
 			inline void set_alive_thread_num(uint32_t num)
 			{
 				mAliveThreads = num;
@@ -1122,7 +1124,7 @@ namespace tilogspace
 			inline bool may_full() const { return mSize.load(std::memory_order_relaxed) >= mMayFullLimit; }
 			inline bool may_nearlly_full() const { return mSize.load(std::memory_order_relaxed) >= mMayNearlyFullLimit; }
 			inline void clear() { mSize.store(0, std::memory_order_relaxed); }
-			inline VecLogCache& get_for_append(const String* key)
+			inline VecLogCache& get_for_append(const TidString* key)
 			{
 				mSize.fetch_add(1, std::memory_order_relaxed);
 				return super::get(key);
@@ -1371,8 +1373,8 @@ namespace tilogspace
 			std::thread loopThread;
 			task_t initerFunc;
 			Deque<task_t> taskDeque;
-			String looptid;
-			String creator_tid;
+			TidString looptid;
+			TidString creator_tid;
 			TILOG_MUTEXABLE_CLASS_MACRO_WITH_CV(MutexType, mtx, CondType, cv)
 			enum
 			{
@@ -1766,7 +1768,7 @@ namespace tilogspace
 
 		struct TiLogEngines
 		{
-			struct ThreadIdStrRefCountFeat : TiLogConcurrentHashMapDefaultFeat<const String*, uint32_t>
+			struct ThreadIdStrRefCountFeat : TiLogConcurrentHashMapDefaultFeat<const TidString*, uint32_t>
 			{
 				constexpr static uint32_t CONCURRENT = TILOG_MAY_MAX_RUNNING_THREAD_NUM;
 			};
@@ -1780,11 +1782,11 @@ namespace tilogspace
 
 			// fix segment fault for mingw64/Windows when use TICLOG in TiLogEngines::TiLogEngines()
 			std::ios_base::Init init_cout;
-			const String* mainThrdId = GetThreadIDString();
+			const TidString* mainThrdId = GetThreadIDString();
 			int64_t tsc_freq{};
 			
 			TiLogMap_t tilogmap;
-			TiLogConcurrentHashMap<const String*, uint32_t, ThreadIdStrRefCountFeat> threadIdStrRefCount;
+			TiLogConcurrentHashMap<const TidString*, uint32_t, ThreadIdStrRefCountFeat> threadIdStrRefCount;
 
 			using engines_t = std::array<engine_t, TILOG_STATIC_SUB_SYS_SIZE>;
 			engines_t engines;
@@ -3563,9 +3565,9 @@ namespace tilogspace
 	{
 		TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_DECLARE_OUTER(TiLogEngines);
 
-		uint32_t IncTidStrRefCnt(const String* s) { return ++TiLogEngines::getRInstance().threadIdStrRefCount.get(s); }
+		uint32_t IncTidStrRefCnt(const TidString* s) { return ++TiLogEngines::getRInstance().threadIdStrRefCount.get(s); }
 
-		uint32_t DecTidStrRefCnt(const String* s)
+		uint32_t DecTidStrRefCnt(const TidString* s)
 		{
 			uint32_t cnt = --TiLogEngines::getRInstance().threadIdStrRefCount.get(s);
 			if (cnt == 0)
