@@ -1600,6 +1600,8 @@ namespace tilogspace
 			alignas(32) arr_t data;
 		};
 
+		constexpr static size_t TILOG_UNIT_ALIGN = 4;
+
 		enum EStaticStringTrait
 		{
 			LITERAL,
@@ -1639,7 +1641,7 @@ namespace tilogspace
 			constexpr size_t size() const { return str_size; }
 			constexpr const char& operator[](size_t i) const { return s[i]; }
 			size_t str_size = N;
-			char s[N + 1];
+			alignas(TILOG_UNIT_ALIGN) char s[N + 1];
 		};
 
 		template <size_t N>
@@ -3333,23 +3335,20 @@ namespace tilogspace
 			return tilog_func(func, tilog_funcr(func));
 		}
 
-		template <ELevel LV, size_t N, int T>
-		constexpr inline static_string<LOG_LEVELS_STRING_LEN + N, CONCAT> tiLog_level_source(const static_string<N, T>& src_loc)
+		template <ELevel LV, size_t N, int T, size_t ALIGN = round_up(N, TILOG_UNIT_ALIGN)>
+		constexpr inline static_string<LOG_LEVELS_STRING_LEN + ALIGN, CONCAT> tiLog_level_source(const static_string<N, T>& src_loc)
 		{
-			return string_concat(tilog_level<LV>(), src_loc);
+			return string_concat(string_concat(tilog_level<LV>(), src_loc), static_string<ALIGN - N, LITERAL>("    ", nullptr));
 		}
 
-		template <size_t N, int T>
-		constexpr inline std::array<static_string<LOG_LEVELS_STRING_LEN + N, CONCAT>, MAX>
+		template <size_t N, int T, size_t ALIGN = round_up(N, TILOG_UNIT_ALIGN)>
+		constexpr inline std::array<static_string<LOG_LEVELS_STRING_LEN + ALIGN, CONCAT>, MAX>
 		tiLog_level_sources(const static_string<N, T>& src_loc)
 		{
-			return std::array<static_string<LOG_LEVELS_STRING_LEN + N, CONCAT>, MAX>{
-				string_concat(tilog_level<INVALID_0>(), src_loc), string_concat(tilog_level<INVALID_1>(), src_loc),
-				string_concat(tilog_level<INVALID_2>(), src_loc), string_concat(tilog_level<ALWAYS>(), src_loc),
-				string_concat(tilog_level<FATAL>(), src_loc),	   string_concat(tilog_level<ERROR>(), src_loc),
-				string_concat(tilog_level<WARN>(), src_loc),	   string_concat(tilog_level<INFO>(), src_loc),
-				string_concat(tilog_level<DEBUG>(), src_loc),	   string_concat(tilog_level<VERBOSE>(), src_loc)
-			};
+			return { tiLog_level_source<INVALID_0>(src_loc), tiLog_level_source<INVALID_1>(src_loc), tiLog_level_source<INVALID_2>(src_loc),
+					 tiLog_level_source<ALWAYS>(src_loc),	 tiLog_level_source<FATAL>(src_loc),	 tiLog_level_source<ERROR>(src_loc),
+					 tiLog_level_source<WARN>(src_loc),		 tiLog_level_source<INFO>(src_loc),		 tiLog_level_source<DEBUG>(src_loc),
+					 tiLog_level_source<VERBOSE>(src_loc) };
 		}
 	}	 // namespace internal
 }	 // namespace tilogspace
