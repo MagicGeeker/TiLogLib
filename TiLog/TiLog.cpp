@@ -468,7 +468,7 @@ namespace tilogspace
 			inline const char& operator[](size_t index) const { return m_front[index]; }
 			inline char& operator[](size_t index) { return m_front[index]; }
 			inline const char* data() const { return m_front; }
-			inline const char* c_str() const { return nullptr == m_front ? "" : (check(), *(char*)m_end = '\0', m_front); }
+			inline const char* c_str() const { return check(), *(char*)m_end = '\0', m_front; }
 
 		protected:
 			inline size_t size_with_zero() const { return size() + sizeof(char); }
@@ -2938,7 +2938,7 @@ namespace tilogspace
 			if(is_long_log){
 				logs.writend(mDeliver.mlogprefix, sizeof(mDeliver.mlogprefix));
 				logs.writend(bean.ext.source_location_str->data(), source_location_size);
-				logs.writend(bean.ext.tid->c_str(), bean.ext.tid->size());
+				logs.writend(bean.ext.tid->data(), bean.ext.tid->size());
 				
 				sse128_memcpy_aa(logs.end(), logsv.data(), beanSVSize);
 				logs.inc_size_s(beanSVSize);
@@ -2947,7 +2947,7 @@ namespace tilogspace
 				logs.inc_size_s(sizeof(mDeliver.mlogprefix));
 				
 				logs.writend(bean.ext.source_location_str->data(), source_location_size);
-				logs.writend(bean.ext.tid->c_str(), bean.ext.tid->size());
+				logs.writend(bean.ext.tid->data(), bean.ext.tid->size());
 				logs.writend(logsv.data(), beanSVSize);			 //-----logsv.size()
 			}
 			

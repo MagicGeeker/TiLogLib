@@ -1906,7 +1906,7 @@ namespace tilogspace
 			inline const char& operator[](size_type index) const { return pFront()[index]; }
 			inline char& operator[](size_type index) { return pFront()[index]; }
 			inline const char* data() const { return pFront(); }
-			inline const char* c_str() const { return nullptr == pFront() ? "" : (check(), *(char*)pEnd() = '\0', pFront()); }
+			inline const char* c_str() const { return check(), *(char*)pEnd() = '\0', pFront(); }
 
 		public:
 			inline const ExtType* ext() const { return reinterpret_cast<const ExtType*>(pCore->ex); }
