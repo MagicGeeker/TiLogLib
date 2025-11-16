@@ -29,6 +29,8 @@ using namespace tilogspace;
 #define file_multi_thread_benchmark_test_with_format_____________________
 #define file_multi_thread_benchmark_test_with_tiny_format_____________________
 #define file_multi_thread_benchmark_test_with_tiny_global_format_____________________
+#define file_single_thread_long_string_benchmark_test_____________________
+#define file_multi_thread_long_string_benchmark_test_____________________
 #define file_single_thread_operator_test_____________________
 #define terminal_single_thread_long_string_log_test_____________________
 #define file_static_log_test_____________________
@@ -77,7 +79,16 @@ struct Student
 	std::string name{ "Jack" };
 };
 
-
+tilogspace::internal::TiLogStringView logstr[8] = {
+	" test long str",
+	" test long str test long str test long str",
+	" test long str test long str test long str test long str test long str",
+	" test long str test long str test long str test long str",
+	" test long str test long str test long str test long str test long str test long str test long str",
+	" test long str test long str",
+	" test long str test long str test long str test long str test long str test long str test long str test long str",
+	" ",
+};
 
 #if USE_COMPLEX_TEST == TEST_WAY
 
@@ -415,6 +426,54 @@ TEST_CASE("file_multi_thread_benchmark_test_with_tiny_global_format_____________
 			}
 		});
 }
+#endif
+
+
+#ifdef file_single_thread_long_string_benchmark_test_____________________
+
+TEST_CASE("file_single_thread_long_string_benchmark_test_____________________")
+{
+	struct testLoop_t : single_thread_test_loop_t
+	{
+		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return test_release ? testpow10(7) : testpow10(5); }
+		constexpr static bool PRINT_LOOP_TIME() { return true; }
+	};
+
+	
+
+	MultiThreadTest<testLoop_t>(
+		"file_single_thread_long_string_benchmark_test_____________________", tilogspace::EPrinterID::PRINTER_TILOG_FILE,
+		[&](int index) -> void {
+			for (uint64_t j = 0; j < testLoop_t::GET_SINGLE_THREAD_LOOPS(); j++)
+			{
+				TILOGE << "index= " << index << " j= " << j << logstr[j % 8];
+			}
+		});
+}
+
+#endif
+
+
+#ifdef file_multi_thread_long_string_benchmark_test_____________________
+
+TEST_CASE("file_multi_thread_long_string_benchmark_test_____________________")
+{
+	struct testLoop_t : multi_thread_test_loop_t
+	{
+		constexpr static int32_t THREADS() { return 6; }
+		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return test_release ? 2 * testpow10(7) : testpow10(5); }
+		constexpr static bool PRINT_LOOP_TIME() { return true; }
+	};
+
+	MultiThreadTest<testLoop_t>(
+		"file_multi_thread_long_string_benchmark_test_____________________", tilogspace::EPrinterID::PRINTER_TILOG_FILE, [](int index) {
+			for (uint64_t j = 0; j < testLoop_t::GET_SINGLE_THREAD_LOOPS(); j++)
+			{
+				TILOGE << "index= " << index << " j= " << j << logstr[j % 8];
+			}
+		});
+}
+
 #endif
 
 #ifdef file_multi_thread_close_print_benchmark_test_____________________

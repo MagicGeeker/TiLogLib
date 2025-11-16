@@ -1646,7 +1646,7 @@ namespace tilogspace
 		}
 
 #if __cplusplus >= 201703L
-		using TiLogStringView = std::string_view;
+		using TiLogStringView = StringView;
 #else
 		class TiLogStringView
 		{
@@ -2735,7 +2735,7 @@ namespace tilogspace
 		inline TiLogStream& operator<<(double val) { return append(val), *this; }
 		inline TiLogStream& operator<<(std::nullptr_t) { return append("nullptr", 7), *this; }
 		inline TiLogStream& operator<<(const String& s) { return append(s.data(), s.size()), *this; }
-		TILOG_CPP17_FEATURE(inline TiLogStream& operator<<(const StringView& s) { return append(s.data(), s.size()), *this; })
+		inline TiLogStream& operator<<(TiLogStringView s) { return append(s.data(), s.size()), *this; }
 
 		template <typename T, typename = typename std::enable_if<std::is_enum<T>::value && sizeof(T) == 1>::type>
 		inline TiLogStream& operator<<(T t)
