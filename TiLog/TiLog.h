@@ -120,6 +120,14 @@
 #define TILOG_NOINLINE
 #endif
 
+#if defined(_MSC_VER)
+    #define TILOG_ASSUME(cond) __assume(cond)
+#elif defined(__clang__) || defined(__GNUC__)
+    #define TILOG_ASSUME(cond) __builtin_assume(cond)
+#else
+    #define TILOG_ASSUME(cond) do { } while(0) // 空定义
+#endif
+
 #ifdef __GNUC__
 #ifdef __MINGW32__
 #define TILOG_COMPILER_MINGW
@@ -575,6 +583,43 @@ namespace tilogspace
 #include <smmintrin.h>	  // SSE4.1
 namespace tilogspace
 {
+	// dest MUST BE aligned to 128bit(16 byte)
+	inline void* sse128_memset_aa(void* dest, int ch, size_t size)
+	{
+		DEBUG_ASSERT(((uintptr_t)dest) % 16 == 0);
+		constexpr size_t chunk_size = 16 * 4;
+
+		__m128i* dest_end = (__m128i*)((char*)dest + (size / chunk_size * chunk_size));
+		__m128i* dest_ptr = (__m128i*)dest;
+
+		// 将字节值扩展到128位向量的每个字节
+		__m128i fill_value = _mm_set1_epi8(static_cast<char>(ch));
+
+		while (dest_ptr < dest_end)
+		{
+			_mm_store_si128(dest_ptr + 0, fill_value);
+			_mm_store_si128(dest_ptr + 1, fill_value);
+			_mm_store_si128(dest_ptr + 2, fill_value);
+			_mm_store_si128(dest_ptr + 3, fill_value);
+
+			dest_ptr += 4;
+		}
+
+		DEBUG_ASSERT(dest_ptr == dest_end);
+		size_t remaining = (char*)dest + size - (char*)dest_end;
+		if (remaining > 0) { memset(dest_ptr, ch, remaining); }
+		return dest;
+	}
+
+	TILOG_FORCEINLINE void* sse128_memcpy_aa_32B(void* dest, const void* src)
+	{
+		__m128i data0 = _mm_load_si128((__m128i*)src + 0);
+		__m128i data1 = _mm_load_si128((__m128i*)src + 1);
+		_mm_store_si128((__m128i*)dest + 0, data0);
+		_mm_store_si128((__m128i*)dest + 1, data1);
+		return dest;
+	}
+
 	// src dest MUST BE aligned to 128bit(16 byte)
 	inline void* sse128_memcpy_aa(void* dest, const void* src, size_t size)
 	{

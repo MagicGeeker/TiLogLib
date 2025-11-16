@@ -1170,6 +1170,7 @@ namespace tilogspace
 			void make_aligned_to_simd() { make_aligned(TILOG_SIMD_ALIGN); }
 			void make_aligned_to_sector() { make_aligned(TILOG_DISK_SECTOR_SIZE); }
 			using TiLogCoreString::TiLogCoreString;
+			using TiLogCoreString::inc_size_s;
 		};
 		void swap(IOBean& lhs, IOBean& rhs) noexcept
 		{
@@ -2846,6 +2847,7 @@ namespace tilogspace
 		}
 		inline std::unique_lock<std::mutex> TiLogDaemon::GetPollLock() { return GetCoreThrdLock(mPoll); }
 
+		constexpr static uint16_t TILOG_LONG_LOG_MIN_SIZE = 32;	   // long log(will add padding in log to speedup memcpy) min size
 		inline void AppendToMergeCacheByMetaData(DeliverStru& mDeliver, const TiLogCompactString& bean)
 		{
 			TiLogStringView logsv {bean.buf(),bean.size};
@@ -2853,7 +2855,22 @@ namespace tilogspace
 			auto preSize = logs.size();
 			auto source_location_size = bean.ext.source_location_str->size();
 			auto beanSVSize = logsv.size();
-			size_t L2 = (source_location_size + bean.ext.tid->size() + beanSVSize);
+			
+			size_t L2 = (source_location_size + bean.ext.tid->size());
+			size_t append_size0 = L2 + TILOG_RESERVE_LEN_L1;
+			char* ptr;
+			bool is_long_log = beanSVSize >= TILOG_LONG_LOG_MIN_SIZE;
+			if (is_long_log)
+			{
+				ptr = logs.end() + append_size0;	// make logsv aligned
+			} else
+			{
+				ptr = logs.end();	 // make mlogprefix aligned
+			}
+			char* aligned_ptr = (char*)round_up((uintptr_t)ptr, TILOG_SSE4_ALIGN);
+			size_t padding = (size_t)(aligned_ptr - ptr);	 // padding keep unchanged even if logs realloc when reserve
+			L2 += (padding + beanSVSize);
+
 			size_t append_size = L2 + TILOG_RESERVE_LEN_L1;
 			size_t reserveSize = preSize + append_size;
 			logs.reserve(reserveSize);
@@ -2913,18 +2930,33 @@ namespace tilogspace
 			mDeliver.mPreLogTimeUs = us_tp;
 #endif
 
-			logs.writend(mDeliver.mlogprefix, sizeof(mDeliver.mlogprefix));
-			logs.writend(bean.ext.source_location_str->data(), source_location_size);
-			logs.writend(bean.ext.tid->c_str(), bean.ext.tid->size());
-			logs.writend(logsv.data(), beanSVSize);			 //-----logsv.size()
-													   // clang-format off
-			// |----mlogprefix(32or24)----------|------------source_location----------------------------|--logsv(tid|usedata)-----|
+			TILOG_ASSUME(padding < TILOG_SSE4_ALIGN);
+			memset(logs.end(), ' ', padding);
+			logs.inc_size_s(padding);
+			if(is_long_log){
+				logs.writend(mDeliver.mlogprefix, sizeof(mDeliver.mlogprefix));
+				logs.writend(bean.ext.source_location_str->data(), source_location_size);
+				logs.writend(bean.ext.tid->c_str(), bean.ext.tid->size());
+				
+				sse128_memcpy_aa(logs.end(), logsv.data(), beanSVSize);
+				logs.inc_size_s(beanSVSize);
+			}else{
+				sse128_memcpy_aa_32B(logs.end(), mDeliver.mlogprefix);
+				logs.inc_size_s(sizeof(mDeliver.mlogprefix));
+				
+				logs.writend(bean.ext.source_location_str->data(), source_location_size);
+				logs.writend(bean.ext.tid->c_str(), bean.ext.tid->size());
+				logs.writend(logsv.data(), beanSVSize);			 //-----logsv.size()
+			}
+			
+			// clang-format off
+			// |---padding---mlogprefix(32)----|------------source_location----------------------------|--logsv(tid|usedata)-----|
 			// \n   [2024-04-21  15:52:25.886] #ERR D:\Codes\CMake\TiLogLib\Test\test.cpp:708 operator() @39344 nullptr
 			// \n   [2024-04-21  15:52:25.886] #
 			//                                  ERR D:\Codes\CMake\TiLogLib\Test\test.cpp:708 operator()
 			//                                                                                           @39344 nullptr
-			// static L1= sizeof(mDeliver.mlogprefix)(32or24)
-			// dynamic L2= source_location+ logsv.size()
+			// static L1 = sizeof(mDeliver.mlogprefix)(32)
+			// dynamic L2 = padding + source_location + tid + logsv.size()
 			// reserve preSize+L1+L2 bytes
 													   // clang-format on
 			DEBUG_DECLARE(auto newSize = logs.size();)
