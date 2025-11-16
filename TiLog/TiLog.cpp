@@ -644,7 +644,11 @@ namespace tilogspace
 
 		const TidString* GetThreadIDString()
 		{
-			thread_local static const TidString* s_tid = new TidString(TidString(" @").append(GetNewThreadIDString()).append(" "));
+			thread_local static const TidString* s_tid = [] {
+				auto str = new TidString(TidString(" @").append(GetNewThreadIDString()).append(" "));
+				str->append("    ", round_up_padding(str->size(), TILOG_UNIT_ALIGN));
+				return str;
+			}();
 			return s_tid;
 		}
 

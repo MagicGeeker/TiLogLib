@@ -455,6 +455,7 @@ namespace tilogspace
 	inline constexpr bool is_power_of_two(uint64_t num) { return num != 0 && (num & (num - 1)) == 0; }
 	inline constexpr size_t round_up(size_t size, size_t align) { return (size + align - 1) / align * align; }
 	inline constexpr size_t round_down(size_t size, size_t align) { return size / align * align; }
+	inline constexpr size_t round_up_padding(size_t size, size_t align) { return round_up(size, align) - size; }
 
 	struct TiLogCppMemoryManager
 	{
