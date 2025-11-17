@@ -1960,15 +1960,18 @@ namespace tilogspace
 		public:
 			inline void reserve(size_type capacity) { ensureCap(capacity), ensureZero(); }
 
-			// will set '\0' if increase
-			inline void resize(size_type sz)
+			// will set ch if increase
+			inline void resize(size_type sz, char ch)
 			{
 				size_t presize = size();
 				ensureCap(sz);
-				if (sz > presize) { memset(pFront() + presize, 0, sz - presize); }
+				if (sz > presize) { memset(pFront() + presize, ch, sz - presize); }
 				pCore->size = sz;
 				ensureZero();
 			}
+
+			// will set '\0' if increase
+			inline void resize(size_type sz) { resize(sz, '\0'); }
 
 			// force set size
 			inline void resetsize(size_type sz) { pCore->size = sz, ensureZero(); }
@@ -2743,6 +2746,7 @@ namespace tilogspace
 		{
 			DEBUG_ASSERT(pCore != nullptr);
 			DEBUG_RUN(TiLogBean::check(this->ext()));
+			aligned_to_unit_size();
 			TiLog::GetSubSystemRef(ext()->subsys).PushLog(this->pCore);
 		}
 
@@ -2887,6 +2891,24 @@ namespace tilogspace
 		}
 
 	protected:
+		inline void aligned_to_unit_size()
+		{
+			size_t presize = size();
+			size_t sz = round_up(presize, internal::TILOG_UNIT_ALIGN);
+			ensureCap(sz);
+			char* pend = pEnd();
+			switch (sz - presize)
+			{
+			case 3:
+				*pend++ = ' ';
+			case 2:
+				*pend++ = ' ';
+			case 1:
+				*pend = ' ';
+			}
+			pCore->size = sz;
+			ensureZero();
+		}
 		inline TiLogStream& resetLogLevel(ELevel lv)
 		{
 			const auto* slex = ext()->source_location_str;

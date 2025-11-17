@@ -2854,15 +2854,17 @@ namespace tilogspace
 		inline std::unique_lock<std::mutex> TiLogDaemon::GetPollLock() { return GetCoreThrdLock(mPoll); }
 
 		constexpr static uint16_t TILOG_LONG_LOG_MIN_SIZE = 32;	   // long log(will add padding in log to speedup memcpy) min size
-		inline void AppendToMergeCacheByMetaData(DeliverStru& mDeliver, const TiLogCompactString& bean)
+		inline void AppendToMergeCacheByMetaData(DeliverStru& mDeliver, const TiLogCompactString& str)
 		{
-			TiLogStringView logsv {bean.buf(),bean.size};
+			const TiLogBean& bean = str.ext;
+			TiLogStringView logsv{ str.buf(), str.size };
 			auto& logs = mDeliver.mIoBean;
 			auto preSize = logs.size();
-			auto source_location_size = bean.ext.source_location_str->size();
+			auto source_location_size = bean.source_location_str->size();
 			auto beanSVSize = logsv.size();
-			
-			size_t L2 = (source_location_size + bean.ext.tid->size());
+			auto tidSize = bean.tid->size();
+
+			size_t L2 = (source_location_size + tidSize);
 			size_t append_size0 = L2 + TILOG_RESERVE_LEN_L1;
 			char* ptr;
 			bool is_long_log = beanSVSize >= TILOG_LONG_LOG_MIN_SIZE;
@@ -2883,14 +2885,14 @@ namespace tilogspace
 
 
 #if (TILOG_USE_USER_MODE_CLOCK && TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_SORT) || TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_MICROSECOND
-			const TiLogTime& show_time = bean.ext.time();
+			const TiLogTime& show_time = bean.time();
 #else
-			TiLogTime show_time = bean.ext.time();
+			TiLogTime show_time = bean.time();
 			show_time.cast_to_show_accu();
 #endif
 
 #if TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_MICROSECOND
-			TiLogTime show_time_ms = bean.ext.time();
+			TiLogTime show_time_ms = bean.time();
 			show_time_ms.cast_to_ms();
 
 			TiLogTime::origin_time_type us_tp = show_time.get_origin_time();
@@ -2906,7 +2908,7 @@ namespace tilogspace
 				mDeliver.mlogprefix[29] = ']';
 			}
 #else
-			TiLogTime show_time_ms = bean.ext.time();
+			TiLogTime show_time_ms = bean.time();
 			show_time_ms.cast_to_ms();
 
 			TiLogTime::origin_time_type us_tp = show_time.get_origin_time();
@@ -2936,25 +2938,54 @@ namespace tilogspace
 			mDeliver.mPreLogTimeUs = us_tp;
 #endif
 
+			char *pend = logs.end(), *pend_pre = pend;
 			TILOG_ASSUME(padding < TILOG_SSE4_ALIGN);
-			memset(logs.end(), ' ', padding);
-			logs.inc_size_s(padding);
-			if(is_long_log){
-				logs.writend(mDeliver.mlogprefix, sizeof(mDeliver.mlogprefix));
-				logs.writend(bean.ext.source_location_str->data(), source_location_size);
-				logs.writend(bean.ext.tid->data(), bean.ext.tid->size());
-				
-				sse128_memcpy_aa(logs.end(), logsv.data(), beanSVSize);
-				logs.inc_size_s(beanSVSize);
-			}else{
-				sse128_memcpy_aa_32B(logs.end(), mDeliver.mlogprefix);
-				logs.inc_size_s(sizeof(mDeliver.mlogprefix));
-				
-				logs.writend(bean.ext.source_location_str->data(), source_location_size);
-				logs.writend(bean.ext.tid->data(), bean.ext.tid->size());
-				logs.writend(logsv.data(), beanSVSize);			 //-----logsv.size()
+			TILOG_ASSUME(padding % TILOG_UNIT_ALIGN == 0);
+			switch (padding)
+			{
+			case 12:
+				*(uint32_t*)pend = *(uint32_t*)"    ";
+				pend += TILOG_UNIT_ALIGN;
+			case 8:
+				*(uint32_t*)pend = *(uint32_t*)"    ";
+				pend += TILOG_UNIT_ALIGN;
+			case 4:
+				*(uint32_t*)pend = *(uint32_t*)"    ";
+				pend += TILOG_UNIT_ALIGN;
 			}
-			
+
+			// memset(logs.end(), ' ', padding);
+			// pend += padding;
+
+			if (is_long_log)
+			{
+				bit32_memcpy_aaa(pend, mDeliver.mlogprefix, sizeof(mDeliver.mlogprefix));
+				pend += sizeof(mDeliver.mlogprefix);
+
+				bit32_memcpy_aaa(pend, bean.source_location_str->data(), source_location_size);
+				pend += source_location_size;
+
+				bit32_memcpy_aaa(pend, bean.tid->data(), tidSize);
+				pend += tidSize;
+
+				sse128_memcpy_aa(pend, logsv.data(), beanSVSize);
+				pend += beanSVSize;
+			} else
+			{
+				sse128_memcpy_aa_32B(pend, mDeliver.mlogprefix);
+				pend += sizeof(mDeliver.mlogprefix);
+
+				bit32_memcpy_aaa(pend, bean.source_location_str->data(), source_location_size);
+				pend += source_location_size;
+
+				bit32_memcpy_aaa(pend, bean.tid->data(), tidSize);
+				pend += tidSize;
+
+				bit32_memcpy_aaa(pend, logsv.data(), beanSVSize);
+				pend += beanSVSize;
+			}
+			logs.inc_size_s(pend - pend_pre);
+
 			// clang-format off
 			// |---padding---mlogprefix(32)----|------------source_location----------------------------|--logsv(tid|usedata)-----|
 			// \n   [2024-04-21  15:52:25.886] #ERR D:\Codes\CMake\TiLogLib\Test\test.cpp:708 operator() @39344 nullptr
@@ -2974,12 +3005,11 @@ namespace tilogspace
 			DEBUG_ASSERT(!deliverCache.empty());
 
 			DEBUG_PRINTI("mergeLogsToOneString,transform deliverCache to string\n");
-			for (TiLogCompactString* pBean : deliverCache)
+			for (TiLogCompactString* pStr : deliverCache)
 			{
-				DEBUG_RUN(TiLogBean::check(&pBean->ext));
-				TiLogCompactString& bean = *pBean;
-
-				AppendToMergeCacheByMetaData(mDeliver, bean);
+				DEBUG_RUN(TiLogBean::check(&pStr->ext));
+				TiLogCompactString& str = *pStr;
+				AppendToMergeCacheByMetaData(mDeliver, str);
 			}
 			mPrintedLogs.fetch_add(deliverCache.size(), std::memory_order_relaxed);
 			DEBUG_PRINTI("End of mergeLogsToOneString,string size= {}\n", mDeliver.mIoBean.size());
@@ -3351,6 +3381,7 @@ namespace tilogspace
 	{
 		TiLogStreamInner::~TiLogStreamInner()
 		{
+			stream.aligned_to_unit_size();
 			TiLogInnerLogMgr::getRInstance().PushLog(stream.pCore);
 			stream.pCore = nullptr;
 		}
