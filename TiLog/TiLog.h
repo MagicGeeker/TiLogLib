@@ -2620,6 +2620,8 @@ namespace tilogspace
 		// get TiLogSubSystem by sub_sys_t ,except for TILOG_SUB_SYSTEM_INTERNAL
 		static TiLogSubSystem& GetSubSystemRef(sub_sys_t subsys);
 
+		static void PushLog(sub_sys_t subsys,internal::TiLogCompactString* str);
+
 		TILOG_SINGLE_INSTANCE_STATIC_ADDRESS_FUNC_IMPL(TiLog, tilogbuf)
 
 	private:
@@ -2747,7 +2749,7 @@ namespace tilogspace
 			DEBUG_ASSERT(pCore != nullptr);
 			DEBUG_RUN(TiLogBean::check(this->ext()));
 			aligned_to_unit_size();
-			TiLog::GetSubSystemRef(ext()->subsys).PushLog(this->pCore);
+			TiLog::PushLog(ext()->subsys, this->pCore);
 		}
 
 	public:

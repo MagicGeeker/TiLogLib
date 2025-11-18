@@ -3617,6 +3617,7 @@ namespace tilogspace
 	}	 // namespace internal
 
 	TiLogSubSystem& TiLog::GetSubSystemRef(sub_sys_t subsys) { return TiLogEngines::getRInstance().engines[subsys].e.subsystem; }
+	void TiLog::PushLog(sub_sys_t subsys, internal::TiLogCompactString* str) { TiLogEngines::getRInstance().engines[subsys].e.subsystem.PushLog(str); }
 
 	void TiLogEngines::GetGlobalVaribleInfo()
 	{
