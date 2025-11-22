@@ -3,12 +3,12 @@ project(TiLog)
 
 set(CMAKE_CXX_STANDARD 11)
 
-option(ENABLE_SSE_4_1 "Enable SSE instructions" ON)
-option(ENABLE_AVX "Enable AVX instructions" ON)
-
-
 #TILOG_CUSTOMIZATION_H is used for customer to override tilog config
 add_definitions(-DTILOG_CUSTOMIZATION_H="${PROJECT_SOURCE_DIR}/Test/subsystest.h")
+
+option(ENABLE_SSE_4_1 "Enable SSE instructions" ON)
+option(ENABLE_AVX "Enable AVX instructions" ON)
+option(ENABLE_PDB_FOR_MINGW_CLANG_IN_WINDOWS "" OFF)
 
 if(ENABLE_AVX AND NOT ENABLE_SSE_4_1)
     message(WARNING "force enable sse4.1 if enable avx")
@@ -63,6 +63,18 @@ if(MSVC)
     endif()
 else()
     message(STATUS "Detected compiler GCC/clang")
+endif()
+
+
+if(WIN32 AND ENABLE_PDB_FOR_MINGW_CLANG_IN_WINDOWS)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND MINGW)
+        message(STATUS "Using Clang with llvm-mingw toolchain")
+        if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+            message(STATUS "Configuring for Windows with PDB debug info")
+            add_compile_options(-gcodeview)
+            add_link_options(-Wl,/DEBUG)
+        endif()
+    endif()
 endif()
 
 add_subdirectory(depend_libs)
