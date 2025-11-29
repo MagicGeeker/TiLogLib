@@ -901,8 +901,9 @@ namespace tilogspace
 #endif
 		struct fctx_t : TiLogObject
 		{
+			using fd_type = std::remove_const<decltype(nullfd)>::type;
 			String fpath{};
-			std::remove_const<decltype(nullfd)>::type fd{ nullfd };
+			fd_type fd{ nullfd };
 		} fctx;
 
 		class TiLogFile : public TiLogObject
@@ -1898,7 +1899,7 @@ namespace tilogspace
 		inline static void func_sync(int fd) { ::fsync(fd); }
 		inline static int64_t func_write(int fd, TiLogStringView buf) { return ::write(fd, buf.data(), buf.size()); }
 #else
-		inline static int func_trunc(int fd, size_t size, bool inc = false) { return 0; }
+		inline static int func_trunc(fctx_t::fd_type fd, size_t size, bool inc = false) { return 0; }
 		inline static FILE* func_open(const char* path)
 		{
 
