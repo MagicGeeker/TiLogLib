@@ -831,6 +831,137 @@ namespace tilogspace
 			size_t hindex;	  // head element index
 		};
 
+		template <size_t CAPACITY, size_t ALIGN = 32>
+		struct SPSCQueue
+		{
+			alignas(ALIGN) char datamem[CAPACITY];
+			char* datas = datamem;
+
+			size_t head_idx = 0;				// Consumer starting position
+			size_t producer_locked_size = 0;	// Size of data locked but not committed by the producer
+			size_t commited_size = 0;			// Total size of committed data in the queue
+
+		public:
+			// The producer attempts to lock *cnt bytes
+			int lock_producer(size_t* cnt, char** p)
+			{
+				if (!cnt || !p) return EADDRNOTAVAIL;
+
+				size_t available = get_producer_available();
+				if (!available)
+				{
+					*cnt = 0;
+					*p = nullptr;
+					return 0;
+				}
+
+				if (producer_locked_size != 0)
+				{
+					*cnt = 0;
+					*p = nullptr;
+					return EBUSY;
+				}
+
+				// Calculate the producer lock start position
+				size_t producer_start = (head_idx + commited_size) % CAPACITY;
+
+				// Calculate the contiguous available space
+				size_t continuous_space;
+				if (producer_start < head_idx)
+				{
+					continuous_space = head_idx - producer_start;
+				} else
+				{	 // Include commited_size == 0
+					continuous_space = CAPACITY - producer_start;
+				}
+
+				DEBUG_ASSERT(continuous_space <= available);
+				*cnt = std::min(*cnt, std::min(available, continuous_space));
+				*p = datas + producer_start;
+
+				// Update the producer lock size
+				producer_locked_size += *cnt;
+				return 0;
+			}
+
+			// Get consumer possible max continuous space
+			void get_consumer_continuous_space(size_t* size1, size_t* size2)
+			{
+				size_t available = get_consumer_available();
+				size_t continuous_space = CAPACITY - head_idx;
+				continuous_space = std::min(continuous_space, available);
+				*size1 = continuous_space;
+				*size2 = available - continuous_space;
+			}
+
+			// The consumer attempts to lock *cnt bytes
+			void lock_consumer(size_t* cnt, char** p)
+			{
+				if (!cnt || !p) return;
+
+				size_t available = get_consumer_available();
+				if (!available)
+				{
+					*cnt = 0;
+					*p = nullptr;
+					return;
+				}
+
+				// Calculate the contiguous readable space
+				size_t continuous_space = CAPACITY - head_idx;
+				continuous_space = std::min(continuous_space, available);
+				*cnt = std::min(*cnt, continuous_space);
+				*p = datas + head_idx;
+			}
+
+			// The producer commits the written data
+			int commit_producer(size_t cnt)
+			{
+				if (!cnt || cnt > producer_locked_size) { return EINVAL; }
+
+				commited_size += cnt;
+				producer_locked_size -= cnt;
+				return 0;
+			}
+
+			// Consumer commits data has readed
+			int commit_consumer(size_t cnt)
+			{
+				if (!cnt || cnt > commited_size) { return EINVAL; }
+
+				head_idx = (head_idx + cnt) % CAPACITY;
+				commited_size -= cnt;
+				if (producer_locked_size == 0 && commited_size == 0)
+				{
+					head_idx = 0;	 // Clear
+				}
+				return 0;
+			}
+
+			// Get producer available space (excluding locked space)
+			size_t get_producer_available() const { return CAPACITY - commited_size - producer_locked_size; }
+
+			// Get consumer available data (committed but have not read)
+			size_t get_consumer_available() const { return commited_size; }
+
+			// Get producer locked but have not committed space
+			size_t get_producer_locked() const { return producer_locked_size; }
+
+			bool empty() const { return commited_size == 0; }
+
+			bool full() const { return get_producer_available() == 0; }
+
+			constexpr size_t capacity() const { return CAPACITY; }
+
+			void clear()
+			{
+				head_idx = 0;
+				producer_locked_size = 0;
+				commited_size = 0;
+			}
+		};
+
+
 #endif
 
 
@@ -962,20 +1093,44 @@ namespace tilogspace
 
 		struct IOBean;
 		using buf_t = TiLogPrinter::buf_t;
-		struct FilePrinterCrcQueue
+		using FilePrinterCrcQueueMutex = std::mutex;
+		struct FilePrinterCrcQueue : SPSCQueue<TILOG_FILE_BUFFER, TILOG_DISK_SECTOR_SIZE>
 		{
-			constexpr static size_t CAPACITY = TILOG_FILE_BUFFER;
+			TILOG_MUTEXABLE_CLASS_MACRO(FilePrinterCrcQueueMutex, mtx)
 
-			alignas(TILOG_DISK_SECTOR_SIZE) char datamem[CAPACITY];
-			TrivialCircularQueue<char, CAPACITY> datas{ datamem };
+			// thread safe emplace_back
+			bool emplace_back(const char* p, size_t cnt)
+			{
+				unique_lock<FilePrinterCrcQueue> lk(*this);
+				if (get_producer_available() < cnt) { return false; }
+				int ret;
+				char* locked_ptr;
+				size_t remain = cnt, locked_size = remain;
+				while (remain != 0)
+				{
+					locked_size = remain;
+					ret = lock_producer(&locked_size, &locked_ptr);
+					lk.unlock();
 
-			~FilePrinterCrcQueue() { datas.pMem = nullptr; }
+					DEBUG_ASSERT(ret == 0 && locked_ptr != nullptr);
+					adapt_memcpy(locked_ptr, p, locked_size);
+					p += locked_size;
+					remain -= locked_size;
+
+					lk.lock();
+					ret = commit_producer(locked_size);
+					DEBUG_ASSERT(ret == 0);
+				}
+				return true;
+			}
+
+			~FilePrinterCrcQueue() {}
+			// thread safe emplace_back
 			bool emplace_back(const buf_t& p)
 			{
 				size_t aligned_size = round_up(p.size(), TILOG_DISK_SECTOR_SIZE);
 				DEBUG_ASSERT(aligned_size == p.size());
-				bool succ = datas.emplace_back(p.data(), p.size(), adapt_memcpy);
-				return succ;
+				return emplace_back(p.data(), p.size());
 			}
 		};
 
@@ -1000,7 +1155,9 @@ namespace tilogspace
 			}
 			TiLogFileRotater(String folderPath0, TiLogFile& file) : TiLogFileRotater(nullptr, std::move(folderPath0), file) {}
 
-			void onAcceptLogs(TiLogPrinter::MetaData metaData);
+			bool MayRotate();
+			bool SetNextFileNameIfNeed(TiLogTime t);
+			void onAcceptLogs(size_t size);
 
 			void CreateNewFile(TiLogPrinter::MetaData metaData);
 			TiLogFile& file() { return mFile; }
@@ -1037,7 +1194,8 @@ namespace tilogspace
 			TiLogFilePrinter(TiLogEngine* e, String folderPath);
 			~TiLogFilePrinter() override;
 
-			void pop();
+			void pop(TiLogTime t, bool force_write = false);
+			void push(TiLogTime t);
 			void push(const buf_t& b);
 			void push_force();
 			void push_big_str(const buf_t& metaData);
@@ -1959,9 +2117,11 @@ namespace tilogspace
 #define CurSubSys() mEngine ? mEngine->subsys : INVALID_SUB_OTHER
 #ifdef __________________________________________________TiLogFileRotater__________________________________________________
 
-		void TiLogFileRotater::onAcceptLogs(TiLogPrinter::MetaData metaData)
+		bool TiLogFileRotater::MayRotate() { return mCurFile.logs_size > TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE; }
+
+		bool TiLogFileRotater::SetNextFileNameIfNeed(TiLogTime t)
 		{
-			if (mCurFile.logs_size > TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE)
+			if (MayRotate())
 			{
 				{
 					sPrintedBytesTotal += mCurFile.logs_size;
@@ -1969,13 +2129,15 @@ namespace tilogspace
 					DEBUG_PRINTV("sync and write index={} \n", mIndex);
 				}
 
-				if (metaData->logTime < mCurFile.logTime) { mCurFile.logTime = metaData->logTime; }
+				mCurFile.logTime = t;
 				CreateNewFile(&mCurFile);
-				mCurFile.logTime=TiLogTime::max();
 				mCurFile.logs_size = 0;
+				return true;
 			}
-			mCurFile.logs_size += metaData->logs_size;
+			return false;
 		}
+
+		void TiLogFileRotater::onAcceptLogs(size_t size) { mCurFile.logs_size += size; }
 
 		void TiLogFileRotater::CreateNewFile(TiLogFilePrinter::MetaData metaData)
 		{
@@ -2049,70 +2211,88 @@ namespace tilogspace
 		EPrinterID TiLogFilePrinter::getUniqueID() const { return PRINTER_TILOG_FILE; }
 #endif
 
+		void TiLogFilePrinter::push(TiLogTime t)
+		{
+			mTaskQueue->pushTask([this, t] { pop(t); });
+		}
+
 		void TiLogFilePrinter::push_force()
 		{
-			buf_t buf;
-			buf.logs_size = buffer.datas.size();
-			if (buf.logs_size == 0) { return; }
-			buf.logTime = mFileTime;
-			mTaskQueue->pushTaskSynced([this, &buf] {
-				mRotater.onAcceptLogs(&buf);
-				pop();
-			});
-			mFileTime = TiLogTime::max();
+			mTaskQueue->pushTaskSynced([this] { pop(TiLogTime::max(), true); });
 		}
 
 		// small str,write async
 		void TiLogFilePrinter::push(const buf_t& b)
 		{
-		retry:
 			bool ret = false;
-			synchronized(loop_ctx)
+			while (true)
 			{
-				if (b.logTime < mFileTime) { mFileTime = b.logTime; }
 				ret = buffer.emplace_back(b);	 // copy str to cache
-				if (ret) { return; }
+				if (ret) { return push(b.logTime); }
+				// queue has not enough space
+				push_force();
 			}
-
-			// queue has not enough space
-			push_force();
-			goto retry;
 		}
 
 		// big str,write through
 		void TiLogFilePrinter::push_big_str(const buf_t& metaData)
 		{
 			mTaskQueue->pushTaskSynced([&metaData, this] {
-				mRotater.onAcceptLogs(&metaData);
+				mRotater.SetNextFileNameIfNeed(metaData.logTime);
 				mFile.write(TiLogStringView{ metaData.logs, metaData.logs_size });
+				mRotater.onAcceptLogs(metaData.logs_size);
 			});
 		}
 
-		void TiLogFilePrinter::pop()
+		void TiLogFilePrinter::pop(TiLogTime t, bool force_write)
 		{
-			std::unique_lock<MutexType> lk(loop_ctx.mtx);
-			size_t data_size;
-			char* data_begin;
+			int ret;
+			size_t dst_cnt;
+			char* dst_ptr;
+			size_t written = 0, min_to_write = 0;
+			bool may_rotate_once = false;
 
-			data_size = buffer.datas.first_sub_queue_size();
-			if (data_size != 0)
+			while (true)
 			{
-				data_begin = buffer.datas.first_sub_queue_begin();
-				mFile.write(TiLogStringView{ data_begin, data_size });
-				DEBUG_PRINTI("write1 {} bytes ok\n", data_size);
+				unique_lock<decltype(buffer)> lk(buffer);
+				size_t sz1, sz2;
+				buffer.get_consumer_continuous_space(&sz1, &sz2);
+				if (!force_write)
+				{
+					if (!may_rotate_once && sz1 + sz2 != 0)
+					{
+						if (mRotater.MayRotate() && mFile.valid())
+						{
+							// TODO  must push all logs until now before rotate, to prevent single log being truncated
+						}
+						may_rotate_once = true;
+						mRotater.SetNextFileNameIfNeed(t);
+					}
+				} else
+				{
+					min_to_write = min_to_write == 0 ? sz1 + sz2 : min_to_write;
+				}
+				dst_cnt = TILOG_FILE_BUFFER;
+				buffer.lock_consumer(&dst_cnt, &dst_ptr);
+				lk.unlock();
+
+				if (sz1 < TILOG_MIN_IO_SIZE && sz2 < TILOG_MIN_IO_SIZE && written >= min_to_write)
+				{
+					break;
+				} else
+				{
+					mFile.write(TiLogStringView{ dst_ptr, dst_cnt });
+					written += dst_cnt;
+					DEBUG_PRINTI("force_write? {} min_to_write {} write {} written {}", force_write, min_to_write, dst_cnt, written);
+
+					lk.lock();
+					ret = buffer.commit_consumer(dst_cnt);
+					DEBUG_ASSERT(ret == 0);
+					// lk.unlock();
+				}
 			}
 
-			data_size = buffer.datas.second_sub_queue_size();
-			if (data_size != 0)
-			{
-				data_begin = buffer.datas.second_sub_queue_begin();
-				mFile.write(TiLogStringView{ data_begin, data_size });
-				DEBUG_PRINTI("write2 {} bytes ok\n", data_size);
-			}
-
-			buffer.datas.clear();
-
-			lk.unlock();
+			mRotater.onAcceptLogs(written);
 		}
 
 #undef CurSubSys
@@ -3442,6 +3622,7 @@ namespace tilogspace
 					{
 						auto it_from_pool = mempoolspace::tilogstream_mempool::xfree_to_std(to_free.begin(), to_free.end());
 						if (it_from_pool != to_free.end()) { mempoolspace::tilogstream_mempool::xfree(*it_from_pool); }
+						mRotater.SetNextFileNameIfNeed(mDeliver.mIoBean.mTime);
 					}
 					to_free.clear();
 					mCaches.clear();
@@ -3461,8 +3642,8 @@ namespace tilogspace
 					{
 						TiLogPrinter::buf_t buf{ sv.data(), sv.size(), mDeliver.mIoBean.mTime };
 						TiLogPrinter::MetaData metaData{ &buf };
-						mRotater.onAcceptLogs(metaData);
 						mFile.write(TiLogStringView{metaData->data(),metaData->size()});
+						mRotater.onAcceptLogs(metaData->size());
 					}
 					mDeliver.mIoBean.clear();
 					if (stat == TO_STOP) { break; }

@@ -268,8 +268,9 @@ namespace tilogspace
 	constexpr static double TILOG_MERGE_RAWDATA_FULL_RATE = 0.35;   // [0.2,2.5]
 	constexpr static double TILOG_MERGE_RAWDATA_ONE_PROCESSER_FULL_RATE = 0.1;  //[0,2]
 
-	constexpr static uint32_t TILOG_DISK_SECTOR_SIZE= 4096;   // %32==0 && %512=0
-	constexpr static size_t TILOG_FILE_BUFFER= (2U << 20U);	//  must be an integer multiple of TILOG_DISK_SECTOR_SIZE
+	constexpr static uint32_t TILOG_DISK_SECTOR_SIZE= (1U << 12U);   // %32==0 && %512=0
+	constexpr static size_t TILOG_MIN_IO_SIZE= (256U << 12U);	//  must be an integer multiple of TILOG_DISK_SECTOR_SIZE
+	constexpr static size_t TILOG_FILE_BUFFER= (1024U << 12U);	//  must be an integer multiple of TILOG_DISK_SECTOR_SIZE
 	constexpr static size_t TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE= (64U << 20U);	// log size per file,it is not accurate,especially TILOG_DELIVER_CACHE_DEFAULT_MEMORY_BYTES is bigger
 }	 // namespace tilogspace
 
