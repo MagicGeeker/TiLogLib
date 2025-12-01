@@ -33,7 +33,7 @@ int main()
 		("abc 0100000000010000000000101000000000002300000000000023002301000000000002300023 %d %lld",123,456LL);
 #elif FUN_MAIN==0
 	TILOG_CURRENT_SUB_SYSTEM.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
-	TICOUT << "file_multi_thread_log_lat_test_____________________";
+	TICOUT << "file_single_thread_log_lat_test_____________________";
 
 	double rdstc0 = SingleLoopTimeTestFunc<false>();
 	double rdstc1 = SingleLoopTimeTestFunc<true>();

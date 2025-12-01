@@ -195,7 +195,7 @@ static void ComplexCalFunc(uint64_t x)
 {
 	char buf1[64] = { 0 };
 	char buf2[64] = { 0 };
-	for (int i = 0; i <= N; i++)
+	for (int i = 0; i < N; i++)
 	{
 		for (uint32_t j = 0; j < (uint32_t)sizeof(buf1); j++)
 		{
@@ -211,8 +211,17 @@ struct lat_t
 	double user_avg = 0.0;
 	uint64_t log_lat_num = 0;
 	uint64_t log_lat_sum = 0;
-	// log_his[i]:count of i rdtsc; log_his[0]:count of bigger than 65535 rdtsc.
-	size_t log_his[UINT16_MAX] = { 0 };
+	uint64_t log_lat_max = 0;
+
+	constexpr static uint64_t size0 = 8192;
+	constexpr static uint64_t size1 = 256;
+	constexpr static uint64_t size2 = 1;
+	constexpr static uint64_t size = size0 + size1 + size2;
+	constexpr static uint64_t mark1 = 1024;
+	uint64_t log_his[size0 + size1 + size2] = { 0 };
+	uint64_t* log_his0 = log_his;
+	uint64_t* log_his1 = &log_his0[size0];
+	uint64_t* log_his2 = &log_his1[size1];
 	double log_avg = 0.0;
 };
 
@@ -228,19 +237,32 @@ static std::string LatDump(lat_t& lat)
 	s += "\nnums " + std::to_string(lat.log_lat_num);
 	s += "\nuser_avg " + std::to_string(lat.user_avg);
 	s += "\nlog_avg " + std::to_string(lat.log_avg);
+	s += "\nlog_max " + std::to_string(lat.log_lat_max);
 	s += "\ncost " + std::to_string(100.0 * (lat.log_avg + lat.user_avg) / lat.user_avg) + '%';
-	s += "\n>65535 cnt:" + std::to_string(lat.log_his[0]) + " freq:" + std::to_string(lat.log_his[0] * 1.0 / lat.log_lat_num) + "\n";
+	s += '\n';
 
-	std::deque<double> d = { 5,10, 20, 35,50, 75, 90, 99, 99.9, 99.99 };
-	for (size_t i = 1; i < UINT16_MAX; ++i)
+	std::deque<double> d = { 5, 10, 20, 35, 50, 75, 90, 99, 99.9, 99.99, 99.995 };
+	for (uint64_t i = 0; i < lat.size; ++i)
 	{
+		uint64_t true_lat;
 		num += lat.log_his[i];
+
+		if (i < lat.size0)
+		{
+			true_lat = i;
+		} else if (i - lat.size0 < lat.size1)
+		{
+			true_lat = (i - lat.size0) * lat.mark1;
+		} else
+		{
+			true_lat = lat.log_lat_max;
+		}
 		double p = num * 100.0 / lat.log_lat_num;
 		if (d.empty()) { break; }
 		if (p >= d.front())
 		{
-			snprintf(pct, 10, "%.2f", d.front());
-			s = s + "[" + pct + "%:" + std::to_string(i) + "] ";
+			snprintf(pct, 10, "%.3f", d.front());
+			s = s + "[" + pct + "%:" + std::to_string(true_lat) + "] ";
 			d.pop_front();
 		}
 	}
@@ -253,10 +275,13 @@ static std::unique_ptr<lat_t> SingleLoopTimeTestFunc(const char* testName = "")
 {
 	struct testLoop_t : multi_thread_test_loop_t
 	{
-		constexpr static int32_t THREADS() { return 10; }
-		constexpr static size_t GET_SINGLE_THREAD_LOOPS() { return (test_release ? testpow10(8) : testpow10(7)) / N * 0.6; }
-		constexpr static bool PRINT_LOOP_TIME() { return false; }
-		constexpr static bool PRINT_TOTAL_TIME() { return false; }
+		constexpr static int32_t THREADS() { return 1; }
+		constexpr static size_t GET_SINGLE_THREAD_LOOPS()
+		{
+			return (test_release ? testpow10(8) : testpow10(7)) / (N <= 10 ? (2 * N + 1) : N) * 0.6;
+		}
+		constexpr static bool PRINT_LOOP_TIME() { return true; }
+		constexpr static bool PRINT_TOTAL_TIME() { return true; }
 	};
 
 	constexpr uint64_t threads = testLoop_t::THREADS();
@@ -267,31 +292,33 @@ static std::unique_ptr<lat_t> SingleLoopTimeTestFunc(const char* testName = "")
 	MultiThreadTest<testLoop_t>(testName, tilogspace::EPrinterID::PRINTER_TILOG_FILE, [LOOPS, &lat](int index) {
 		for (uint64_t loops = LOOPS; loops; loops--)
 		{
-			uint64_t ts0 = rdtsc();
-			ComplexCalFunc<N>(loops);
-			uint64_t tsc = rdtsc();
+			volatile uint64_t ts0 = rdtsc();
 			TILOGE << "index= " << index << " j= " << loops;
-			uint64_t ts1 = rdtsc();
+			volatile uint64_t ts1 = rdtsc();
 
-			uint64_t l = (uint64_t)(ts1 - tsc);
-			if (l < UINT16_MAX)
+			uint64_t l = (uint64_t)(ts1 - ts0);
+			ComplexCalFunc<N>(loops);
+			if (l < lat_t::size0)
 			{
-				++lat.log_his[l];
+				++lat.log_his0[l];
+			} else if (l / lat_t::mark1 < lat_t::size1)
+			{
+				++lat.log_his1[l / lat_t::mark1];
 			} else
 			{
-				++lat.log_his[0];
+				++lat.log_his2[0];
 			}
-			lat.user_lat_sum += (uint64_t)(tsc - ts0);
+			if (l > lat.log_lat_max) { lat.log_lat_max = l; }
+			lat.log_lat_sum += (uint64_t)(l);
+
+			volatile uint64_t ts2 = rdtsc();
+			lat.user_lat_sum += (uint64_t)(ts2 - ts1);
 		}
 	});
 
 	lat.user_avg = double(lat.user_lat_sum) / (threads * LOOPS);
 	lat.cnts = threads * LOOPS;
-	for (size_t i = 0; i < UINT16_MAX; ++i)
-	{
-		lat.log_lat_num += lat.log_his[i];
-		lat.log_lat_sum += i * lat.log_his[i];
-	}
+	lat.log_lat_num = lat.cnts;
 	lat.log_avg = 1.0 * lat.log_lat_sum / lat.log_lat_num;
 	return latp;
 }

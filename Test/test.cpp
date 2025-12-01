@@ -23,7 +23,7 @@ using namespace tilogspace;
 #define none_single_thread_multi_size_log_test_____________________
 #define file_many_thread_log_test_____________________
 #define file_time_many_thread_log_test_with_sleep_____________________
-#define file_multi_thread_log_lat_test_____________________
+#define file_single_thread_log_lat_test_____________________
 #define file_single_thread_benchmark_test_____________________
 #define file_multi_thread_benchmark_test_____________________
 #define file_multi_thread_benchmark_test_with_format_____________________
@@ -292,13 +292,13 @@ TEST_CASE("file_time_many_thread_log_test_with_sleep_____________________")
 #endif
 
 
-#ifdef file_multi_thread_log_lat_test_____________________
+#ifdef file_single_thread_log_lat_test_____________________
 
-TEST_CASE("file_multi_thread_log_lat_test_____________________")
+TEST_CASE("file_single_thread_log_lat_test_____________________")
 {
 	TILOG_CURRENT_SUB_SYSTEM.SetPrinters(tilogspace::EPrinterID::PRINTER_TILOG_FILE);
 	{
-		auto lat = SingleLoopTimeTestFunc<10>("file_multi_thread_log_lat_test_____________________10");
+		auto lat = SingleLoopTimeTestFunc<15>("file_multi_thread_log_lat_test_____________________15");
 		TICOUT << LatDump(*lat);
 	}
 	{
@@ -311,6 +311,10 @@ TEST_CASE("file_multi_thread_log_lat_test_____________________")
 	}
 	{
 		auto lat = SingleLoopTimeTestFunc<100>("file_multi_thread_log_lat_test_____________________100");
+		TICOUT << LatDump(*lat);
+	}
+	{
+		auto lat = SingleLoopTimeTestFunc<200>("file_multi_thread_log_lat_test_____________________200");
 		TICOUT << LatDump(*lat);
 	}
 }
