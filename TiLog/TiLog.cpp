@@ -2048,7 +2048,7 @@ namespace tilogspace
 		{
 			int fd = nullfd;
 			fd = ::open(path, O_WRONLY | O_CREAT | O_DIRECT, 0644);
-			if (fg == nullfd) { fd = ::open(path, O_WRONLY | O_CREAT, 0644); }
+			if (fd == nullfd) { fd = ::open(path, O_WRONLY | O_CREAT, 0644); }
 			// posix_fallocate(fd, 0, TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE);
 			func_trunc(fd, TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE);
 			return fd;

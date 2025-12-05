@@ -122,8 +122,10 @@
 
 #if defined(_MSC_VER)
     #define TILOG_ASSUME(cond) __assume(cond)
-#elif defined(__clang__) || defined(__GNUC__)
+#elif defined(__clang__)
     #define TILOG_ASSUME(cond) __builtin_assume(cond)
+#elif defined(__GNUC__)
+    #define TILOG_ASSUME(cond) do { if (!(cond)) __builtin_unreachable(); } while(0)
 #else
     #define TILOG_ASSUME(cond) do { } while(0) // 空定义
 #endif
