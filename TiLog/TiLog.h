@@ -265,10 +265,10 @@ namespace tilogspace
 	constexpr static uint32_t TILOG_STREAM_MEMPOOL_TRY_GET_CYCLE = 1024;	// range(1,)
 	
 
-	// user thread suspend and notify merge thread if merge rawdata size >= it.
+	// Set it smaller to lat daemon thread work more Frequently
 	// Set it smaller may make log latency lower but too small may make bandwidth even worse
-	constexpr static double TILOG_MERGE_RAWDATA_FULL_RATE = 0.35;   // [0.2,2.5]
-	constexpr static double TILOG_MERGE_RAWDATA_ONE_PROCESSER_FULL_RATE = 0.1;  //[0,2]
+	constexpr static double TILOG_MERGE_RAWDATA_FULL_RATE = 0.40;   // [0.2,2.5]
+	constexpr static double TILOG_MERGE_RAWDATA_ONE_PROCESSER_FULL_RATE = 0.20;  //[0,2]
 
 	constexpr static uint32_t TILOG_DISK_SECTOR_SIZE= (1U << 12U);   // %32==0 && %512=0
 	constexpr static size_t TILOG_MIN_IO_SIZE= (256U << 12U);	//  must be an integer multiple of TILOG_DISK_SECTOR_SIZE
@@ -766,6 +766,27 @@ namespace tilogspace
 
 namespace tilogspace
 {
+	static const int index64[64] = { 0,	 1,	 48, 2,	 57, 49, 28, 3,	 61, 58, 50, 42, 38, 29, 17, 4,	 62, 55, 59, 36, 53, 51,
+									 43, 22, 45, 39, 33, 30, 24, 18, 12, 5,	 63, 47, 56, 27, 60, 41, 37, 16, 54, 35, 52, 21,
+									 44, 32, 23, 11, 46, 26, 40, 15, 34, 20, 31, 10, 25, 14, 19, 9,	 13, 8,	 7,	 6 };
+
+	/**
+	 * bitScanForward
+	 * @author Martin Läuter (1997)
+	 *         Charles E. Leiserson
+	 *         Harald Prokop
+	 *         Keith H. Randall
+	 * "Using de Bruijn Sequences to Index a 1 in a Computer Word"
+	 * @param bb bitboard to scan
+	 * @precondition bb != 0
+	 * @return index (0..63) of least significant one bit
+	 */
+	inline int bitScanForward(uint64_t bb)
+	{
+		const uint64_t debruijn64 = UINT64_C(0x03f79d71b4cb0a89);
+		// assert (bb != 0);
+		return index64[((bb & (uint64_t)(-(int64_t)bb)) * debruijn64) >> 58];
+	}
 
 	template <typename T>
 	inline constexpr T roundup_helper(T value, unsigned maxb, unsigned curb)

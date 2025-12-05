@@ -1246,6 +1246,7 @@ namespace tilogspace
 			TiLogCompactString* crcq_mem[TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE];
 			CrcQueueLogCache qCache;
 			ThreadLocalSpinMutex spinMtx;	 // protect cache
+			std::condition_variable_any thrdSleepCV;
 
 			const TidString* tid;
 
@@ -1273,33 +1274,61 @@ namespace tilogspace
 			using mutex_type = OptimisticMutex;
 			constexpr static uint32_t CONCURRENT = TILOG_MAY_MAX_RUNNING_THREAD_NUM;
 		};
-		
+
+		using merge_rawdata_counter_i = uint64_t;	 //  uint16_t { mMayNearlyFullLimit,mMayFullLimit,mAliveThreads,mSize }
+		struct merge_rawdata_counter_s
+		{
+			uint16_t mSize{};
+			uint16_t mAliveThreads{};
+			uint16_t mMayFullLimit{};
+			uint16_t mMayNearlyFullLimit{};
+		};
+
 		struct MergeRawDatas : public TiLogObject, public TiLogConcurrentHashMap<const TidString*, VecLogCache, MergeRawDatasHashMapFeat>
 		{
 			using super = TiLogConcurrentHashMap<const TidString*, VecLogCache, MergeRawDatasHashMapFeat>;
 			inline void set_alive_thread_num(uint32_t num)
 			{
-				mAliveThreads = num;
-				mMayFullLimit = 1 + TILOG_DAEMON_PROCESSER_NUM * TILOG_MERGE_RAWDATA_FULL_RATE * mAliveThreads;
-				mMayNearlyFullLimit = 1 + mAliveThreads * TILOG_DAEMON_PROCESSER_NUM * TILOG_MERGE_RAWDATA_ONE_PROCESSER_FULL_RATE;
+				merge_rawdata_counter_s s{};
+				s.mAliveThreads = num;
+				s.mMayFullLimit = 1 + (1 + s.mAliveThreads) * TILOG_DAEMON_PROCESSER_NUM * TILOG_MERGE_RAWDATA_FULL_RATE;
+				s.mMayNearlyFullLimit =
+					1 + (1 + s.mAliveThreads) * TILOG_DAEMON_PROCESSER_NUM * TILOG_MERGE_RAWDATA_ONE_PROCESSER_FULL_RATE;
+
+				merge_rawdata_counter_i i = (uint64_t(s.mMayNearlyFullLimit) << 48) | (uint64_t(s.mMayFullLimit) << 32)
+					| (uint64_t(s.mAliveThreads) << 16) | (uint64_t(s.mSize) << 0);
+				counter.store(i, std::memory_order_release);
 			}
-			inline size_t may_size() const { return mSize.load(std::memory_order_relaxed); }
-			inline bool may_full() const { return mSize.load(std::memory_order_relaxed) >= mMayFullLimit; }
-			inline bool may_nearlly_full() const { return mSize.load(std::memory_order_relaxed) >= mMayNearlyFullLimit; }
-			inline void clear() { mSize.store(0, std::memory_order_relaxed); }
+			inline size_t may_size() const { return size_t(counter.load(std::memory_order_relaxed) & 0xFFFF); }
+			inline bool may_full() const
+			{
+				auto c = counter.load(std::memory_order_relaxed);
+				return (c & 0xFFFF) >= ((c >> 32) & 0xFFFF);
+			}
+			inline bool may_nearlly_full() const
+			{
+				auto c = counter.load(std::memory_order_relaxed);
+				return (c & 0xFFFF) >= (c >> 48);
+			}
+			inline void clear() { counter.fetch_and(0xFFFFFFFFFFFF0000, std::memory_order_relaxed); }
 			inline VecLogCache& get_for_append(const TidString* key)
 			{
-				mSize.fetch_add(1, std::memory_order_relaxed);
+				counter.fetch_add(1, std::memory_order_relaxed);
 				return super::get(key);
+			}
+			inline merge_rawdata_counter_s get_counter()
+			{
+				auto c = counter.load(std::memory_order_relaxed);
+				merge_rawdata_counter_s s;
+				s.mMayNearlyFullLimit = uint16_t(c >> 48);
+				s.mMayFullLimit = uint16_t((c >> 32) & 0xFFFF);
+				s.mAliveThreads = uint16_t((c >> 16) & 0xFFFF);
+				s.mSize = uint16_t(c & 0xFFFF);
+				return s;
 			}
 
 		protected:
-			// multi thread write
-			atomic_uint32_t mSize{ 0 };
-			uint32_t mAliveThreads{};
-			// one thread(poll thread) write and multi thread read with low freq, no need strict atomic
-			volatile uint32_t mMayFullLimit{};
-			volatile uint32_t mMayNearlyFullLimit{};
+			std::atomic<merge_rawdata_counter_i> counter;
 		};
 
 		using VecVecLogCache = Vector<VecLogCache>;
@@ -1640,7 +1669,7 @@ namespace tilogspace
 			{
 				return [](void* core) { ((TiLogCore*)(core))->Entry(); };
 			};
-			bool IsBusy() override { return mNeedWoking; };
+			bool IsBusy() override;
 
 			inline explicit TiLogCore(TiLogDaemon* d, uint32_t id);
 			inline ~TiLogCore() override final;
@@ -1648,6 +1677,10 @@ namespace tilogspace
 		private:
 
 			void Entry();
+
+			void MergeThreadStruQueueToSet(List<ThreadStru*>& thread_queue, TiLogCompactString& bean);
+
+			void CollectRawDatas();
 
 			void MergeSortForGlobalQueue();
 
@@ -1715,10 +1748,7 @@ namespace tilogspace
 
 			inline void MoveLocalCacheToGlobal(ThreadStru& bean);
 
-			void MergeThreadStruQueueToSet(List<ThreadStru*>& thread_queue, TiLogCompactString& bean);
-
 			static void InitMergeLogVecVec(MergeVecVecLogcaches& vv, size_t needMergeSortReserveSize = SIZE_MAX);
-			void CollectRawDatas();
 
 			bool Prepared();
 			void WaitPrepared(TiLogStringView msg);
@@ -1728,6 +1758,11 @@ namespace tilogspace
 			inline std::unique_lock<std::mutex> GetPollLock();
 
 			void ChangeCoreSeq(TiLogCore* core, core_seq_t seq);
+
+			void FindFreeCoreAndNotifyForUser(ThreadStru& stru);
+			void FindFreeCoreAndNotifyForPoll();
+			void MarkCoreBusy(uint64_t core_idx);
+			void MarkCoreFree(uint64_t core_idx);
 
 			void thrdFuncPoll();
 
@@ -1759,6 +1794,8 @@ namespace tilogspace
 				using tilogcore_b = char[sizeof(TiLogCore)];
 				alignas(alignof(TiLogCore)) std::array<tilogcore_b, TILOG_DAEMON_PROCESSER_NUM> mCoreArrRaw;
 				std::array<TiLogCore*, TILOG_DAEMON_PROCESSER_NUM> mCoreArr;
+				// bit 1: free; bit 0: busy
+				alignas(TILOG_CACHE_LINE_SIZE) std::atomic<uint64_t> mFreeCoreMark{ ~(UINT64_MAX << TILOG_DAEMON_PROCESSER_NUM) };
 				MultiSet<TiLogCoreMini> mCoreMap;  // earliest active cores->newest active cores->free cores // [210,0x0100],[209,0x0200],[SEQ_FREE,0x0300]
 				core_seq_t mPollSeq{ SEQ_BEIGN };		// max seq of log has collected and commit to core
 				core_seq_t mHandledSeq{ SEQ_BEIGN };	// max seq of log has handled in TiLogCore
@@ -2488,21 +2525,33 @@ namespace tilogspace
 			});
 		}
 
+		bool TiLogCore::IsBusy()
+		{
+			return mTiLogDaemon->mMerge.mRawDatas.may_nearlly_full() || mNeedWoking || mStatus >= PREPARE_FINAL_LOOP;
+		};
+
 		void TiLogCore::Entry()
 		{
 			mTiLogDaemon->InitCoreThreadBeforeRun(GetName());
 			while (true)
 			{
 				std::unique_lock<std::mutex> lk_merge(mMtx);
-				auto cleaner = make_cleaner([this] { mDoing = false; });
+				auto cleaner = make_cleaner([this] {
+					mDoing = false;
+					mTiLogDaemon->MarkCoreFree(mID);
+				});
 				if (!mNeedWoking)
 				{
 					if (mStatus == ON_FINAL_LOOP) { break; }
 					if (mStatus == PREPARE_FINAL_LOOP) { mStatus = ON_FINAL_LOOP; }
 				}
-				mCV.wait(lk_merge, [this] { return mNeedWoking || mStatus >= PREPARE_FINAL_LOOP; });
+				mCV.wait(lk_merge, [this] { return IsBusy(); });
+				// auto s =mTiLogDaemon->mMerge.mRawDatas.get_counter();
+				// DEBUG_PRINTD("s {} {} {} {}", s.mMayFullLimit,s.mMayNearlyFullLimit, s.mAliveThreads, s.mSize);
 				mDoing = true;
+				mTiLogDaemon->MarkCoreBusy(mID);
 
+				CollectRawDatas();
 				{
 					mGC.mTOGC = mMerge.mMergeLogVecVec;
 					MergeSortForGlobalQueue();
@@ -2551,16 +2600,8 @@ namespace tilogspace
 				(llu)mMerge.mMergedSize, (llu)mDeliver.mPushLogCount, (llu)mDeliver.mPushLogBlockCount, (llu)mDeliver.mBeanShrinker.mShrinkCount,
 				100.0 - 100.0 * mDeliver.mPushLogBlockCount / mDeliver.mPushLogCount,
 				100.0 - 100.0 * mDeliver.mBeanShrinker.mShrinkCount / mDeliver.mPushLogCount);
-			TiLogCore* core = nullptr;
 			auto& schd = mTiLogDaemon->mScheduler;
-			synchronized(schd)
-			{
-				TiLogCoreMini cmini = static_cast<TiLogCoreMini>(*this);
-				auto it = schd.mCoreMap.find(cmini);
-				DEBUG_ASSERT(it != schd.mCoreMap.end());
-				it = std::next(it);
-				if (it != schd.mCoreMap.end()) { core = (*it).core; }
-			}
+			TiLogCore* core = mID > 0 ? schd.mCoreArr[mID - 1] : nullptr;
 			mTiLogDaemon->AtInternalThreadExit(this, core);
 			return;
 		}
@@ -2735,18 +2776,17 @@ namespace tilogspace
 			if (isLocalFull)
 			{
 				lk_local.unlock();
-				auto lk_poll = GetPollLock();
+				auto lk_tq = std::unique_lock<decltype(mThreadStruQueue)>(mThreadStruQueue);
 				lk_local.lock();
 				MoveLocalCacheToGlobal(stru);
 				lk_local.unlock();
-				lk_poll.unlock();
-				if (mMerge.mRawDatas.may_nearlly_full())
-				{
-					NotifyPoll();
-				} 
+				lk_tq.unlock();
+				if (mMerge.mRawDatas.may_nearlly_full()) { FindFreeCoreAndNotifyForUser(stru); }
 				while (mMerge.mRawDatas.may_full())
 				{
-					NotifyPoll();
+					FindFreeCoreAndNotifyForUser(stru);
+					unique_lock<ThreadLocalSpinMutex> lk_local(stru.spinMtx);
+					stru.thrdSleepCV.wait_for(lk_local, chrono::nanoseconds(64), [this] { return !mMerge.mRawDatas.may_full(); });
 				}
 			}
 		}
@@ -2780,10 +2820,10 @@ namespace tilogspace
 			DEBUG_ASSERT1(false, os.str());
 		}
 
-		void TiLogDaemon::MergeThreadStruQueueToSet(List<ThreadStru*>& thread_queue, TiLogCompactString& bean)
+		void TiLogCore::MergeThreadStruQueueToSet(List<ThreadStru*>& thread_queue, TiLogCompactString& bean)
 		{
 			using ThreadSpinLock = std::unique_lock<ThreadLocalSpinMutex>;
-			DEBUG_PRINTD("mMerge.mRawDatas may_size {}\n", mMerge.mRawDatas.may_size());
+			DEBUG_PRINTD("mMerge.mRawDatas may_size {}\n", mTiLogDaemon->mMerge.mRawDatas.may_size());
 			for (auto it = thread_queue.begin(); it != thread_queue.end(); ++it)
 			{
 				ThreadStru& threadStru = **it;
@@ -2806,7 +2846,7 @@ namespace tilogspace
 					" ptid {} , tid {} , qCache {} qCachePreSize= {} first tp {}\n", ptid, tid, &qCache, qCachePreSize,
 					qCachePreSize == 0 ? 0 : qCache.front()->ext.time().toSteadyFlag());
 
-				VecLogCache& v = mMerge.mRawDatas.get(ptid);
+				VecLogCache& v = mTiLogDaemon->mMerge.mRawDatas.get(ptid);
 				size_t vsizepre = v.size();
 				DEBUG_PRINTD("v {} size pre: {} final tp {}\n", &v, vsizepre, vsizepre == 0 ? 0 : v.back()->ext.time().toSteadyFlag());
 
@@ -2850,6 +2890,7 @@ namespace tilogspace
 						"ptid %p, tid %s, first log [%.30s], final log [%.30s]", ptid, tid, first_log->buf(), final_log->buf());
 				}
 				mMerge.mMergeLogVecVec[mMerge.mMergeLogVecVec.mIndex++].swap(v);
+				threadStru.thrdSleepCV.notify_one();
 			}
 		}
 
@@ -2863,22 +2904,37 @@ namespace tilogspace
 			vv.mIndex = 0;
 		}
 
-		void TiLogDaemon::CollectRawDatas()
+		void TiLogCore::CollectRawDatas()
 		{
 			size_t init_size = 0;
-			TiLogCompactString referenceBean;
-			referenceBean.ext.time() = mPoll.s_log_last_time = TiLogTime::now();	// referenceBean's time is the biggest up to now
-			DEBUG_PRINTI("Begin,poll time {}\n",mPoll.s_log_last_time.toSteadyFlag());
+			TiLogDaemon& dm = *mTiLogDaemon;
+			ThreadStruQueue& sq = dm.mThreadStruQueue;
 
-			synchronized(mThreadStruQueue)
+			synchronized(sq)
 			{
-				size_t availQueueSize = mThreadStruQueue.availQueue.size();
-				size_t waitMergeQueueSize = mThreadStruQueue.waitMergeQueue.size();
+				TiLogCompactString referenceBean;
+				referenceBean.ext.time() = dm.mPoll.s_log_last_time = TiLogTime::now();	   // referenceBean's time is the biggest up to now
+				DEBUG_PRINTI("Begin,poll time {}\n", dm.mPoll.s_log_last_time.toSteadyFlag());
+				size_t availQueueSize = sq.availQueue.size();
+				size_t waitMergeQueueSize = sq.waitMergeQueue.size();
 				init_size = availQueueSize + waitMergeQueueSize;
-				InitMergeLogVecVec(mMerge.mMergeLogVecVec,init_size);
-				MergeThreadStruQueueToSet(mThreadStruQueue.availQueue, referenceBean);
+				TiLogDaemon::InitMergeLogVecVec(mMerge.mMergeLogVecVec, init_size);
+				MergeThreadStruQueueToSet(sq.availQueue, referenceBean);
 				DEBUG_PRINTI("CollectRawDatas availQueueSize {} waitMergeQueueSize {}\n", availQueueSize, waitMergeQueueSize);
-				MergeThreadStruQueueToSet(mThreadStruQueue.waitMergeQueue, referenceBean);
+				MergeThreadStruQueueToSet(sq.waitMergeQueue, referenceBean);
+
+				dm.mMerge.mRawDatas.clear();
+				dm.mPoll.mCvWait.notify_all();
+				auto& schd = dm.mScheduler;
+				core_seq_t seq;
+				synchronized(schd)
+				{
+					seq = schd.mPollSeq;
+					++schd.mPollSeq;
+					schd.mWaitPushLogs.emplace(seq, IOBeanTracker{ nullptr, IOBeanTracker::NO_HANDLED });	 // mark log birth
+					dm.mMerge.mRawDatas.set_alive_thread_num(sq.availQueue.size());
+				}
+				dm.ChangeCoreSeq(this, seq);
 			}
 		}
 
@@ -3280,6 +3336,47 @@ namespace tilogspace
 			}
 		}
 
+		void TiLogDaemon::FindFreeCoreAndNotifyForUser(ThreadStru& stru)
+		{
+			TiLogCore* currCore;
+			uint64_t mark = mScheduler.mFreeCoreMark.load(std::memory_order_acquire);
+			if (mark != 0)
+			{
+				uint64_t free_core_index = bitScanForward(mark);	// find free core begin with core 0
+				currCore = mScheduler.mCoreArr[free_core_index];
+				currCore->mCV.notify_one();
+			} else
+			{
+				NotifyPoll();	 // let Poll thread to find free core
+			}
+		}
+
+		void TiLogDaemon::FindFreeCoreAndNotifyForPoll()
+		{
+			TiLogCore* currCore;
+			uint64_t mark = mScheduler.mFreeCoreMark.load(std::memory_order_acquire);
+			uint64_t free_core_index = mark != 0 ? bitScanForward(mark) : 0;
+			currCore = mScheduler.mCoreArr[free_core_index];
+			{
+				auto lk = GetCoreThrdLock(*currCore);
+				currCore->mNeedWoking = true;
+			}
+			currCore->mCV.notify_one();
+			DEBUG_PRINTI("notify free core {} {}", free_core_index, currCore);
+		}
+
+		void TiLogDaemon::MarkCoreBusy(uint64_t core_idx)
+		{
+			uint64_t mark = ~(1ULL << core_idx);
+			mScheduler.mFreeCoreMark.fetch_and(mark, std::memory_order_release);
+		}
+
+		void TiLogDaemon::MarkCoreFree(uint64_t core_idx)
+		{
+			uint64_t mark = (1ULL << core_idx);
+			mScheduler.mFreeCoreMark.fetch_or(mark, std::memory_order_release);
+		}
+
 		void TiLogDaemon::thrdFuncPoll()
 		{
 			InitCoreThreadBeforeRun(mPoll.GetName());
@@ -3305,38 +3402,7 @@ namespace tilogspace
 							GetCoreThrdLock(*core);	   // wait for all core
 						}
 					}
-					CollectRawDatas();
-					TiLogCore* currCore;
-					core_seq_t seq;
-					synchronized(mScheduler)
-					{
-						TiLogCoreMini free_core;
-						auto it = mScheduler.mCoreMap.lower_bound(free_core);
-						if (it != mScheduler.mCoreMap.end())
-						{
-							++mPoll.free_core_use_cnt;
-							currCore = it->core;
-						} else
-						{
-							++mPoll.nofree_core_use_cnt;
-							currCore = mScheduler.mCoreMap.begin()->core;
-						}
-						seq = mScheduler.mPollSeq;
-						mScheduler.mWaitPushLogs.emplace(seq, IOBeanTracker{ nullptr, IOBeanTracker::NO_HANDLED });	   // mark log birth
-					}
-					{
-						auto lk = GetCoreThrdLock(*currCore);
-						DEBUG_ASSERT(!currCore->mNeedWoking);
-						ChangeCoreSeq(currCore, seq);
-						DEBUG_ASSERT(currCore->mMerge.mMergeLogVecVec.mIndex == 0);
-						currCore->mMerge.mMergeLogVecVec.swap(mMerge.mMergeLogVecVec);	  // exchange logs to core's mMergeLogVecVec
-						currCore->mNeedWoking = true;
-						DEBUG_PRINTI("choose core {} {} to handle seq {}", currCore->mID, currCore, seq);
-					}
-					synchronized(mScheduler) { ++mScheduler.mPollSeq; }
-					currCore->mCV.notify_one();
-					mMerge.mRawDatas.clear();
-					mPoll.mCvWait.notify_all();
+					FindFreeCoreAndNotifyForPoll();
 				}
 
 				nowTime = SteadyClock::now();
@@ -3403,7 +3469,7 @@ namespace tilogspace
 						} else if (
 							handledseq <= threadStru.pollseq_when_thrd_dead || inno_pollseq <= threadStru.inno_pollseq_when_thrd_dead)
 						{
-							DEBUG_PRINTA("thrd {} exit but some logs remians in core Entry\n", threadStru.tid->c_str());
+							DEBUG_PRINTI("thrd {} exit, remains logs in core Entry", threadStru.tid->c_str());
 						} else
 						{
 							DEBUG_PRINTA("thrd {} exit delete thread stru\n", threadStru.tid->c_str());
@@ -3493,10 +3559,7 @@ namespace tilogspace
 				"poll thrd prepare to exit,try last poll mPoll.free_core_use_cnt %llu mPoll.nofree_core_use_cnt %llu hit %4.1f%%\n",
 				(long long unsigned)mPoll.free_core_use_cnt, (long long unsigned)mPoll.nofree_core_use_cnt,
 				(100.0 * mPoll.free_core_use_cnt / (mPoll.free_core_use_cnt + mPoll.nofree_core_use_cnt)));
-			mScheduler.lock();
-			auto core = mScheduler.mCoreMap.begin()->core;
-			mScheduler.unlock();
-			AtInternalThreadExit(&mPoll, core);
+			AtInternalThreadExit(&mPoll, mScheduler.mCoreArr.back());
 		}
 
 		inline void TiLogDaemon::InitCoreThreadBeforeRun(const char* tag)
