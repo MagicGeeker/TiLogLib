@@ -41,7 +41,7 @@
 #define DEBUG_PRINTA(fmt,...) DEBUG_PF(ALWAYS, fmt,__VA_ARGS__)
 #define DEBUG_PRINTF(fmt,...) DEBUG_PF(FATAL, fmt,__VA_ARGS__)
 #define DEBUG_PRINTE(fmt,...) DEBUG_PF(ERROR, fmt,__VA_ARGS__)
-#define DEBUG_PRINTW(fmt,...) DEBUG_PF(WARNING, fmt,__VA_ARGS__)
+#define DEBUG_PRINTW(fmt,...) DEBUG_PF(WARN, fmt,__VA_ARGS__)
 #define DEBUG_PRINTI(fmt,...) DEBUG_PF(INFO, fmt,__VA_ARGS__)
 #define DEBUG_PRINTD(fmt,...) DEBUG_PF(DEBUG, fmt,__VA_ARGS__)
 #define DEBUG_PRINTV(fmt,...) DEBUG_PF(VERBOSE, fmt,__VA_ARGS__)
@@ -1759,7 +1759,7 @@ namespace tilogspace
 
 			void ChangeCoreSeq(TiLogCore* core, core_seq_t seq);
 
-			void FindFreeCoreAndNotifyForUser(ThreadStru& stru);
+			void FindFreeCoreAndNotify();
 			void FindFreeCoreAndNotifyForPoll();
 			void MarkCoreBusy(uint64_t core_idx);
 			void MarkCoreFree(uint64_t core_idx);
@@ -2163,7 +2163,6 @@ namespace tilogspace
 				{
 					sPrintedBytesTotal += mCurFile.logs_size;
 					file().close();
-					DEBUG_PRINTV("sync and write index={} \n", mIndex);
 				}
 
 				mCurFile.logTime = t;
@@ -2206,7 +2205,7 @@ namespace tilogspace
 				s = mFolderPath + indexs;
 				mIndex++;
 			}
-
+			DEBUG_PRINTW("gen file{}", s);
 			file().open({ s.data(), s.size() });
 		}
 #endif
@@ -2781,10 +2780,10 @@ namespace tilogspace
 				MoveLocalCacheToGlobal(stru);
 				lk_local.unlock();
 				lk_tq.unlock();
-				if (mMerge.mRawDatas.may_nearlly_full()) { FindFreeCoreAndNotifyForUser(stru); }
+				if (mMerge.mRawDatas.may_nearlly_full()) { FindFreeCoreAndNotify(); }
 				while (mMerge.mRawDatas.may_full())
 				{
-					FindFreeCoreAndNotifyForUser(stru);
+					FindFreeCoreAndNotify();
 					unique_lock<ThreadLocalSpinMutex> lk_local(stru.spinMtx);
 					stru.thrdSleepCV.wait_for(lk_local, chrono::nanoseconds(64), [this] { return !mMerge.mRawDatas.may_full(); });
 				}
@@ -3336,7 +3335,7 @@ namespace tilogspace
 			}
 		}
 
-		void TiLogDaemon::FindFreeCoreAndNotifyForUser(ThreadStru& stru)
+		void TiLogDaemon::FindFreeCoreAndNotify()
 		{
 			TiLogCore* currCore;
 			uint64_t mark = mScheduler.mFreeCoreMark.load(std::memory_order_acquire);
@@ -3716,6 +3715,10 @@ namespace tilogspace
 
 			void PushLog(TiLogCompactString* pBean)
 			{
+				// InnoLoger never push log, in case of deadlock
+				// Never push log when logthrd dead
+				auto logthrdid = logthrd.get_id();
+				if (logthrdid == std::this_thread::get_id() || logthrdid == std::thread::id()) { return; }
 				std::unique_lock<OptimisticMutex> lk(mtx);
 				
 				if (mCaches.size() >= TILOG_INNO_LOG_QUEUE_NEARLY_FULL_SIZE)
