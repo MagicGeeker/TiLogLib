@@ -243,7 +243,7 @@ namespace tilogspace
 	constexpr static uint32_t TILOG_POLL_MS_ADJUST_PERCENT_RATE = 75;	// range(0,100),a percent number to adjust poll time
 	constexpr static uint32_t TILOG_MEM_TRIM_LEAST_MS = 500;	// range(0,) adjust mem least internal
 
-	constexpr static size_t TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE = ((size_t)1 << 10U);			 // single thread cache queue max length
+	constexpr static size_t TILOG_SINGLE_THREAD_QUEUE_MAX_SIZE = ((size_t)1 << 9U);			 // single thread cache queue max length
 	
 	constexpr static size_t TILOG_IO_STRING_DATA_POOL_SIZE = ((size_t)6);	// io string data max szie
 	constexpr static size_t TILOG_SINGLE_LOG_RESERVE_LEN = 60 + 40;	// reserve size for every log(include sizeof TiLogBean)
@@ -267,8 +267,10 @@ namespace tilogspace
 
 	// Set it smaller to lat daemon thread work more Frequently
 	// Set it smaller may make log latency lower but too small may make bandwidth even worse
-	constexpr static double TILOG_MERGE_RAWDATA_FULL_RATE = 0.40;   // [0.2,2.5]
-	constexpr static double TILOG_MERGE_RAWDATA_ONE_PROCESSER_FULL_RATE = 0.20;  //[0,2]
+	// [TILOG_NOTIFY_DAEMON_MIN_LOG_NUM,20000]
+	constexpr static size_t TILOG_MAX_VCACHED_LOGS = 4096;   
+	// [100,TILOG_MAX_VCACHED_LOGS]  // a litter bigger than TILOG_MAX_VCACHED_LOGS/TILOG_DAEMON_PROCESSER_NUM is well
+	constexpr static size_t TILOG_NOTIFY_DAEMON_MIN_LOG_NUM = 1792;   
 
 	constexpr static uint32_t TILOG_DISK_SECTOR_SIZE= (1U << 12U);   // %32==0 && %512=0
 	constexpr static size_t TILOG_MIN_IO_SIZE= (256U << 12U);	//  must be an integer multiple of TILOG_DISK_SECTOR_SIZE
@@ -3365,8 +3367,8 @@ namespace tilogspace
 	static_assert(TILOG_STREAM_MEMPOOL_TRIM_MS > 0, "fatal err!");
 	static_assert(TILOG_STREAM_MEMPOOL_TRY_GET_CYCLE > 1, "fatal err!");
 
-	static_assert(TILOG_MERGE_RAWDATA_FULL_RATE >= 0.2 && TILOG_MERGE_RAWDATA_FULL_RATE <= 2.5, "error range");
-	static_assert(TILOG_MERGE_RAWDATA_ONE_PROCESSER_FULL_RATE >= 0 && TILOG_MERGE_RAWDATA_ONE_PROCESSER_FULL_RATE <= 2, "error range");
+	static_assert(TILOG_MAX_VCACHED_LOGS <= 20000, "error range");
+	static_assert(TILOG_NOTIFY_DAEMON_MIN_LOG_NUM >= 100 && TILOG_NOTIFY_DAEMON_MIN_LOG_NUM <= TILOG_MAX_VCACHED_LOGS, "error range");
 
 	static_assert(TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE > 0, "fatal err!");
 	static_assert(TILOG_DISK_SECTOR_SIZE % 512 == 0, "fatal err!");
