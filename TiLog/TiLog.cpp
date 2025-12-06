@@ -894,6 +894,9 @@ namespace tilogspace
 				*size2 = available - continuous_space;
 			}
 
+			// Return true if consumer's continuous_space_one's end == datamem's end
+			bool consumer_continuous_space_one_has_write_to_end() const { return head_idx + commited_size >= CAPACITY; }
+
 			// The consumer attempts to lock *cnt bytes
 			void lock_consumer(size_t* cnt, char** p)
 			{
@@ -2250,6 +2253,7 @@ namespace tilogspace
 				unique_lock<decltype(buffer)> lk(buffer);
 				size_t sz1, sz2;
 				buffer.get_consumer_continuous_space(&sz1, &sz2);
+				bool sz1_has_write_to_end = buffer.consumer_continuous_space_one_has_write_to_end();
 				if (!force_write)
 				{
 					if (!may_rotate_once && sz1 + sz2 != 0)
@@ -2269,14 +2273,16 @@ namespace tilogspace
 				buffer.lock_consumer(&dst_cnt, &dst_ptr);
 				lk.unlock();
 
-				if (sz1 < TILOG_MIN_IO_SIZE && sz2 < TILOG_MIN_IO_SIZE && written >= min_to_write)
+				if ((sz1 < TILOG_MIN_IO_SIZE && sz2 < TILOG_MIN_IO_SIZE && written >= min_to_write) && (!sz1_has_write_to_end))
 				{
 					break;
 				} else
 				{
 					mFile.write(TiLogStringView{ dst_ptr, dst_cnt });
 					written += dst_cnt;
-					DEBUG_PRINTI("force_write? {} min_to_write {} write {} written {}", force_write, min_to_write, dst_cnt, written);
+					DEBUG_PRINTI(
+						"force_write? {} min_to_write {} write {} written {} buffercnt{}", force_write, min_to_write, dst_cnt, written,
+						(sz1 + sz2));
 
 					lk.lock();
 					ret = buffer.commit_consumer(dst_cnt);
