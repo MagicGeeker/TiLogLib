@@ -82,7 +82,7 @@ using namespace tilogspace::internal;
 
 namespace tilogspace
 {
-	static char TILOG_BLANK_BUFFER[TILOG_DISK_SECTOR_SIZE];
+	alignas(32) static char TILOG_BLANK_BUFFER[TILOG_DISK_SECTOR_SIZE];
 	constexpr static char TILOG_TITLE[TILOG_DISK_SECTOR_SIZE] = "                                                               \n"
 											  "      ########    #####    #           #####        #####      \n"
 											  "          #         #      #          #     #      #     #     \n"
@@ -1834,14 +1834,14 @@ namespace tilogspace
 #if TILOG_TIMESTAMP_SHOW == TILOG_TIMESTAMP_MICROSECOND
 			TiLogMap_t()
 			{
-				char mod[4 + 1] = "000]";
+				alignas(4) char mod[4 + 1] = "000]";
 				for (uint32_t i = 0; i < 1000; i++)
 				{
 					sprintf(mod, "%03d]", i);	 // "000]"->"999]"
 					memcpy_small<4>(m_map_us[i], mod);
 				}
 			}
-			char m_map_us[1000][4];
+			alignas(4) char m_map_us[1000][4];
 #endif
 		};
 
@@ -3105,7 +3105,7 @@ namespace tilogspace
 			uint32_t us = (uint32_t)chrono::duration_cast<chrono::microseconds>(us_tp - ms_tp).count();
 			if (ms_tp == mDeliver.mPreLogTime)	  // ms is equal
 			{
-				memcpy_small<4>(&mDeliver.mlogprefix[26], &TiLogEngines::getRInstance().tilogmap.m_map_us[us]);	   // update us only
+				memcpy(&mDeliver.mlogprefix[26], &TiLogEngines::getRInstance().tilogmap.m_map_us[us], 4);	 // update us only
 			} else
 			{
 				size_t len = TimePointToTimeCStr(mDeliver.mctimestr, us_tp);				// parse by us
@@ -3146,16 +3146,18 @@ namespace tilogspace
 			char *pend = logs.end(), *pend_pre = pend;
 			TILOG_ASSUME(padding < TILOG_SSE4_ALIGN);
 			TILOG_ASSUME(padding % TILOG_UNIT_ALIGN == 0);
+			TILOG_ASSUME(uintptr_t(pend) % TILOG_UNIT_ALIGN == 0);
+			alignas(sizeof(uint32_t)) constexpr char blankstr[] = "    ";
 			switch (padding)
 			{
 			case 12:
-				*(uint32_t*)pend = *(uint32_t*)"    ";
+				*(uint32_t*)pend = *(uint32_t*)blankstr;
 				pend += TILOG_UNIT_ALIGN;
 			case 8:
-				*(uint32_t*)pend = *(uint32_t*)"    ";
+				*(uint32_t*)pend = *(uint32_t*)blankstr;
 				pend += TILOG_UNIT_ALIGN;
 			case 4:
-				*(uint32_t*)pend = *(uint32_t*)"    ";
+				*(uint32_t*)pend = *(uint32_t*)blankstr;
 				pend += TILOG_UNIT_ALIGN;
 			}
 

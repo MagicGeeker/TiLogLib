@@ -1902,7 +1902,7 @@ namespace tilogspace
 			using const_this_type = const this_type;
 
 		public:
-			struct alignas(32) Core
+			struct Core
 			{
 				size_type size;		   // exclude '\0'
 				size_type capacity;	   // exclude '\0',it means Core can save capacity + 1 chars include '\0'
@@ -1911,7 +1911,7 @@ namespace tilogspace
 					char ex[SIZE_OF_EXTEND]{};
 					ExtType ext;
 				};
-				// char buf[]; //It seems like there is an array here // 32 byte aligned
+				// char buf[]; //It seems like there is an array here
 				Core() {}
 				const char* buf() const { return reinterpret_cast<const char*>(this + 1); }
 				char* buf() { return reinterpret_cast<char*>(this + 1); }
@@ -2689,7 +2689,7 @@ namespace tilogspace
 
 		inline static void uint32tohex(char dst[8], uint32_t val)
 		{
-			const uint16_t* const mm = (const uint16_t* const)
+			alignas(4) constexpr  static char tab[]=
 				"000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F"
 				"202122232425262728292A2B2C2D2E2F303132333435363738393A3B3C3D3E3F"
 				"404142434445464748494A4B4C4D4E4F505152535455565758595A5B5C5D5E5F"
@@ -2698,11 +2698,13 @@ namespace tilogspace
 				"A0A1A2A3A4A5A6A7A8A9AAABACADAEAFB0B1B2B3B4B5B6B7B8B9BABBBCBDBEBF"
 				"C0C1C2C3C4C5C6C7C8C9CACBCCCDCECFD0D1D2D3D4D5D6D7D8D9DADBDCDDDEDF"
 				"E0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFF0F1F2F3F4F5F6F7F8F9FAFBFCFDFEFF";
-			uint16_t* const p = (uint16_t* const)dst;
+			const uint16_t* const mm = (const uint16_t* const)tab;
+			uint16_t p[4];
 			p[0] = mm[(val & 0xFF000000) >> 24];
 			p[1] = mm[(val & 0x00FF0000) >> 16];
 			p[2] = mm[(val & 0x0000FF00) >> 8];
 			p[3] = mm[val & 0xFF];
+			memcpy(dst,p,sizeof(p));
 		}
 
 		inline static void uint64tohex(char dst[16], uint64_t val)
