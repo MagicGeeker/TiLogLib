@@ -2114,7 +2114,7 @@ namespace tilogspace
 #define CurSubSys() mEngine ? mEngine->subsys : INVALID_SUB_OTHER
 #ifdef __________________________________________________TiLogFileRotater__________________________________________________
 
-		bool TiLogFileRotater::MayRotate() { return mCurFile.logs_size > TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE; }
+		bool TiLogFileRotater::MayRotate() { return mCurFile.logs_size > TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE - TILOG_FILE_BUFFER; }
 
 		bool TiLogFileRotater::SetNextFileNameIfNeed(TiLogTime t)
 		{
@@ -2122,6 +2122,11 @@ namespace tilogspace
 			{
 				{
 					sPrintedBytesTotal += mCurFile.logs_size;
+					if (mCurFile.logs_size < TILOG_DEFAULT_FILE_PRINTER_MAX_SIZE_PER_FILE)
+					{
+						DEBUG_ASSERT(mCurFile.logs_size % TILOG_DISK_SECTOR_SIZE == 0);
+						file().trunc(mCurFile.logs_size);
+					}
 					file().close();
 				}
 
