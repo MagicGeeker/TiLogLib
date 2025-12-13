@@ -619,6 +619,9 @@ namespace tilogspace
 
 	namespace internal
 	{
+		uint32_t IncTidStrRefCnt(const TidString* s);
+		uint32_t DecTidStrRefCnt(const TidString* s);
+
 		String GetStringByStdThreadID(std::thread::id val)
 		{
 #ifdef TILOG_OS_WIN
@@ -647,13 +650,12 @@ namespace tilogspace
 			thread_local static const TidString* s_tid = [] {
 				auto str = new TidString(TidString(" @").append(GetNewThreadIDString()).append(" "));
 				str->append("    ", round_up_padding(str->size(), TILOG_UNIT_ALIGN));
+				IncTidStrRefCnt(str);
 				return str;
 			}();
 			return s_tid;
 		}
 
-		uint32_t IncTidStrRefCnt(const TidString* s);
-		uint32_t DecTidStrRefCnt(const TidString* s);
 	}	 // namespace internal
 
 	namespace internal
@@ -1942,11 +1944,11 @@ namespace tilogspace
 
 			// fix segment fault for mingw64/Windows when use TICLOG in TiLogEngines::TiLogEngines()
 			std::ios_base::Init init_cout;
-			const TidString* mainThrdId = GetThreadIDString();
 			int64_t tsc_freq{};
 			
 			TiLogMap_t tilogmap;
 			TiLogConcurrentHashMap<const TidString*, uint32_t, ThreadIdStrRefCountFeat> threadIdStrRefCount;
+			const TidString* mainThrdId = GetThreadIDString();
 
 			using engines_t = std::array<engine_t, TILOG_STATIC_SUB_SYS_SIZE>;
 			engines_t engines;
@@ -1985,7 +1987,6 @@ namespace tilogspace
 			  thrdExistCV()
 		{
 			DEBUG_PRINTI("ThreadStru ator pDaemon {} this {} tid [{} {}]\n", pDaemon, this, tid, tid->c_str());
-			IncTidStrRefCnt(tid);
 		};
 
 		sub_sys_t ThreadStru::CurSubSys() { return pDaemon->GetEngine()->subsys; }
@@ -3684,7 +3685,11 @@ namespace tilogspace
 				// InnoLoger never push log, in case of deadlock
 				// Never push log when logthrd dead
 				auto logthrdid = logthrd.get_id();
-				if (logthrdid == std::this_thread::get_id() || logthrdid == std::thread::id()) { return; }
+				if (logthrdid == std::this_thread::get_id() || logthrdid == std::thread::id())
+				{
+					mempoolspace::utils::xfree_to_std(pBean);
+					return;
+				}
 				std::unique_lock<OptimisticMutex> lk(mtx);
 				
 				if (mCaches.size() >= TILOG_INNO_LOG_QUEUE_NEARLY_FULL_SIZE)
